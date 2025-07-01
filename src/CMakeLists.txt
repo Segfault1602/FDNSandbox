@@ -1,0 +1,12 @@
+set(APP_SOURCES
+    main.cpp
+    utils.cpp
+    app.cpp)
+
+add_executable(${PROJECT_NAME} ${APP_SOURCES})
+
+target_link_libraries(${PROJECT_NAME} PRIVATE imgui implot ${OPENGL_LIBRARIES} audio_utils sfFDN sndfile Boost::math Eigen3::Eigen)
+target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} )
+target_compile_definitions(${PROJECT_NAME} PUBLIC GL_SILENCE_DEPRECATION -DIMGUI_USER_CONFIG="app_imconfig.h")
+target_compile_options(${PROJECT_NAME} PUBLIC $<$<CONFIG:Debug>:-fsanitize=address> -fno-omit-frame-pointer)
+target_link_options(${PROJECT_NAME} PUBLIC $<$<CONFIG:Debug>:-fsanitize=address>)
