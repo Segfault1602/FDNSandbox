@@ -1,0 +1,44 @@
+{
+    "version": 10,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 24,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "ninja-multi",
+            "hidden": true,
+            "displayName": "Ninja Multi-Config",
+            "description": "Default build using Ninja Multi-Config generator",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/build"
+        },
+        {
+            "name": "apple",
+            "displayName": "Apple",
+            "description": "Build for Apple platforms",
+            "inherits": "ninja-multi",
+            "cacheVariables": {
+                "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/llvm-toolchain.cmake"
+            }
+        },
+        {
+            "name": "windows",
+            "displayName": "Windows",
+            "description": "Build for Windows",
+            "inherits": "ninja-multi",
+            "cacheVariables": {
+                "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "default",
+            "configurePreset": "apple"
+        }
+    ]
+}

@@ -3,7 +3,7 @@
 #include <span>
 #include <vector>
 
-#include <matrix_gallery.h>
+#include <sffdn/sffdn.h>
 
 namespace utils
 {
@@ -73,19 +73,12 @@ std::vector<float> ReadAudioFile(const std::string& filename);
  */
 void WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate);
 
-/**
- * @brief Compute the energy decay curve of a signal.
- *
- * @param signal The input signal.
- * @param to_db If true, convert the energy values to decibels.
- * @return std::vector<float> The short-time energy of the signal.
- */
-std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db = false);
-
 std::array<std::array<float, 6>, 10> GetOctaveBandsSOS();
 
 std::string GetMatrixName(sfFDN::ScalarMatrixType type);
 
-std::vector<float> T60ToGainsDb(std::span<const float> t60s, size_t sample_rate);
+std::string GetDelayLengthTypeName(sfFDN::DelayLengthType type);
+
+std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate);
 
 } // namespace utils

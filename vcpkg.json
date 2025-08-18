@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "fftw3",
+    "kissfft",
+    "nanobench",
+    "pffft",
+    "boost-math"
+  ]
+}

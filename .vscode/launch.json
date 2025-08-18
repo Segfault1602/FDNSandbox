@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(lldb) Launch",
+            "name": "FDNSandbox",
             "type": "lldb-dap",
             "request": "launch",
-            "program": "${workspaceFolder}/build/src/Debug/FDNToolbox",
+            "program": "${workspaceFolder}/build/src/Debug/FDNSandbox",
             "args": [],
             "stopOnEntry": false,
             "cwd": "${workspaceFolder}",
@@ -16,7 +16,7 @@
             "runInTerminal": false
         },
         {
-            "name": "(lldb) Launch",
+            "name": "sfFDN Tests",
             "type": "lldb-dap",
             "request": "launch",
             "program": "${workspaceFolder}/build/externals/sffdn/tests/Debug/tests",

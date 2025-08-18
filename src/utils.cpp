@@ -2,14 +2,18 @@
 
 #include <Eigen/Core>
 #include <boost/math/interpolators/pchip.hpp>
+#include <boost/math/statistics/linear_regression.hpp>
 #include <sndfile.h>
 
+#include <cassert>
 #include <complex>
 #include <mdspan>
 #include <numbers>
 #include <span>
 #include <stdexcept>
 #include <vector>
+
+#include <audio_utils/fft_utils.h>
 
 namespace
 {
@@ -30,11 +34,15 @@ Eigen::ArrayXcf Polyval(const Eigen::ArrayXf& p, const Eigen::ArrayXcf& x)
 bool isPrime(uint32_t n)
 {
     if (n <= 1)
+    {
         return false;
+    }
     for (uint32_t i = 2; i * i <= n; ++i)
     {
         if (n % i == 0)
+        {
             return false;
+        }
     }
     return true;
 }
@@ -53,9 +61,9 @@ std::vector<T> LogSpace(T start, T stop, size_t num)
 {
     std::vector<T> result(num);
     if (num == 0)
+    {
         return result;
-
-    T step = (stop - start) / (num - 1);
+    }
 
     Eigen::Map<Eigen::ArrayX<T>> result_map(result.data(), num);
 
@@ -114,8 +122,8 @@ std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w
 
     for (size_t i = 1; i < K; ++i)
     {
-        Eigen::Map<const Eigen::ArrayXf> b_map(sos.data() + i * 6, 3);
-        Eigen::Map<const Eigen::ArrayXf> a_map(sos.data() + i * 6 + 3, 3);
+        Eigen::Map<const Eigen::ArrayXf> b_map(sos.data() + (i * 6), 3);
+        Eigen::Map<const Eigen::ArrayXf> a_map(sos.data() + (i * 6) + 3, 3);
         Eigen::ArrayXcf h = Polyval(b_map, dig_w) / Polyval(a_map, dig_w);
 
         h_complex = h_complex * h;
@@ -131,28 +139,28 @@ std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w
 std::vector<float> ReadAudioFile(const std::string& filename)
 {
     // Preload the drum loop
-    SF_INFO sf_info{0};
+    SF_INFO sf_info{};
     SNDFILE* sndfile = sf_open(filename.c_str(), SFM_READ, &sf_info);
-    if (!sndfile)
+    if (sndfile == nullptr)
     {
-        std::cerr << "Failed to open audio file: " << sf_strerror(nullptr) << std::endl;
+        std::cerr << "Failed to open audio file: " << sf_strerror(nullptr) << '\n';
         return {};
     }
 
     if (sf_info.channels != 1)
     {
-        std::cerr << "Audio file must be mono." << std::endl;
+        std::cerr << "Audio file must be mono.\n";
         sf_close(sndfile);
         return {};
     }
 
-    std::cout << "Audio file format: " << std::hex << sf_info.format << std::dec << std::endl;
+    std::cout << "Audio file format: " << std::hex << sf_info.format << std::dec << '\n';
 
     std::vector<float> audio_data(sf_info.frames);
     sf_count_t read_count = sf_readf_float(sndfile, audio_data.data(), sf_info.frames);
     if (read_count != sf_info.frames)
     {
-        std::cerr << "Failed to read audio file: " << sf_strerror(sndfile) << std::endl;
+        std::cerr << "Failed to read audio file: " << sf_strerror(sndfile) << '\n';
         sf_close(sndfile);
         return {};
     }
@@ -169,44 +177,19 @@ void WriteAudioFile(const std::string& filename, std::span<const float> audio_da
     sf_info.channels = 1; // Mono audio
 
     SNDFILE* sndfile = sf_open(filename.c_str(), SFM_WRITE, &sf_info);
-    if (!sndfile)
+    if (sndfile == nullptr)
     {
-        std::cerr << "Failed to open audio file for writing: " << sf_strerror(nullptr) << std::endl;
+        std::cerr << "Failed to open audio file for writing: " << sf_strerror(nullptr) << '\n';
         return;
     }
 
     sf_count_t write_count = sf_writef_float(sndfile, audio_data.data(), audio_data.size());
     if (write_count != static_cast<sf_count_t>(audio_data.size()))
     {
-        std::cerr << "Failed to write audio file: " << sf_strerror(sndfile) << std::endl;
+        std::cerr << "Failed to write audio file: " << sf_strerror(sndfile) << '\n';
     }
 
     sf_close(sndfile);
-}
-
-std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db)
-{
-    if (signal.empty())
-    {
-        return {};
-    }
-
-    // Calculate the energy decay curve
-    std::vector<float> decay_curve(signal.size());
-    float cumulative_energy = 0.0f;
-
-    for (int i = signal.size() - 1; i > 0; --i)
-    {
-        cumulative_energy += signal[i] * signal[i];
-        decay_curve[i] = std::sqrt(cumulative_energy);
-
-        if (to_db)
-        {
-            decay_curve[i] = 20.0f * std::log10(decay_curve[i]);
-        }
-    }
-
-    return decay_curve;
 }
 
 uint32_t GetClosestPrime(uint32_t n)
@@ -241,24 +224,6 @@ uint32_t GetClosestPrime(uint32_t n)
     }
 }
 
-std::array<std::array<float, 6>, 10> GetOctaveBandsSOS()
-{
-    constexpr std::array<std::array<float, 6>, 10> sos = {{
-        {0.0015030849515687771, 0.0, -0.0015030849515687771, 1.0, -1.9969768922228524, 0.9969938300968622},
-        {0.002871531785966629, 0.0, -0.002871531785966629, 1.0, -1.9941885090948224, 0.9942569364280671},
-        {0.0057913669578533045, 0.0, -0.0057913669578533045, 1.0, -1.9881473928034248, 0.9884172660842931},
-        {0.011452462772237581, 0.0, -0.011452462772237581, 1.0, -1.9760247796495045, 0.9770950744555245},
-        {0.022585992641400612, 0.0, -0.022585992641400612, 1.0, -1.950619403188065, 0.954828014717199},
-        {0.044136899380977195, 0.0, -0.044136899380977195, 1.0, -1.8953529021139157, 0.9117262012380455},
-        {0.08443111970068386, 0.0, -0.08443111970068386, 1.0, -1.7688495350676474, 0.8311377605986322},
-        {0.15660038007809052, 0.0, -0.15660038007809052, 1.0, -1.4604043277147636, 0.686799239843819},
-        {0.2772680112435692, 0.0, -0.2772680112435692, 1.0, -0.6989762067733558, 0.4454639775128615},
-        {0.5255476381877647, -0.5255476381877647, 0.0, 1.0, -0.051095276375529505, 0.0},
-    }};
-
-    return sos;
-}
-
 std::string GetMatrixName(sfFDN::ScalarMatrixType type)
 {
     switch (type)
@@ -284,13 +249,34 @@ std::string GetMatrixName(sfFDN::ScalarMatrixType type)
     }
 }
 
-std::vector<float> T60ToGainsDb(std::span<const float> t60s, size_t sample_rate)
+std::string GetDelayLengthTypeName(sfFDN::DelayLengthType type)
+{
+    switch (type)
+    {
+    case sfFDN::DelayLengthType::Random:
+        return "Random";
+    case sfFDN::DelayLengthType::Gaussian:
+        return "Gaussian";
+    case sfFDN::DelayLengthType::Primes:
+        return "Primes";
+    case sfFDN::DelayLengthType::Uniform:
+        return "Uniform";
+    case sfFDN::DelayLengthType::PrimePower:
+        return "Prime Power";
+    case sfFDN::DelayLengthType::SteamAudio:
+        return "Steam Audio";
+    default:
+        return "Unknown";
+    }
+}
+
+std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate)
 {
     std::vector<float> gains(t60s.size(), 0.0f);
     for (size_t i = 0; i < t60s.size(); ++i)
     {
         gains[i] = std::pow(10.0, -3.0 / t60s[i]);
-        gains[i] = std::pow(gains[i], 1000.f / sample_rate);
+        gains[i] = std::pow(gains[i], static_cast<float>(delay) / sample_rate);
         gains[i] = 20.f * std::log10(gains[i]);
     }
 

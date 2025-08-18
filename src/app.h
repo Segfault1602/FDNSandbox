@@ -1,15 +1,13 @@
 #pragma once
 
 #include <atomic>
-#include <bitset>
 
-#include <sndfile.h>
+#include <audio_utils/audio_file_manager.h>
+#include <audio_utils/audio_manager.h>
 
-#include <audio_file_manager.h>
-#include <audio_manager.h>
-#include <fft_utils.h>
+#include "analysis/fdn_analyzer.h"
 
-#include <fdn.h>
+#include <sffdn/sffdn.h>
 
 enum class DelayFilterType
 {
@@ -20,13 +18,18 @@ enum class DelayFilterType
 
 struct FDNConfig
 {
-    float ir_duration;
-    uint32_t sample_rate;
     uint32_t N;
     std::vector<float> input_gains;
     std::vector<float> output_gains;
     std::vector<uint32_t> delays;
     std::vector<float> feedback_matrix;
+
+    // Configuration for cascaded feedback matrix
+    bool is_cascaded = false;
+    sfFDN::CascadedFeedbackMatrixInfo cascaded_feedback_matrix_info;
+    int num_stages = 1;        // Number of stages for cascaded feedback matrix
+    float sparsity = 1.0f;     // Sparsity level for cascaded feedback matrix
+    float cascade_gain = 1.0f; // Gain per sample for cascaded feedback matrix
 
     DelayFilterType delay_filter_type = DelayFilterType::Proportional;
     float feedback_gain;         // Only used for proportional feedback gains
@@ -60,8 +63,9 @@ class FDNToolboxApp
     void DrawFilterResponse();
     void DrawEnergyDecayCurve();
     void DrawCepstrum();
+    void DrawEchoDensity();
+    void DrawT60s();
 
-    bool DrawFilterDesigner(FDNConfig& fdn_config);
     bool DrawToneCorrectionFilterDesigner(FDNConfig& fdn_config);
 
     void UpdateFDN();
@@ -72,12 +76,9 @@ class FDNToolboxApp
     std::unique_ptr<audio_manager> audio_manager_;
     std::unique_ptr<audio_file_manager> audio_file_manager_;
 
-    std::vector<float> impulse_response_;
-    std::vector<float> spectrogram_data_;
-    spectrogram_info spectrogram_info_;
-    bool show_delay_filter_designer_;
     bool show_tc_filter_designer_;
 
+    std::unique_ptr<sfFDN::FDN> gui_fdn_;
     std::unique_ptr<sfFDN::FDN> audio_fdn_;
     std::unique_ptr<sfFDN::FDN> other_fdn_;
 
@@ -87,7 +88,6 @@ class FDNToolboxApp
     {
         Idle,
         ImpulseRequested,
-        PlayingDrums,
 
     } audio_state_ = AudioState::Idle;
 
@@ -95,16 +95,5 @@ class FDNToolboxApp
     std::atomic<float> dry_wet_mix_ = 0.5f;
     std::atomic<float> fdn_cpu_usage_ = 0.0f;
 
-    enum WindowType
-    {
-        ImpulseResponse = 0,
-        Spectrogram = 1,
-        Spectrum = 2,
-        Autocorrelation = 3,
-        FilterResponse = 4,
-        EnergyDecayCurve = 5,
-        Cepstrum = 6,
-        WindowTypeCount
-    };
-    std::bitset<WindowType::WindowTypeCount> impulse_response_changed_ = 0;
+    fdn_analysis::FDNAnalyzer fdn_analyzer_;
 };
