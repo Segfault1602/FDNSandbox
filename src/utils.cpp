@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <boost/math/interpolators/pchip.hpp>
 #include <boost/math/statistics/linear_regression.hpp>
+#include <quill/LogMacros.h>
 #include <sndfile.h>
 
 #include <cassert>
@@ -13,6 +14,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "settings.h"
+#include "sffdn/delay_utils.h"
 #include <audio_utils/fft_utils.h>
 
 namespace
@@ -73,17 +76,33 @@ std::vector<T> LogSpace(T start, T stop, size_t num)
     return result;
 }
 
-std::vector<float> pchip(const std::vector<float>& x, const std::vector<float>& y, const std::vector<float>& xq)
+template <typename T>
+std::vector<T> Linspace(T start, T stop, size_t num)
 {
-    auto x_copy = x;
-    auto y_copy = y;
+    std::vector<T> result(num);
+    if (num == 0)
+    {
+        return result;
+    }
+
+    Eigen::Map<Eigen::ArrayX<T>> result_map(result.data(), num);
+
+    result_map = Eigen::ArrayX<T>::LinSpaced(num, start, stop);
+
+    return result;
+}
+
+std::vector<float> pchip(std::span<const float> x, std::span<const float> y, std::span<const float> xq)
+{
+    std::vector<float> x_copy(x.begin(), x.end());
+    std::vector<float> y_copy(y.begin(), y.end());
     auto spline = boost::math::interpolators::pchip(std::move(x_copy), std::move(y_copy));
 
     std::vector<float> yq;
     yq.reserve(xq.size());
-    for (size_t i = 0; i < xq.size(); ++i)
+    for (float i : xq)
     {
-        yq.push_back(spline(xq[i]));
+        yq.push_back(spline(i));
     }
 
     return yq;
@@ -136,39 +155,6 @@ std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w
     return h;
 }
 
-std::vector<float> ReadAudioFile(const std::string& filename)
-{
-    // Preload the drum loop
-    SF_INFO sf_info{};
-    SNDFILE* sndfile = sf_open(filename.c_str(), SFM_READ, &sf_info);
-    if (sndfile == nullptr)
-    {
-        std::cerr << "Failed to open audio file: " << sf_strerror(nullptr) << '\n';
-        return {};
-    }
-
-    if (sf_info.channels != 1)
-    {
-        std::cerr << "Audio file must be mono.\n";
-        sf_close(sndfile);
-        return {};
-    }
-
-    std::cout << "Audio file format: " << std::hex << sf_info.format << std::dec << '\n';
-
-    std::vector<float> audio_data(sf_info.frames);
-    sf_count_t read_count = sf_readf_float(sndfile, audio_data.data(), sf_info.frames);
-    if (read_count != sf_info.frames)
-    {
-        std::cerr << "Failed to read audio file: " << sf_strerror(sndfile) << '\n';
-        sf_close(sndfile);
-        return {};
-    }
-
-    sf_close(sndfile);
-    return audio_data;
-}
-
 void WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate)
 {
     SF_INFO sf_info{};
@@ -179,14 +165,14 @@ void WriteAudioFile(const std::string& filename, std::span<const float> audio_da
     SNDFILE* sndfile = sf_open(filename.c_str(), SFM_WRITE, &sf_info);
     if (sndfile == nullptr)
     {
-        std::cerr << "Failed to open audio file for writing: " << sf_strerror(nullptr) << '\n';
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file for writing: {}", sf_strerror(nullptr));
         return;
     }
 
     sf_count_t write_count = sf_writef_float(sndfile, audio_data.data(), audio_data.size());
     if (write_count != static_cast<sf_count_t>(audio_data.size()))
     {
-        std::cerr << "Failed to write audio file: " << sf_strerror(sndfile) << '\n';
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to write audio file: {}", sf_strerror(sndfile));
     }
 
     sf_close(sndfile);
@@ -244,30 +230,41 @@ std::string GetMatrixName(sfFDN::ScalarMatrixType type)
         return "Allpass";
     case sfFDN::ScalarMatrixType::NestedAllpass:
         return "Nested Allpass";
+    case sfFDN::ScalarMatrixType::VariableDiffusion:
+        return "Variable Diffusion";
     default:
         return "Unknown";
     }
 }
 
-std::string GetDelayLengthTypeName(sfFDN::DelayLengthType type)
+std::string GetDelayLengthTypeName(int type)
 {
-    switch (type)
+    if (type < static_cast<int>(sfFDN::DelayLengthType::Count))
     {
-    case sfFDN::DelayLengthType::Random:
-        return "Random";
-    case sfFDN::DelayLengthType::Gaussian:
-        return "Gaussian";
-    case sfFDN::DelayLengthType::Primes:
-        return "Primes";
-    case sfFDN::DelayLengthType::Uniform:
-        return "Uniform";
-    case sfFDN::DelayLengthType::PrimePower:
-        return "Prime Power";
-    case sfFDN::DelayLengthType::SteamAudio:
-        return "Steam Audio";
-    default:
-        return "Unknown";
+        switch (static_cast<sfFDN::DelayLengthType>(type))
+        {
+        case sfFDN::DelayLengthType::Random:
+            return "Random";
+        case sfFDN::DelayLengthType::Gaussian:
+            return "Gaussian";
+        case sfFDN::DelayLengthType::Primes:
+            return "Primes";
+        case sfFDN::DelayLengthType::Uniform:
+            return "Uniform";
+        case sfFDN::DelayLengthType::PrimePower:
+            return "Prime Power";
+        case sfFDN::DelayLengthType::SteamAudio:
+            return "Steam Audio";
+        default:
+            return "Unknown";
+        }
     }
+
+    if (type == static_cast<int>(sfFDN::DelayLengthType::Count))
+    {
+        return "Mean Delay";
+    }
+    return "Unknown";
 }
 
 std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate)
@@ -285,4 +282,6 @@ std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, siz
 
 template std::vector<double> LogSpace(double start, double stop, size_t num);
 template std::vector<float> LogSpace(float start, float stop, size_t num);
+template std::vector<double> Linspace(double start, double stop, size_t num);
+template std::vector<float> Linspace(float start, float stop, size_t num);
 } // namespace utils

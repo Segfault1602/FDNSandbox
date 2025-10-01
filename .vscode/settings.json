@@ -77,5 +77,6 @@
         "future": "cpp",
         "valarray": "cpp",
         "nnls": "cpp"
-    }
+    },
+    "C_Cpp.intelliSenseEngine": "disabled"
 }

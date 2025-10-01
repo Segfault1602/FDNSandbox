@@ -37,6 +37,18 @@ template <typename T>
 std::vector<T> LogSpace(T start, T stop, size_t num);
 
 /**
+ * @brief Generate a linearly spaced vector.
+ *
+ * @tparam T The type of the elements in the vector.
+ * @param start The starting value of the range.
+ * @param stop The ending value of the range.
+ * @param num The number of points to generate.
+ * @return A vector containing linearly spaced values.
+ */
+template <typename T>
+std::vector<T> Linspace(T start, T stop, size_t num);
+
+/**
  * @brief Perform piecewise cubic Hermite interpolation.
  *
  * @param x The x-coordinates of the data points.
@@ -44,7 +56,7 @@ std::vector<T> LogSpace(T start, T stop, size_t num);
  * @param xq The x-coordinates of the query points.
  * @return A vector containing the interpolated values.
  */
-std::vector<float> pchip(const std::vector<float>& x, const std::vector<float>& y, const std::vector<float>& xq);
+std::vector<float> pchip(std::span<const float> x, std::span<const float> y, std::span<const float> xq);
 
 /**
  * @brief Compute the absolute value of the frequency response.
@@ -55,14 +67,6 @@ std::vector<float> pchip(const std::vector<float>& x, const std::vector<float>& 
  * @return A vector containing the absolute frequency response.
  */
 std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w, size_t sr);
-
-/**
- * @brief Read an audio file and return its samples.
- *
- * @param filename The path to the audio file.
- * @return A vector containing the audio samples.
- */
-std::vector<float> ReadAudioFile(const std::string& filename);
 
 /**
  * @brief Write audio samples to a file.
@@ -77,7 +81,7 @@ std::array<std::array<float, 6>, 10> GetOctaveBandsSOS();
 
 std::string GetMatrixName(sfFDN::ScalarMatrixType type);
 
-std::string GetDelayLengthTypeName(sfFDN::DelayLengthType type);
+std::string GetDelayLengthTypeName(int type);
 
 std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate);
 

@@ -1,44 +1,97 @@
 {
     "version": 10,
     "cmakeMinimumRequired": {
-        "major": 3,
-        "minor": 24,
-        "patch": 0
+        "major": 4,
+        "minor": 1,
+        "patch": 1
     },
     "configurePresets": [
         {
-            "name": "ninja-multi",
+            "name": "common",
             "hidden": true,
-            "displayName": "Ninja Multi-Config",
-            "description": "Default build using Ninja Multi-Config generator",
-            "generator": "Ninja Multi-Config",
-            "binaryDir": "${sourceDir}/build"
+            "displayName": "Common",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+            }
         },
         {
-            "name": "apple",
-            "displayName": "Apple",
-            "description": "Build for Apple platforms",
-            "inherits": "ninja-multi",
+            "name": "Debug",
+            "hidden": true,
+            "inherits": "common",
+            "description": "Default build using Ninja generator",
+            "binaryDir": "${sourceDir}/build/debug",
             "cacheVariables": {
-                "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/llvm-toolchain.cmake"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
+        },
+        {
+            "name": "Release",
+            "hidden": true,
+            "inherits": "common",
+            "binaryDir": "${sourceDir}/build/Release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "RelWithDebInfo",
+            "hidden": true,
+            "inherits": "common",
+            "binaryDir": "${sourceDir}/build/RelWithDebInfo",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "llvm-dbg",
+            "displayName": "LLVM - Debug",
+            "description": "Build for LLVM",
+            "inherits": "Debug",
+            "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake"
+        },
+        {
+            "name": "llvm-rel",
+            "displayName": "LLVM - Release",
+            "description": "Build for LLVM",
+            "inherits": "Release",
+            "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake"
+        },
+        {
+            "name": "llvm-relwithdebinfo",
+            "displayName": "LLVM - RelWithDebInfo",
+            "description": "Build for LLVM",
+            "inherits": "RelWithDebInfo",
+            "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake"
         },
         {
             "name": "windows",
             "displayName": "Windows",
             "description": "Build for Windows",
-            "inherits": "ninja-multi",
+            "inherits": "Debug",
             "cacheVariables": {
                 "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
                 "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
             }
         }
     ],
     "buildPresets": [
         {
-            "name": "default",
-            "configurePreset": "apple"
+            "name": "llvm-debug",
+            "configurePreset": "llvm-dbg"
+        },
+        {
+            "name": "llvm-release",
+            "configurePreset": "llvm-rel"
+        },
+        {
+            "name": "llvm-relwithdebinfo",
+            "configurePreset": "llvm-relwithdebinfo"
         }
     ]
 }

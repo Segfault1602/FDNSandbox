@@ -1,29 +1,70 @@
-set(APP_SOURCES main.cpp utils.cpp widget.cpp app.cpp fdn_info.cpp)
-
 add_subdirectory(analysis)
 
-add_executable(${PROJECT_NAME} ${APP_SOURCES})
-
+# ====== FDN Sandbox App logic =======
+add_library(fdn_sandbox_app STATIC)
+target_sources(
+    fdn_sandbox_app
+    PRIVATE utils.cpp
+            widget.cpp
+            app.cpp
+            fdn_info.cpp
+            presets.cpp
+            fdn_config.cpp
+)
 target_link_libraries(
-  ${PROJECT_NAME}
-  PRIVATE imgui
-          implot
-          ${OPENGL_LIBRARIES}
-          audio_utils
-          fdn_analysis
-          sfFDN
-          SndFile::sndfile
-          Boost::math
-          Eigen3::Eigen)
+    fdn_sandbox_app
+    PUBLIC audio_utils quill::quill sfFDN.sfFDN
+    PRIVATE imgui
+            implot
+            fdn_analysis
+            SndFile::sndfile
+            Boost::math
+            Boost::filesystem
+            Eigen3::Eigen
+            nlohmann_json::nlohmann_json
+)
+target_include_directories(fdn_sandbox_app PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR})
+target_compile_features(fdn_sandbox_app PRIVATE cxx_std_23)
+target_compile_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
+target_link_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
 
-target_include_directories(
-  ${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR}
-                         ${CMAKE_CURRENT_SOURCE_DIR})
+# ====== Metal implementation ======
+if(APPLE)
+    add_executable(${PROJECT_NAME})
+    target_sources(${PROJECT_NAME} PRIVATE main.mm)
+    target_link_libraries(
+        ${PROJECT_NAME}
+        PRIVATE imgui_metal
+                implot
+                fdn_sandbox_app
+                "-framework Metal"
+                "-framework MetalKit"
+                "-framework Cocoa"
+                "-framework IOKit"
+                "-framework CoreVideo"
+                "-framework QuartzCore"
+    )
+else()
+    # ========= OpenGL implementation =========
+    add_executable(${PROJECT_NAME} main.cpp)
 
-target_compile_definitions(
-  ${PROJECT_NAME} PUBLIC GL_SILENCE_DEPRECATION
-                         -DIMGUI_USER_CONFIG="app_imconfig.h")
+    target_link_libraries(
+        ${PROJECT_NAME}
+        PRIVATE fdn_sandbox_app
+                imgui
+                implot
+                ${OPENGL_LIBRARIES}
+    )
 
+    target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_compile_definitions(${PROJECT_NAME} PUBLIC GL_SILENCE_DEPRECATION -DIMGUI_USER_CONFIG="app_imconfig.h")
+
+endif()
 target_compile_options(${PROJECT_NAME} PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
-target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
 target_link_options(${PROJECT_NAME} PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
+
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/../audio
+                                              $<TARGET_FILE_DIR:${PROJECT_NAME}>/audio
+)

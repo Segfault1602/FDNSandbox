@@ -1,9 +1,13 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 4.1.1)
 set(CMAKE_CXX_STANDARD 20)
 
 project(FDNSandbox)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET 26.0)
+endif()
 
 include(./fetch_deps.cmake)
 

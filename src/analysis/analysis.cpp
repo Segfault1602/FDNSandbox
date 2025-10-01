@@ -3,8 +3,15 @@
 #include <Eigen/Core>
 #include <algorithm>
 #include <boost/math/statistics/linear_regression.hpp>
+#include <sndfile.h>
 
+#include <algorithm>
+#include <numbers>
+
+#include "audio_utils/fft.h"
 #include "octave_band_coeff.h"
+#include "octave_band_filters_fir.h"
+#include "sffdn/partitioned_convolver.h"
 #include <audio_utils/fft_utils.h>
 
 #include <sffdn/sffdn.h>
@@ -66,11 +73,11 @@ EstimateT60Results EstimateT60(std::span<const float> decay_curve, std::span<con
         throw std::invalid_argument("decay_curve and time must have the same size");
     }
 
-    auto it_start =
-        std::lower_bound(decay_curve.begin(), decay_curve.end(), decay_start_db,
-                         [](float value, float threshold) { return std::abs(value) < std::abs(threshold); });
-    auto it_end = std::lower_bound(decay_curve.begin(), decay_curve.end(), decay_end_db,
-                                   [](float value, float threshold) { return std::abs(value) < std::abs(threshold); });
+    auto it_start = std::ranges::lower_bound(decay_curve, decay_start_db, [](float value, float threshold) {
+        return std::abs(value) < std::abs(threshold);
+    });
+    auto it_end = std::ranges::lower_bound(
+        decay_curve, decay_end_db, [](float value, float threshold) { return std::abs(value) < std::abs(threshold); });
 
     auto start_index = std::distance(decay_curve.begin(), it_start);
     auto end_index = std::distance(decay_curve.begin(), it_end);
@@ -100,18 +107,28 @@ std::array<std::vector<float>, 10> EnergyDecayRelief(std::span<const float> sign
 {
     std::array<std::vector<float>, 10> edc_octaves;
 
-    for (auto i = 0; i < kOctaveBandCoeffs.size(); ++i)
+#pragma omp parallel for firstprivate(signal, to_db)
+    for (auto i = 0; i < kOctaveBandFirFilters.size(); ++i)
     {
-        sfFDN::CascadedBiquads octave_filter;
-        octave_filter.SetCoefficients(14, kOctaveBandCoeffs[i]);
-        edc_octaves[i].resize(signal.size(), 0.0f);
+        const auto& fir_coeffs = kOctaveBandFirFilters[i];
 
-        sfFDN::AudioBuffer input_buffer(signal.size(), 1,
-                                        std::span<float>(const_cast<float*>(signal.data()), signal.size()));
-        sfFDN::AudioBuffer output_buffer(edc_octaves[i].size(), 1, edc_octaves[i]);
-        octave_filter.Process(input_buffer, output_buffer);
+        auto conv_size = signal.size() + fir_coeffs.size() - 1;
+        conv_size = audio_utils::FFT::NextSupportedFFTSize(static_cast<uint32_t>(conv_size));
+        audio_utils::FFT fft(conv_size);
 
-        edc_octaves[i] = EnergyDecayCurve(output_buffer.GetChannelSpan(0), to_db);
+        std::vector<float> result(conv_size, 0.0f);
+        fft.Convolve(signal, fir_coeffs, result);
+
+        // The filters introduce a delay of roughly half the filter length
+        const size_t delay = (fir_coeffs.size() / 2) * 0.9;
+        if (delay < result.size())
+        {
+            std::ranges::rotate(result, result.begin() + delay);
+            std::fill(result.end() - delay, result.end(), 0.0f);
+        }
+
+        result.erase(result.begin() + signal.size(), result.end());
+        edc_octaves[i] = EnergyDecayCurve(result, to_db);
     }
 
     return edc_octaves;
@@ -128,7 +145,7 @@ EchoDensityResults EchoDensity(std::span<const float> signal, uint32_t window_si
     EchoDensityResults results;
 
     std::vector<float> win(window_size, 0.0f);
-    GetWindow(audio_utils::FFTWindowType::Hann, win.data(), win.size());
+    GetWindow(audio_utils::FFTWindowType::Hann, win);
     float win_sum = std::accumulate(win.begin(), win.end(), 0.0f);
     for (auto& w : win)
     {
@@ -174,7 +191,7 @@ EchoDensityResults EchoDensity(std::span<const float> signal, uint32_t window_si
         float echo_density = (mask * wT_map).sum();
 
         // normalize
-        const float kErfc = std::erfc(1.0f / std::sqrt(2.0f));
+        const float kErfc = std::erfc(1.0f / std::numbers::sqrt2_v<float>);
         echo_density /= kErfc;
 
         results.sparse_indices.push_back(n);

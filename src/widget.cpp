@@ -1,6 +1,7 @@
 #include "widget.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -8,16 +9,56 @@
 #include <implot.h>
 
 #include <sffdn/sffdn.h>
+#include <string>
+#include <sys/types.h>
 
-#include "app.h"
-#include "fdn_info.h"
+#include "imgui.h"
+#include "settings.h"
 #include "utils.h"
 
 namespace
 {
+constexpr size_t kNBands = 10;
 
-constexpr size_t kSampleRate = 48000; // Define a constant sample rate for audio processing
-bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
+std::vector<float> GetMatrixFromClipboard(uint32_t N)
+{
+    std::vector<float> feedback_matrix(N * N, 0.0f);
+    const char* clipboard_text = ImGui::GetClipboardText();
+    std::string clipboard_string(clipboard_text);
+
+    // split by newline
+    std::vector<std::string> lines;
+    std::istringstream stream(clipboard_string);
+    std::string line;
+    while (std::getline(stream, line))
+    {
+        lines.push_back(line);
+    }
+
+    size_t line_count = std::min(lines.size(), static_cast<size_t>(N));
+
+    for (size_t i = 0; i < line_count; ++i)
+    {
+        // Each line should have N values separated by spaces or tabs
+        std::istringstream line_stream(lines[i]);
+        std::vector<float> values;
+        float value = 0;
+        while (line_stream >> value)
+        {
+            values.push_back(value);
+        }
+
+        // Only keep the first N values for each row
+        for (size_t j = 0; j < N && j < values.size(); ++j)
+        {
+            feedback_matrix[i * N + j] = values[j];
+        }
+    }
+
+    return feedback_matrix;
+}
+
+bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 {
     if (!ImGui::Begin("Filter Designer", &show_delay_filter_designer))
     {
@@ -29,8 +70,8 @@ bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
 
     constexpr uint32_t kTestDelay = 593.f; // arbitrary, needed to design the filter for the GUI
 
-    constexpr size_t kNBands = 10; // Number of bands in the filter designer
-    static std::vector<float> t60s(kNBands, 2.f);
+    // Number of bands in the filter designer
+    assert(t60s.size() == kNBands);
     static std::vector<float> frequencies(0, 0.f);
     std::vector<float> gains(kNBands, 0.0f);
 
@@ -41,16 +82,6 @@ bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
     static std::vector<float> filter_freqs_plot;
 
     bool point_changed = false;
-
-    // Initialize with default values if empty
-    if (fdn_config.t60s.size() == 0)
-    {
-        fdn_config.t60s = t60s;
-    }
-    // else // Use the existing t60s from the config
-    // {
-    //     t60s = fdn_config.t60s;
-    // }
 
     if (frequencies.size() == 0)
     {
@@ -64,13 +95,13 @@ bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
 
     if (frequencies_plot.size() == 0) // Only runs on first call
     {
-        frequencies_plot =
-            utils::LogSpace(std::log10(frequencies[0] + 1e-6f), std::log10(frequencies.back() - 1.f), 256);
-        filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(kSampleRate / 2.f), 512);
+        frequencies_plot = frequencies; // utils::LogSpace(std::log10(frequencies[0] + 1e-6f),
+                                        // std::log10(frequencies.back() - 1.f), 256);
+        filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 512);
         t60s_plot = utils::pchip(frequencies, t60s, frequencies_plot);
 
-        gains = utils::T60ToGainsDb(t60s, kTestDelay, kSampleRate);
-        gains_plot = utils::pchip(frequencies, gains, frequencies_plot);
+        gains = utils::T60ToGainsDb(t60s, kTestDelay, Settings::Instance().SampleRate());
+        gains_plot = gains;   // utils::pchip(frequencies, gains, frequencies_plot);
         point_changed = true; // Force initial plot update
     }
 
@@ -81,7 +112,7 @@ bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.01f, 5.0f, ImPlotCond_Once);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
 
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, kSampleRate / 2);
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, Settings::Instance().SampleRate() / 2);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0.f, 10.f);
 
         static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
@@ -117,17 +148,18 @@ bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
 
     if (point_changed)
     {
-        gains = utils::T60ToGainsDb(t60s, kTestDelay, kSampleRate);
-        gains_plot = utils::pchip(frequencies, gains, frequencies_plot);
+        gains = utils::T60ToGainsDb(t60s, kTestDelay, Settings::Instance().SampleRate());
+        gains_plot = gains; // utils::pchip(frequencies, gains, frequencies_plot);
         std::vector<float> t60s_f(t60s.begin(), t60s.end());
-        std::vector<float> sos = sfFDN::GetTwoFilter(t60s_f, kTestDelay, kSampleRate, shelf_cutoff);
+        std::vector<float> sos =
+            sfFDN::GetTwoFilter(t60s_f, kTestDelay, Settings::Instance().SampleRate(), shelf_cutoff);
 
-        H = utils::AbsFreqz(sos, filter_freqs_plot, kSampleRate);
+        H = utils::AbsFreqz(sos, filter_freqs_plot, Settings::Instance().SampleRate());
 
         // To db gain
-        for (size_t i = 0; i < H.size(); ++i)
+        for (float& i : H)
         {
-            H[i] = 20.f * std::log10(H[i]);
+            i = 20.f * std::log10(i);
         }
     }
 
@@ -135,17 +167,18 @@ bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
     {
 
         ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)");
-        ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, 20000.0f, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, -10.0f, 1.0f, ImPlotCond_Once);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
 
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, kSampleRate / 2);
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, Settings::Instance().SampleRate() / 2.f);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -60.f, 10.f);
 
         static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
         ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), frequencies_d.size(), nullptr, false);
 
         ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.70f, 0.20f, 1.0f), 4.0f);
+        ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
         ImPlot::PlotLine("Target Gain", frequencies_plot.data(), gains_plot.data(), frequencies_plot.size());
 
         if (H.size() > 0)
@@ -159,16 +192,11 @@ bool DrawFilterDesigner(FDNConfig& fdn_config, bool& show_delay_filter_designer)
 
     if (point_changed)
     {
-        fdn_config.delay_filter_type = DelayFilterType::TwoFilter;
-        fdn_config.t60s = t60s;
         config_changed = true;
     }
 
     if (ImGui::Button("Apply"))
     {
-        std::cout << "Applying filter design..." << std::endl;
-        fdn_config.delay_filter_type = DelayFilterType::TwoFilter;
-        fdn_config.t60s = t60s;
         config_changed = true;
         show_delay_filter_designer = false;
     }
@@ -290,33 +318,29 @@ bool DrawGainsWidget(std::span<float> gains)
 
     return config_changed;
 }
-
 } // namespace
 
-void DrawInputOutputGainsPlot(const sfFDN::FDN* fdn)
+void DrawInputOutputGainsPlot(const FDNConfig& config)
 {
     if (ImPlot::BeginSubplots("##Input/Output_Gains", 2, 1, ImVec2(300, 200),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
-        static std::vector<float> input_gains;
-        static std::vector<float> output_gains;
-
-        fdn_info::GetInputAndOutputGains(fdn, input_gains, output_gains);
-
         constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
         if (ImPlot::BeginPlot("Input Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, input_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Input Gains", input_gains.data(), input_gains.size(), 0.90, 0, ImPlotBarsFlags_None);
+            ImPlot::SetupAxesLimits(-0.45, config.input_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
+            ImPlot::PlotBars("Input Gains", config.input_gains.data(), config.input_gains.size(), 0.90, 0,
+                             ImPlotBarsFlags_None);
             ImPlot::EndPlot();
         }
 
         if (ImPlot::BeginPlot("Output Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, output_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Output Gains", output_gains.data(), output_gains.size(), 0.90, 0, ImPlotBarsFlags_None);
+            ImPlot::SetupAxesLimits(-0.45, config.output_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
+            ImPlot::PlotBars("Output Gains", config.output_gains.data(), config.output_gains.size(), 0.90, 0,
+                             ImPlotBarsFlags_None);
             ImPlot::EndPlot();
         }
 
@@ -324,443 +348,719 @@ void DrawInputOutputGainsPlot(const sfFDN::FDN* fdn)
     }
 }
 
-void DrawDelaysPlot(const sfFDN::FDN* fdn, uint32_t max_delay)
+void DrawDelaysPlot(const FDNConfig& config, uint32_t max_delay)
 {
     if (ImPlot::BeginPlot("Delays", ImVec2(300, 100), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
-        static std::vector<uint32_t> delays;
-        fdn_info::GetDelays(fdn, delays);
-
         constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
         ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
 
-        ImPlot::SetupAxesLimits(-1, delays.size(), 0, max_delay, ImPlotCond_Always);
+        ImPlot::SetupAxesLimits(-1, config.delays.size(), 0, max_delay, ImPlotCond_Always);
 
-        ImPlot::PlotBars("##Delays", delays.data(), delays.size(), 0.90, 0, ImPlotBarsFlags_None);
+        ImPlot::PlotBars("##Delays", config.delays.data(), config.delays.size(), 0.90, 0, ImPlotBarsFlags_None);
         ImPlot::EndPlot();
     }
 }
 
-void DrawFeedbackMatrixPlot(const sfFDN::FDN* fdn)
+void DrawFeedbackMatrixPlot(const FDNConfig& config)
 {
     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_Plasma;
 
     static std::vector<float> feedback_matrix;
-    static uint32_t N = 0;
-    if (fdn_info::GetFeedbackMatrix(fdn, feedback_matrix, N))
-    {
-        ImPlot::PushColormap(feedback_matrix_colormap);
-        if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(300, 300), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
-        {
+    const uint32_t N = config.N;
 
-            constexpr ImPlotAxisFlags axes_flags =
-                ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
-            ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
-            const char* label_fmt = N < 10 ? "%.2f" : nullptr; // Adjust label format based on N size
-            ImPlot::PlotHeatmap("heat", feedback_matrix.data(), N, N, -1, 1, label_fmt, ImPlotPoint(0, 0),
-                                ImPlotPoint(1, 1), 0);
+    std::visit(
+        [&](auto&& arg) {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, std::vector<float>>)
+            {
+                feedback_matrix = arg;
+            }
+            else if constexpr (std::is_same_v<T, sfFDN::CascadedFeedbackMatrixInfo>)
+            {
+                auto first_matrix = std::span(arg.matrices).first(N * N);
 
-            ImPlot::EndPlot();
-        }
-        ImPlot::PopColormap();
-    }
-    else
+                feedback_matrix.resize(N * N);
+                std::copy(first_matrix.begin(), first_matrix.end(), feedback_matrix.begin());
+            }
+        },
+        config.matrix_info);
+
+    ImPlot::PushColormap(feedback_matrix_colormap);
+    if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(300, 300), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
-        ImGui::Text("Unable to display feedback matrix");
+
+        constexpr ImPlotAxisFlags axes_flags =
+            ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
+        ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
+        const char* label_fmt = N < 10 ? "%.2f" : nullptr; // Adjust label format based on N size
+        ImPlot::PlotHeatmap("heat", feedback_matrix.data(), N, N, -1, 1, label_fmt, ImPlotPoint(0, 0),
+                            ImPlotPoint(1, 1), 0);
+
+        ImPlot::EndPlot();
     }
+    ImPlot::PopColormap();
 }
 
-bool DrawInputGainsWidget(sfFDN::FDN* fdn, std::span<float> gains)
+bool DrawInputGainsWidget(FDNConfig& config)
 {
-    static std::vector<float> input_gains;
-    static std::vector<float> output_gains;
-    fdn_info::GetInputAndOutputGains(fdn, input_gains, output_gains);
-
-    bool config_changed = DrawGainsWidget(input_gains);
-
-    if (config_changed)
+    if (config.input_gains.size() != config.N)
     {
-        fdn->SetInputGains(input_gains);
+        config.input_gains.resize(config.N, 0.5f);
+    }
+
+    bool config_changed = false;
+    if (ImGui::TreeNode("Edit input gains"))
+    {
+        config_changed |= DrawGainsWidget(config.input_gains);
+        ImGui::TreePop();
     }
 
     return config_changed;
 }
 
-bool DrawOutputGainsWidget(sfFDN::FDN* fdn, std::span<float> gains)
+bool DrawOutputGainsWidget(FDNConfig& config)
 {
-    static std::vector<float> input_gains;
-    static std::vector<float> output_gains;
-    fdn_info::GetInputAndOutputGains(fdn, input_gains, output_gains);
-
-    bool config_changed = DrawGainsWidget(output_gains);
-    if (config_changed)
+    if (config.output_gains.size() != config.N)
     {
-        fdn->SetOutputGains(output_gains);
+        config.output_gains.resize(config.N, 0.5f);
+    }
+
+    bool config_changed = false;
+    if (ImGui::TreeNode("Edit output gains"))
+    {
+        config_changed |= DrawGainsWidget(config.output_gains);
+        ImGui::TreePop();
     }
 
     return config_changed;
 }
 
-bool DrawDelayLengthsWidget(size_t N, std::span<uint32_t> delays, int& min_delay, int& max_delay, uint32_t random_seed,
-                            bool refresh)
+bool DrawDelayLengthsWidget(FDNConfig& config, int& min_delay, int& max_delay, uint32_t random_seed)
 {
     bool config_changed = false;
-    bool should_update_delays = refresh;
-    static sfFDN::DelayLengthType selected_delay_length_type = sfFDN::DelayLengthType::Random;
+    bool should_update_delays = false;
+    static int selected_delay_length_type = static_cast<int>(sfFDN::DelayLengthType::Random);
     static int selected_sort_type = 0;
     bool sort_type_changed = false;
 
-    if (!ImGui::TreeNode("Edit delays"))
-    {
-        return false;
-    }
+    static float mean_delay = 50.f;
+    static float std_dev = 2.8f;
 
-    constexpr int kMinDelay = 100; // Minimum delay in samples
-    if (ImGui::DragIntRange2("Delay Range", &min_delay, &max_delay, 1, kMinDelay, 0, "%d samples", "%d samples",
-                             ImGuiSliderFlags_AlwaysClamp))
+    const uint32_t N = config.N;
+
+    if (config.delays.size() != N)
     {
+        config.delays.resize(N, min_delay);
         should_update_delays = true;
     }
 
-    // Need to manually clamp because DragIntRange2 doesn't seem to respect the min/max values
-    min_delay = std::clamp(min_delay, kMinDelay, max_delay);
-    max_delay = std::max(max_delay, kMinDelay);
-
-    if (ImGui::BeginCombo("Delay Length Type", utils::GetDelayLengthTypeName(selected_delay_length_type).c_str()))
+    if (ImGui::TreeNode("Edit delays"))
     {
-        for (int i = 0; i < static_cast<int>(sfFDN::DelayLengthType::Count); i++)
+        constexpr int kMinDelay = 100; // Minimum delay in samples
+
+        if (ImGui::BeginCombo("Delay Length Type", utils::GetDelayLengthTypeName(selected_delay_length_type).c_str()))
         {
-            bool is_selected = (selected_delay_length_type == static_cast<sfFDN::DelayLengthType>(i));
-            if (ImGui::Selectable(utils::GetDelayLengthTypeName(static_cast<sfFDN::DelayLengthType>(i)).c_str(),
-                                  is_selected))
+            for (int i = 0; i < static_cast<int>(sfFDN::DelayLengthType::Count) + 1; i++)
             {
-                selected_delay_length_type = static_cast<sfFDN::DelayLengthType>(i);
+                bool is_selected = (selected_delay_length_type == i);
+                if (ImGui::Selectable(utils::GetDelayLengthTypeName(i).c_str(), is_selected))
+                {
+                    selected_delay_length_type = i;
+                    should_update_delays = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        if (selected_delay_length_type < static_cast<int>(sfFDN::DelayLengthType::Count))
+        {
+            if (ImGui::DragIntRange2("Delay Range", &min_delay, &max_delay, 1, kMinDelay, 0, "%d samples", "%d samples",
+                                     ImGuiSliderFlags_AlwaysClamp))
+            {
                 should_update_delays = true;
             }
+            // Need to manually clamp because DragIntRange2 doesn't seem to respect the min/max values
+            min_delay = std::clamp(min_delay, kMinDelay, max_delay);
+            max_delay = std::max(max_delay, kMinDelay);
         }
-        ImGui::EndCombo();
-    }
-
-    static bool clamp_to_prime = false;
-    config_changed |= ImGui::Checkbox("Clamp to Prime", &clamp_to_prime);
-
-    constexpr const char* sort_type[] = {"None", "Ascending", "Descending"};
-    if (ImGui::BeginCombo("Sort Type", sort_type[selected_sort_type]))
-    {
-        for (int i = 0; i < IM_ARRAYSIZE(sort_type); ++i)
+        else
         {
-            bool is_selected = (selected_sort_type == i);
-            if (ImGui::Selectable(sort_type[i], is_selected))
+            should_update_delays |= ImGui::SliderFloat("Mean Delay", &mean_delay, 0.f, 1000.f);
+            should_update_delays |= ImGui::SliderFloat("Std Dev", &std_dev, 0.2f, 3.f);
+        }
+
+        static bool clamp_to_prime = false;
+        config_changed |= ImGui::Checkbox("Clamp to Prime", &clamp_to_prime);
+
+        constexpr std::array<const char*, 3> sort_type = {"None", "Ascending", "Descending"};
+        if (ImGui::BeginCombo("Sort Type", sort_type[selected_sort_type]))
+        {
+            for (int i = 0; i < sort_type.size(); ++i)
             {
-                selected_sort_type = i;
-                sort_type_changed = true;
+                bool is_selected = (selected_sort_type == i);
+                if (ImGui::Selectable(sort_type[i], is_selected))
+                {
+                    selected_sort_type = i;
+                    sort_type_changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            std::string label = "Delay " + std::to_string(i + 1);
+            int delay = static_cast<int>(config.delays[i]);
+            config_changed |= ImGui::SliderInt(label.c_str(), &delay, kMinDelay, max_delay, nullptr);
+
+            config.delays[i] = std::max<size_t>(static_cast<size_t>(delay), kMinDelay);
+
+            if (clamp_to_prime)
+            {
+                config.delays[i] = utils::GetClosestPrime(config.delays[i]);
             }
         }
-        ImGui::EndCombo();
+
+        if (should_update_delays)
+        {
+            config_changed = true;
+            if (selected_delay_length_type < static_cast<int>(sfFDN::DelayLengthType::Count))
+            {
+                config.delays = sfFDN::GetDelayLengths(N, min_delay, max_delay,
+                                                       static_cast<sfFDN::DelayLengthType>(selected_delay_length_type),
+                                                       random_seed);
+            }
+            else
+            {
+                assert(selected_delay_length_type == static_cast<int>(sfFDN::DelayLengthType::Count));
+                // Mean delay
+                config.delays =
+                    sfFDN::GetDelayLengthsFromMean(N, mean_delay, std_dev, Settings::Instance().SampleRate());
+            }
+            sort_type_changed = true; // Force sort if we updated delays
+        }
+
+        if (sort_type_changed)
+        {
+            config_changed = true;
+            if (selected_sort_type == 1) // Ascending
+            {
+                std::ranges::sort(config.delays);
+            }
+            else if (selected_sort_type == 2) // Descending
+            {
+                std::ranges::sort(config.delays, std::greater<uint32_t>());
+            }
+        }
+
+        ImGui::TreePop();
     }
+
+    return config_changed;
+}
+
+bool DrawExtraDelayWidget(FDNConfig& config, bool force_update)
+{
+    bool config_changed = force_update;
+
+    constexpr int kMinDelay = 0;
+    constexpr int kMaxDelay = 1000;
+
+    const uint32_t N = config.N;
+    config.input_stage_delays.resize(N, 0);
 
     for (uint32_t i = 0; i < N; ++i)
     {
         std::string label = "Delay " + std::to_string(i + 1);
-        int delay = static_cast<int>(delays[i]);
-        config_changed |= ImGui::SliderInt(label.c_str(), &delay, kMinDelay, max_delay, nullptr);
+        int delay = static_cast<int>(config.input_stage_delays[i]);
+        config_changed |= ImGui::SliderInt(label.c_str(), &delay, kMinDelay, kMaxDelay, nullptr);
 
-        delays[i] = std::max<size_t>(static_cast<size_t>(delay), kMinDelay);
-
-        if (clamp_to_prime)
-        {
-            delays[i] = utils::GetClosestPrime(delays[i]);
-        }
+        config.input_stage_delays[i] = std::max<size_t>(static_cast<size_t>(delay), kMinDelay);
     }
 
-    if (should_update_delays)
-    {
-        config_changed = true;
-        auto delay_vec = sfFDN::GetDelayLengths(N, min_delay, max_delay, selected_delay_length_type, random_seed);
-        assert(delays.size() == delay_vec.size());
-        for (size_t i = 0; i < N; ++i)
-        {
-            delays[i] = delay_vec[i];
-        }
-        sort_type_changed = true; // Force sort if we updated delays
-    }
-
-    if (sort_type_changed)
-    {
-        config_changed = true;
-        if (selected_sort_type == 1) // Ascending
-        {
-            std::ranges::sort(delays);
-        }
-        else if (selected_sort_type == 2) // Descending
-        {
-            std::ranges::sort(delays, std::greater<uint32_t>());
-        }
-    }
-
-    ImGui::TreePop();
     return config_changed;
 }
 
-bool DrawFeedbackMatrixWidget(FDNConfig& fdn_config, uint32_t random_seed, bool refresh)
+bool DrawExtraSchroederAllpassWidget(FDNConfig& config, bool force_update)
 {
-    return DrawScalarMatrixWidget(fdn_config, random_seed, refresh);
+    bool config_changed = force_update;
+
+    const uint32_t N = config.N;
+    config.schroeder_allpass_delays.resize(N, 0);
+    config.schroeder_allpass_gains.resize(N, 0.0f);
+
+    if (ImGui::Button("Edit"))
+    {
+        ImGui::OpenPopup("Edit Schroeder Section");
+    }
+
+    if (ImGui::BeginPopupModal("Edit Schroeder Section", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        static int section_count = 1;
+        ImGui::InputInt("Section Count", &section_count, 1, 1);
+        section_count = std::clamp(section_count, 1, 10);
+
+        static std::vector<uint32_t> delays(section_count * config.N, 0);
+        delays.resize(section_count * config.N, 0);
+
+        static std::vector<float> gains(config.N, 0.0f);
+
+        if (ImGui::BeginTable("Schroeder Table", section_count + 1))
+        {
+            for (int col = 0; col < section_count; ++col)
+            {
+                std::string column_name = "Delay " + std::to_string(col + 1);
+                ImGui::TableSetupColumn(column_name.c_str(), ImGuiTableColumnFlags_WidthFixed, 120.0f);
+            }
+            ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+
+            ImGui::TableHeadersRow();
+
+            for (int row = 0; row < config.N; ++row)
+            {
+                ImGui::TableNextRow();
+
+                for (int col = 0; col < section_count; ++col)
+                {
+                    ImGui::TableSetColumnIndex(col);
+                    int delay = static_cast<int>(delays[(row * section_count) + col]);
+                    ImGui::PushID((row * section_count) + col);
+
+                    ImGui::DragInt("##delay", &delay, 1, 1, 9999);
+                    delay = std::clamp(delay, 1, 9999);
+                    delays[(row * section_count) + col] = delay;
+                    ImGui::PopID();
+                }
+
+                ImGui::TableSetColumnIndex(section_count);
+                ImGui::PushID(row + 1000);
+                ImGui::DragFloat("##gain", &gains[row], 0.01f, -1.0f, 1.0f);
+                gains[row] = std::clamp(gains[row], -1.0f, 1.0f);
+                ImGui::PopID();
+            }
+
+            ImGui::EndTable();
+        }
+
+        if (ImGui::Button("Apply"))
+        {
+            config.schroeder_allpass_delays = delays;
+            config.schroeder_allpass_gains = gains;
+            config_changed = true;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+    return config_changed;
 }
 
-bool DrawScalarMatrixWidget(FDNConfig& fdn_config, uint32_t random_seed, bool refresh)
+bool DrawScalarMatrixWidget(FDNConfig& config, uint32_t random_seed)
 {
     bool config_changed = false;
-    bool should_update_feedback_matrix = refresh;
+    bool should_update_feedback_matrix = false;
     static bool cascade_matrix = false;
     static float sparsity = 1.f;
     static int num_stages = 2;
+    bool manual_edit = false;
+    static float diffusion_theta = 1.f;
 
-    static int selected_matrix_type = 0;
-    if (!ImGui::TreeNode("Edit matrix"))
+    static std::vector<float> feedback_matrix;
+    static sfFDN::CascadedFeedbackMatrixInfo cascaded_feedback_matrix_info;
+
+    const uint32_t N = config.N;
+    if (feedback_matrix.size() != N * N)
     {
-        return false;
+        feedback_matrix.resize(N * N, 0.0f);
+        should_update_feedback_matrix = true;
     }
 
-    const std::string combo_preview_value =
-        utils::GetMatrixName(static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type));
-    if (ImGui::BeginCombo("Matrix Type", combo_preview_value.c_str()))
+    static int selected_matrix_type = 4; // Default to Hadamard
+    if (ImGui::TreeNode("Edit matrix"))
     {
-        for (int i = 0; i < static_cast<int>(sfFDN::ScalarMatrixType::Count); i++)
+        const std::string combo_preview_value =
+            utils::GetMatrixName(static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type));
+        if (ImGui::BeginCombo("Matrix Type", combo_preview_value.c_str()))
         {
-            bool is_selected = (selected_matrix_type == i);
-
-            ImGuiSelectableFlags flags = ImGuiSelectableFlags_None;
-
-            if (!utils::IsPowerOfTwo(fdn_config.N) &&
-                static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::Hadamard)
+            for (int i = 0; i < static_cast<int>(sfFDN::ScalarMatrixType::Count); i++)
             {
-                flags |= ImGuiSelectableFlags_Disabled;
+                bool is_selected = (selected_matrix_type == i);
+
+                ImGuiSelectableFlags flags = ImGuiSelectableFlags_None;
+
+                if (!utils::IsPowerOfTwo(N) &&
+                    (static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::Hadamard ||
+                     static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::VariableDiffusion))
+                {
+                    flags |= ImGuiSelectableFlags_Disabled;
+                }
+
+                if (ImGui::Selectable(utils::GetMatrixName(static_cast<sfFDN::ScalarMatrixType>(i)).c_str(),
+                                      is_selected, flags))
+                {
+                    selected_matrix_type = i;
+                    should_update_feedback_matrix = true;
+                }
+
+                if (!utils::IsPowerOfTwo(N) &&
+                    (static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::Hadamard ||
+                     static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::VariableDiffusion))
+                {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), " only supported for N that is a power of 2.");
+                }
             }
+            ImGui::EndCombo();
+        }
 
-            if (ImGui::Selectable(utils::GetMatrixName(static_cast<sfFDN::ScalarMatrixType>(i)).c_str(), is_selected,
-                                  flags))
+        if (selected_matrix_type == static_cast<int>(sfFDN::ScalarMatrixType::VariableDiffusion))
+        {
+            should_update_feedback_matrix |= ImGui::SliderFloat("Diffusion Theta", &diffusion_theta, 0.f, 1.0f, "%.3f");
+        }
+
+        if (ImGui::Button("Manual Edit"))
+        {
+            ImGui::OpenPopup("Matrix Edit Popup");
+        }
+
+        if (ImGui::BeginPopupModal("Matrix Edit Popup", nullptr,
+                                   ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            if (ImGui::Button("Clear"))
             {
-                selected_matrix_type = i;
+                feedback_matrix.assign(N * N, 0.0f);
+                config_changed = true;
+                manual_edit = true;
                 should_update_feedback_matrix = true;
             }
 
-            if (!utils::IsPowerOfTwo(fdn_config.N) &&
-                static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::Hadamard)
+            ImGui::SameLine();
+            if (ImGui::Button("Read from clipboard"))
             {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), " only supported for N that is a power of 2.");
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    if (ImGui::Button("Manual Edit"))
-    {
-        ImGui::OpenPopup("Matrix Edit Popup");
-    }
-
-    if (ImGui::BeginPopupModal("Matrix Edit Popup", nullptr,
-                               ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysAutoResize))
-    {
-        if (ImGui::Button("Clear"))
-        {
-            fdn_config.feedback_matrix.assign(fdn_config.N * fdn_config.N, 0.0f);
-            config_changed = true;
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Read from clipboard"))
-        {
-            const char* clipboard_text = ImGui::GetClipboardText();
-            std::string clipboard_string(clipboard_text);
-
-            // split by newline
-            std::vector<std::string> lines;
-            std::istringstream stream(clipboard_string);
-            std::string line;
-            while (std::getline(stream, line))
-            {
-                lines.push_back(line);
+                feedback_matrix = GetMatrixFromClipboard(N);
             }
 
-            size_t line_count = std::min(lines.size(), static_cast<size_t>(fdn_config.N));
-
-            for (size_t i = 0; i < line_count; ++i)
+            ImGui::PushItemWidth(50);
+            for (size_t i = 0; i < N; ++i)
             {
-                // Each line should have N values separated by spaces or tabs
-                std::istringstream line_stream(lines[i]);
-                std::vector<float> values;
-                float value = 0;
-                while (line_stream >> value)
+                for (size_t j = 0; j < N; ++j)
                 {
-                    values.push_back(value);
-                }
+                    if (j != 0)
+                    {
+                        ImGui::SameLine(); // Align inputs in a grid
+                    }
+                    ImGui::PushID((i * N) + j);
+                    config_changed |= ImGui::InputScalar("##MatrixValue", ImGuiDataType_Float,
+                                                         &feedback_matrix[(i * N) + j], nullptr, nullptr, "%.3f", 0);
+                    ImGui::PopID();
 
-                // Only keep the first N values for each row
-                for (size_t j = 0; j < fdn_config.N && j < values.size(); ++j)
-                {
-                    fdn_config.feedback_matrix[i * fdn_config.N + j] = values[j];
+                    manual_edit |= config_changed;
+                    should_update_feedback_matrix |= config_changed;
                 }
             }
-        }
 
-        ImGui::PushItemWidth(50);
-        for (size_t i = 0; i < fdn_config.N; ++i)
-        {
-            for (size_t j = 0; j < fdn_config.N; ++j)
-            {
-                if (j != 0)
-                {
-                    ImGui::SameLine(); // Align inputs in a grid
-                }
-                ImGui::PushID((i * fdn_config.N) + j);
-                config_changed |= ImGui::InputScalar("##MatrixValue", ImGuiDataType_Float,
-                                                     &fdn_config.feedback_matrix[(i * fdn_config.N) + j], nullptr,
-                                                     nullptr, "%.3f", 0);
-                ImGui::PopID();
-            }
-        }
+            ImGui::PopItemWidth();
 
-        ImGui::PopItemWidth();
-
-        if (ImGui::Button("Set"))
-        {
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-
-    should_update_feedback_matrix |= ImGui::Checkbox("Cascade Matrix", &cascade_matrix);
-    if (cascade_matrix)
-    {
-        should_update_feedback_matrix |= ImGui::SliderFloat("Sparsity", &sparsity, 1.f, 10.0f);
-        should_update_feedback_matrix |= ImGui::InputInt("Num Stages", &num_stages, 1, 1);
-
-        num_stages = std::clamp(num_stages, 1, 10);
-        sparsity = std::clamp(sparsity, 1.f, 10.f);
-
-        if (ImGui::Button("View"))
-        {
-            // Open a new window to display the matrix
-            ImGui::OpenPopup("Cascaded Matrix View");
-        }
-
-        if (ImGui::BeginPopupModal("Cascaded Matrix View", nullptr,
-                                   ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysAutoResize))
-        {
-            PlotCascadedFeedbackMatrix(fdn_config.cascaded_feedback_matrix_info);
-
-            if (ImGui::Button("OK", ImVec2(120, 0)))
+            if (ImGui::Button("Set"))
             {
                 ImGui::CloseCurrentPopup();
+                manual_edit = true;
+                should_update_feedback_matrix = true;
             }
             ImGui::EndPopup();
         }
+
+        should_update_feedback_matrix |= ImGui::Checkbox("Cascade Matrix", &cascade_matrix);
+        if (cascade_matrix)
+        {
+            should_update_feedback_matrix |= ImGui::SliderFloat("Sparsity", &sparsity, 1.f, 10.0f);
+            should_update_feedback_matrix |= ImGui::InputInt("Num Stages", &num_stages, 1, 1);
+
+            num_stages = std::clamp(num_stages, 1, 10);
+            sparsity = std::clamp(sparsity, 1.f, 10.f);
+
+            if (ImGui::Button("View"))
+            {
+                // Open a new window to display the matrix
+                ImGui::OpenPopup("Cascaded Matrix View");
+            }
+
+            if (ImGui::BeginPopupModal("Cascaded Matrix View", nullptr,
+                                       ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                PlotCascadedFeedbackMatrix(cascaded_feedback_matrix_info);
+
+                if (ImGui::Button("OK", ImVec2(120, 0)))
+                {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+        }
+        ImGui::TreePop();
     }
 
     if (should_update_feedback_matrix)
     {
         auto matrix_type = static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type);
-        if (matrix_type == sfFDN::ScalarMatrixType::NestedAllpass)
+        if (manual_edit)
         {
-            fdn_config.feedback_matrix =
-                sfFDN::NestedAllpassMatrix(fdn_config.N, random_seed, fdn_config.input_gains, fdn_config.output_gains);
+            config.matrix_info = feedback_matrix;
+        }
+        else if (matrix_type == sfFDN::ScalarMatrixType::NestedAllpass)
+        {
+            std::vector<float> input_gains(N, 0.0f);
+            std::vector<float> output_gains(N, 0.0f);
+            feedback_matrix = sfFDN::NestedAllpassMatrix(N, random_seed, input_gains, output_gains);
+
+            config.input_gains = input_gains;
+            config.output_gains = output_gains;
+            config.matrix_info = feedback_matrix;
         }
         else
         {
-            fdn_config.feedback_matrix = sfFDN::GenerateMatrix(fdn_config.N, matrix_type, random_seed);
+            std::optional<float> extra_arg = std::nullopt;
+            if (matrix_type == sfFDN::ScalarMatrixType::VariableDiffusion)
+            {
+                extra_arg = diffusion_theta;
+            }
+
+            feedback_matrix = sfFDN::GenerateMatrix(N, matrix_type, random_seed, extra_arg);
+
+            config.matrix_info = feedback_matrix;
         }
 
         if (cascade_matrix)
         {
-            fdn_config.cascaded_feedback_matrix_info = sfFDN::ConstructCascadedFeedbackMatrix(
-                fdn_config.N, num_stages, sparsity, static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type), 1.f);
+            cascaded_feedback_matrix_info = sfFDN::ConstructCascadedFeedbackMatrix(
+                N, num_stages, sparsity, static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type), 1.f);
+
+            config.matrix_info = cascaded_feedback_matrix_info;
         }
 
-        fdn_config.is_cascaded = cascade_matrix;
-        fdn_config.sparsity = sparsity;
-        fdn_config.num_stages = num_stages;
-        fdn_config.cascade_gain = 1.f;
         config_changed = true;
     }
 
-    ImGui::TreePop();
     return config_changed;
 }
 
-bool DrawDelayFilterWidget(FDNConfig& fdn_config)
+bool DrawDelayFilterWidget(FDNConfig& config)
 {
     bool config_changed = false;
+    static float feedback_gain = 0.9999f;
+    static float t60_dc = 2.f;
+    static float t60_ny = 1.f;
+    static std::vector<float> t60s(kNBands, 2.f);
 
     static bool show_delay_filter_designer = false;
-
-    constexpr std::array<const char*, 3> kFilterTypeNames = {"Proportional", "One Pole", "Octave Band Filter"};
-    static int selected_filter_type = 0;
-    const char* combo_preview_value = kFilterTypeNames[selected_filter_type];
-    if (ImGui::BeginCombo("Filter Type", combo_preview_value))
+    static DelayFilterType delay_filter_type = DelayFilterType::Proportional;
+    if (ImGui::TreeNode("Delay Filters"))
     {
-        for (int i = 0; i < kFilterTypeNames.size(); i++)
+        constexpr std::array<const char*, 3> kFilterTypeNames = {"Proportional", "One Pole", "Octave Band Filter"};
+        static int selected_filter_type = 0;
+        const char* combo_preview_value = kFilterTypeNames[selected_filter_type];
+        if (ImGui::BeginCombo("Filter Type", combo_preview_value))
         {
-            bool is_selected = (selected_filter_type == i);
-            if (ImGui::Selectable(kFilterTypeNames[i], is_selected))
+            for (int i = 0; i < kFilterTypeNames.size(); i++)
             {
-                selected_filter_type = i;
+                bool is_selected = (selected_filter_type == i);
+                if (ImGui::Selectable(kFilterTypeNames[i], is_selected))
+                {
+                    delay_filter_type = static_cast<DelayFilterType>(i);
+                    selected_filter_type = i;
+                    config_changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        // Proportinal feedback Gain
+        if (delay_filter_type == DelayFilterType::Proportional)
+        {
+            const float kFbGainStep = 0.01f;
+            const float kFbGainStepFast = 0.25f;
+            config_changed |= ImGui::InputScalar("RT60", ImGuiDataType_Float, &feedback_gain, &kFbGainStep,
+                                                 &kFbGainStepFast, "%.5f", 0);
+            feedback_gain = std::clamp(feedback_gain, 0.1f, 10.0f);
+        }
+        else if (delay_filter_type == DelayFilterType::OnePole) // One Pole
+        {
+            constexpr float kOffsetFromStart = 125.f;
+            ImGui::Text("RT60 DC: ");
+            ImGui::SameLine(kOffsetFromStart);
+            ImGui::SetNextItemWidth(200);
+
+            config_changed |= (ImGui::InputFloat("RT60 DC", &t60_dc, 0.01f, 0.1f, "%.2f"));
+            t60_dc = std::clamp(t60_dc, 0.01f, 10.0f);
+
+            ImGui::Text("RT60 Nyquist: ");
+            ImGui::SameLine(kOffsetFromStart);
+            ImGui::SetNextItemWidth(200);
+
+            config_changed |= (ImGui::InputFloat("RT60 Nyquist", &t60_ny, 0.01f, 0.1f, "%.2f"));
+            t60_ny = std::clamp(t60_ny, 0.01f, 10.0f);
+        }
+        else if (delay_filter_type == DelayFilterType::TwoFilter)
+        {
+            if (t60s.size() != kNBands)
+            {
+                t60s.resize(kNBands, 1.f);
+            }
+            if (ImGui::Button("Edit"))
+            {
+                show_delay_filter_designer = true;
                 config_changed = true;
             }
         }
-        ImGui::EndCombo();
+
+        if (show_delay_filter_designer)
+        {
+            config_changed |= DrawFilterDesigner(t60s, show_delay_filter_designer);
+        }
+        ImGui::TreePop();
     }
 
-    // Proportinal feedback Gain
-    if (selected_filter_type == 0) // Proportional
+    if (config_changed)
     {
-        const float kFbGainStep = 0.00001f;
-        const float kFbGainStepFast = 0.0001f;
-        config_changed |= ImGui::InputScalar("Feedback Gain", ImGuiDataType_Float, &fdn_config.feedback_gain,
-                                             &kFbGainStep, &kFbGainStepFast, "%.5f", 0);
-        fdn_config.feedback_gain =
-            std::clamp(fdn_config.feedback_gain, -1.0f, 1.0f); // Ensure feedback gain is within [0, 1]
-        fdn_config.delay_filter_type = DelayFilterType::Proportional;
+        if (delay_filter_type == DelayFilterType::Proportional)
+        {
+            config.attenuation_t60s.resize(1);
+            config.attenuation_t60s[0] = feedback_gain;
+        }
+        else if (delay_filter_type == DelayFilterType::OnePole)
+        {
+            config.attenuation_t60s = {{t60_dc, t60_ny}};
+        }
+        else if (delay_filter_type == DelayFilterType::TwoFilter)
+        {
+            config.attenuation_t60s = t60s;
+        }
     }
-    else if (selected_filter_type == 1) // One Pole
+
+    return config_changed;
+}
+
+bool DrawToneCorrectionFilterDesigner(FDNConfig& config)
+{
+    static bool show_tc_filter_designer = false;
+    static std::vector<float> tc_gains(kNBands, 0.f);
+    static std::vector<float> frequencies(0);
+    static std::vector<float> frequencies_plot;   // Oversampled vectors for plotting
+    static std::vector<float> frequency_response; // Frequency response for plotting
+    static bool enabled = false;
+
+    if (frequencies.size() == 0)
     {
-        constexpr float kOffsetFromStart = 125.f;
-        ImGui::Text("RT60 DC: ");
-        ImGui::SameLine(kOffsetFromStart);
-        ImGui::SetNextItemWidth(200);
-        if (ImGui::InputFloat("RT60 DC", &fdn_config.t60_dc, 0.01f, 0.1f, "%.2f"))
+        frequencies.resize(kNBands);
+        constexpr float kUpperLimit = 16000.0f;
+        for (size_t i = 0; i < kNBands; ++i)
+        {
+            frequencies[i] = kUpperLimit / std::pow(2.0f, static_cast<float>(kNBands - 1 - i));
+        }
+    }
+
+    bool point_changed = false;
+    if (frequencies_plot.size() == 0) // Only runs on first call
+    {
+        frequencies_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 1024);
+
+        point_changed = true; // Force initial plot update
+    }
+
+    bool config_changed = false;
+
+    if (ImGui::TreeNode("Tone Correction Filters"))
+    {
+        if (ImGui::Checkbox("Enabled", &enabled))
         {
             config_changed = true;
         }
 
-        fdn_config.t60_dc = std::clamp(fdn_config.t60_dc, 0.01f, 10.0f);
-
-        ImGui::Text("RT60 Nyquist: ");
-        ImGui::SameLine(kOffsetFromStart);
-        ImGui::SetNextItemWidth(200);
-        if (ImGui::InputFloat("RT60 Nyquist", &fdn_config.t60_ny, 0.01f, 0.1f, "%.2f"))
+        if (enabled)
         {
-            config_changed = true;
+            if (ImGui::Button("Edit"))
+            {
+                show_tc_filter_designer = true;
+                config_changed = true;
+            }
         }
 
-        fdn_config.t60_ny = std::clamp(fdn_config.t60_ny, 0.01f, 10.0f);
-        fdn_config.delay_filter_type = DelayFilterType::OnePole;
-    }
-    else if (selected_filter_type == 2) // TwoFilter
-    {
-        if (ImGui::Button("Edit"))
-        {
-            std::cout << "Opening filter designer...\n";
-            show_delay_filter_designer = true;
-            config_changed = true;
-        }
-        fdn_config.delay_filter_type = DelayFilterType::TwoFilter;
+        ImGui::TreePop();
     }
 
-    if (show_delay_filter_designer)
+    if (show_tc_filter_designer && ImGui::Begin("Filter Designer"))
     {
-        bool filter_changed = DrawFilterDesigner(fdn_config, show_delay_filter_designer);
-        config_changed |= filter_changed;
+
+        if (ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.92f), ImPlotFlags_None))
+        {
+            ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+            ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);
+            // ImPlot::SetupAxisLimits(ImAxis_Y1, -10.0f, 10.0f, ImPlotCond_Once);
+            ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+
+            ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0.f, Settings::Instance().SampleRate() / 2.0f);
+            ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -60.f, 60.f);
+
+            static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
+            ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), frequencies_d.size(), nullptr, false);
+
+            for (size_t i = 0; i < frequencies.size(); ++i)
+            {
+                double freq = frequencies[i]; // The frequency should stay constant
+                double gain = tc_gains[i];
+                point_changed |= ImPlot::DragPoint(i, &freq, &gain, ImVec4(0, 0.9f, 0, 0), 10);
+                tc_gains[i] = std::clamp(static_cast<float>(gain), -25.f, 25.0f); // Update the gain value
+            }
+
+            if (point_changed)
+            {
+                config_changed = true;
+
+                std::vector<float> sos =
+                    sfFDN::DesignGraphicEQ(tc_gains, frequencies, Settings::Instance().SampleRate());
+                frequency_response = utils::AbsFreqz(sos, frequencies_plot, Settings::Instance().SampleRate());
+
+                // To db gain
+                for (float& i : frequency_response)
+                {
+                    i = 20.f * std::log10(i);
+                }
+            }
+
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
+            ImPlot::PlotScatter("RT60", frequencies.data(), tc_gains.data(), tc_gains.size());
+
+            if (frequency_response.size() > 0)
+            {
+                ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
+                ImPlot::PlotLine("Filter Response", frequencies_plot.data(), frequency_response.data(),
+                                 frequencies_plot.size());
+            }
+
+            if (ImGui::Button("Apply"))
+            {
+                show_tc_filter_designer = false;
+                config_changed = true;
+            }
+            ImPlot::EndPlot();
+        }
+
+        ImGui::End();
+    }
+
+    if (config_changed)
+    {
+        if (enabled)
+        {
+            config.tc_gains = tc_gains;
+            config.tc_frequencies = frequencies;
+        }
+        else
+        {
+            config.tc_gains.clear();
+            config.tc_frequencies.clear();
+        }
     }
 
     return config_changed;
@@ -784,6 +1084,9 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
     ImPlot::PopStyleVar();
 
     duration_changed = ImPlot::DragLineX(0, &ir_duration, ImVec4(1.f, 1.f, 1.f, 1.f), 1.f, ImPlotDragToolFlags_None);
+
+    // Clamp the duration because if it is dragged too far, it may go out of bounds and get lost forever
+    ir_duration = std::clamp(ir_duration, 0.1, static_cast<double>(time_data.back() * 0.95));
 
     std::array<double, 2> early_xs = {0.f, ir_duration};
     std::array<double, 2> early_ys1 = {-1.f, -1.f};

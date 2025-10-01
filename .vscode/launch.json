@@ -8,7 +8,7 @@
             "name": "FDNSandbox",
             "type": "lldb-dap",
             "request": "launch",
-            "program": "${workspaceFolder}/build/src/Debug/FDNSandbox",
+            "program": "${workspaceFolder}/build/Debug/src/FDNSandbox",
             "args": [],
             "stopOnEntry": false,
             "cwd": "${workspaceFolder}",

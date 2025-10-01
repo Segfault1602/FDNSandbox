@@ -1,9 +1,10 @@
 #include "fdn_info.h"
-#include "sffdn/audio_processor.h"
-#include "sffdn/feedback_matrix.h"
 
-#include <sffdn/fdn.h>
+#include <sffdn/sffdn.h>
 
+#include "settings.h"
+
+#include <imgui.h>
 #include <iostream>
 
 namespace fdn_info
@@ -27,6 +28,22 @@ bool GetInputAndOutputGains(const sfFDN::FDN* fdn, std::vector<float>& input_gai
     {
         input_parallel_gains->GetGains(input_gains);
     }
+    else if (auto* input_tv_gains = dynamic_cast<sfFDN::TimeVaryingParallelGains*>(input_gains_processor))
+    {
+        uint32_t samples_elapsed = ImGui::GetIO().DeltaTime * Settings::Instance().SampleRate();
+        std::vector<float> input(samples_elapsed, 1.f);
+        std::vector<float> output(samples_elapsed * N, 0.f);
+
+        sfFDN::AudioBuffer input_buffer(samples_elapsed, 1, input);
+        sfFDN::AudioBuffer output_buffer(samples_elapsed, N, output);
+
+        input_tv_gains->Process(input_buffer, output_buffer);
+
+        for (auto i = 0; i < N; ++i)
+        {
+            input_gains[i] = output_buffer.GetChannelSpan(i).back();
+        }
+    }
     else
     {
         std::cerr << "[fdn_info::GetInputAndOutputGains]: Input gains processor is not a ParallelGains instance.\n";
@@ -37,6 +54,31 @@ bool GetInputAndOutputGains(const sfFDN::FDN* fdn, std::vector<float>& input_gai
     if (output_parallel_gains != nullptr)
     {
         output_parallel_gains->GetGains(output_gains);
+    }
+    else if (auto* output_tv_gains = dynamic_cast<sfFDN::TimeVaryingParallelGains*>(output_gains_processor))
+    {
+        uint32_t samples_elapsed = ImGui::GetIO().DeltaTime * Settings::Instance().SampleRate();
+        samples_elapsed = std::max(samples_elapsed, static_cast<uint32_t>(N));
+        std::vector<float> input(samples_elapsed * N, 0.f);
+        std::vector<float> output(samples_elapsed * N, 0.f);
+
+        // Kinda hacky way to do this but if we make sure each channel are set to zeros except for one value, as long as
+        // that one value does not overlap between channels we should be able to work out the output gains for each
+        // channel
+        sfFDN::AudioBuffer input_buffer(samples_elapsed, 1, input);
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            input_buffer.GetChannelSpan(i).last(N)[i] = 1.f;
+        }
+
+        sfFDN::AudioBuffer output_buffer(samples_elapsed * N, 1, output);
+
+        output_tv_gains->Process(input_buffer, output_buffer);
+
+        for (auto i = 0; i < N; ++i)
+        {
+            output_gains[i] = output_buffer.GetChannelSpan(0).last(N)[i];
+        }
     }
     else
     {

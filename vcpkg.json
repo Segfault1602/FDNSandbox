@@ -1,9 +1,15 @@
 {
-  "dependencies": [
-    "fftw3",
-    "kissfft",
-    "nanobench",
-    "pffft",
-    "boost-math"
-  ]
+    "dependencies": [
+        "boost-dll",
+        "boost-math",
+        "eigen3",
+        "kissfft",
+        "libsamplerate",
+        "libsndfile",
+        "nanobench",
+        "nlohmann-json",
+        "pffft",
+        "quill",
+        "rtaudio"
+    ]
 }

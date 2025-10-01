@@ -3,12 +3,12 @@
 #include "fdn_analyzer.h"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <format>
-#include <iostream>
 #include <memory>
-#include <ranges>
 #include <span>
 #include <vector>
 
@@ -16,11 +16,15 @@
 #include <implot.h>
 
 #include "imgui_internal.h"
+#include <boost/dll/runtime_symbol_info.hpp>
+#include <nlohmann/json.hpp>
+#include <quill/LogMacros.h>
 
-#include <analysis/analysis.h>
+#include "analysis/analysis.h"
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft_utils.h>
 
+#include "fdn_config.h"
 #include "presets.h"
 #include "settings.h"
 #include "utils.h"
@@ -30,111 +34,83 @@
 
 namespace
 {
-constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
-constexpr size_t kBlockSize = 64;         // Define a constant block size for audio processing
+constexpr size_t kSystemBlockSize = 512; // System block size for audio processing
 
-std::unique_ptr<sfFDN::AudioProcessor> CreateFilterBank(const FDNConfig& config)
+struct MelFormatterContext
 {
-    if (config.delay_filter_type == DelayFilterType::Proportional)
-    {
-        std::vector<float> proportional_fb_gains(config.N, 0.f);
-        for (size_t i = 0; i < config.N; ++i)
-        {
-            proportional_fb_gains[i] = std::pow(config.feedback_gain, config.delays[i]);
-        }
+    std::span<const float> mel_frequencies;
+};
 
-        auto feedback_gains =
-            std::make_unique<sfFDN::ParallelGains>(sfFDN::ParallelGainsMode::Parallel, proportional_fb_gains);
-        return feedback_gains;
-    }
-    else if (config.delay_filter_type == DelayFilterType::OnePole)
-    {
-        auto filter_bank = std::make_unique<sfFDN::FilterBank>();
-        for (size_t i = 0; i < config.N; ++i)
-        {
-            auto filter = std::make_unique<sfFDN::OnePoleFilter>();
-            float b = 0.f;
-            float a = 0.f;
-            sfFDN::GetOnePoleAbsorption(config.t60_dc, config.t60_ny, Settings::Instance().SampleRate(),
-                                        config.delays[i], b, a);
-            filter->SetCoefficients(b, a);
-            filter_bank->AddFilter(std::move(filter));
-        }
-        return filter_bank;
-    }
-
-    assert(config.delay_filter_type == DelayFilterType::TwoFilter);
-    auto filter_bank = std::make_unique<sfFDN::FilterBank>();
-    for (size_t i = 0; i < config.N; ++i)
-    {
-        std::vector<float> sos = sfFDN::GetTwoFilter(config.t60s, config.delays[i], Settings::Instance().SampleRate());
-        const size_t num_stages = sos.size() / 6;
-        auto filter = std::make_unique<sfFDN::CascadedBiquads>();
-        filter->SetCoefficients(num_stages, sos);
-        filter_bank->AddFilter(std::move(filter));
-    }
-
-    return filter_bank;
-}
-
-std::unique_ptr<sfFDN::FDN> CreateFDN(const FDNConfig& config)
+int MelFormatter(double value, char* buff, int size, void* data)
 {
-    auto fdn = std::make_unique<sfFDN::FDN>(config.N, kBlockSize);
-
-    fdn->SetInputGains(config.input_gains);
-    fdn->SetOutputGains(config.output_gains);
-    fdn->SetDelays(config.delays);
-
-    if (!config.is_cascaded)
-    {
-        auto scalar_feedback_matrix = std::make_unique<sfFDN::ScalarFeedbackMatrix>(config.N);
-        scalar_feedback_matrix->SetMatrix(config.feedback_matrix);
-        fdn->SetFeedbackMatrix(std::move(scalar_feedback_matrix));
-    }
-    else
-    {
-        auto ffm = sfFDN::MakeFilterFeedbackMatrix(config.cascaded_feedback_matrix_info);
-        fdn->SetFeedbackMatrix(std::move(ffm));
-    }
-
-    fdn->SetFilterBank(CreateFilterBank(config));
-
-    constexpr size_t kNBands = 10;
-    std::vector<float> freqs(kNBands, 0.f);
-    constexpr float kUpperLimit = 16000.0f;
-    for (size_t i = 0; i < kNBands; ++i)
-    {
-        freqs[i] = kUpperLimit / std::pow(2.0f, static_cast<float>(kNBands - 1 - i));
-    }
-    std::vector<float> tc_sos = sfFDN::DesignGraphicEQ(config.tc_gains, freqs, Settings::Instance().SampleRate());
-
-    std::unique_ptr<sfFDN::CascadedBiquads> tc_filter = std::make_unique<sfFDN::CascadedBiquads>();
-    const size_t num_stages = tc_sos.size() / 6;
-    tc_filter->SetCoefficients(num_stages, tc_sos);
-    fdn->SetTCFilter(std::move(tc_filter));
-
-    return fdn;
-}
-
-int MelFormatter(double value, char* buff, int size, void*)
-{
-    std::vector<float> mels = audio_utils::GetMelFrequencies(512, 0.f, Settings::Instance().SampleRate() / 2.f);
+    MelFormatterContext context = *reinterpret_cast<MelFormatterContext*>(data);
     auto mel_index = static_cast<size_t>(value);
-    if (mel_index >= mels.size())
+    if (mel_index >= context.mel_frequencies.size())
     {
-        mel_index = mels.size() - 1; // Clamp to the last index if out of bounds
+        mel_index = context.mel_frequencies.size() - 1; // Clamp to the last index if out of bounds
     }
-    auto mel = static_cast<uint32_t>(mels[mel_index]);
+    auto mel = static_cast<uint32_t>(context.mel_frequencies[mel_index]);
     std::span<char> out_string(buff, size);
-    std::format_to(out_string.begin(), "{}", mel);
+    const std::format_to_n_result result = std::format_to_n(out_string.begin(), size, "{}", mel);
+    *result.out = '\0';
     return std::strlen(buff);
+}
+
+bool FancyButtons(const std::string_view label1, const std::string_view label2, uint32_t& selected)
+{
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+
+    uint32_t new_selected = selected;
+
+    if (selected == 0)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.3f, 0.6f, 0.6f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.3f, 0.7f, 0.7f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.3f, 0.8f, 0.8f));
+    }
+    if (ImGui::Button(label1.data(), ImVec2(50, 0)))
+    {
+        new_selected = 0;
+    }
+
+    if (selected == 0)
+    {
+        ImGui::PopStyleColor(3);
+    }
+    ImGui::PopStyleVar();
+
+    if (selected == 1)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.3f, 0.6f, 0.6f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.3f, 0.7f, 0.7f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.3f, 0.8f, 0.8f));
+    }
+
+    if (ImGui::Button(label2.data(), ImVec2(50, 0)))
+    {
+        new_selected = 1;
+    }
+
+    if (selected == 1)
+    {
+        ImGui::PopStyleColor(3);
+    }
+
+    bool changed = (selected != new_selected);
+    selected = new_selected;
+    return changed;
 }
 
 } // namespace
 
 FDNToolboxApp::FDNToolboxApp()
-    : fdn_analyzer_(Settings::Instance().SampleRate())
+    : fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
+    , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
+    , load_config_browser(0)
+    , save_config_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
 {
+    LOG_INFO(Settings::Instance().GetLogger(), "Starting FDN Toolbox");
+
     audio_manager_ = audio_manager::create_audio_manager();
     if (!audio_manager_)
     {
@@ -155,13 +131,38 @@ FDNToolboxApp::FDNToolboxApp()
             },
             kSystemBlockSize))
     {
-        throw std::runtime_error("Failed to start audio stream");
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
     }
+    LOG_INFO(Settings::Instance().GetLogger(), "Audio stream started");
+
+    save_ir_browser.SetTitle("Save Impulse Response");
+    save_ir_browser.SetTypeFilters({".wav"});
+
+    load_config_browser.SetTitle("Load FDN Configuration");
+    load_config_browser.SetTypeFilters({".json"});
+
+    save_config_browser.SetTitle("Save FDN Configuration");
+    save_config_browser.SetTypeFilters({".json"});
 
     show_tc_filter_designer_ = false;
-
     fdn_config_ = presets::kDefaultFDNConfig;
+    fdn_config_A_ = presets::kDefaultFDNConfig;
+    fdn_config_B_ = presets::kDefaultFDNConfig;
 
+    spectrogram_info_ = {
+#ifndef NDEBUG
+        .fft_size = 1024,
+        .overlap = 300,
+        .window_size = 1024,
+#else
+        .fft_size = 2048,
+        .overlap = 400,
+        .window_size = 512,
+#endif
+        .samplerate = Settings::Instance().SampleRate(),
+        .window_type = audio_utils::FFTWindowType::Hann};
+
+    gui_fdn_ = presets::CreateDefaultFDN();
     UpdateFDN();
 }
 
@@ -179,16 +180,16 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
 
     if (frame_size != kSystemBlockSize)
     {
-        std::cerr << "Frame size mismatch: expected " << kSystemBlockSize << ", got " << frame_size << "\n";
+        LOG_ERROR(Settings::Instance().GetLogger(), "Frame size mismatch: expected {}, got {}", kSystemBlockSize,
+                  frame_size);
         return;
     }
 
     if (other_fdn_ != nullptr)
     {
-
         audio_fdn_ = std::move(other_fdn_);
-        audio_fdn_->SetDirectGain(0.f); // Direct gain is controlled by the dry/wet mix instead
         other_fdn_ = nullptr;
+        audio_fdn_->SetDirectGain(0.f); // Direct gain is controlled by the dry/wet mix instead
     }
 
     if (audio_fdn_ == nullptr)
@@ -215,7 +216,7 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         audio_state_ = AudioState::Idle; // Reset state after processing impulse response
     }
 
-    audio_file_manager_->process_block(input_data.data(), kSystemBlockSize, 1);
+    audio_file_manager_->process_block(input_data, kSystemBlockSize, 1);
 
     // Process the FDN for this block
     audio_fdn_->Process(input_audio_buffer, output_audio_buffer);
@@ -240,6 +241,13 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
     const float allowed_time = (1e9 / Settings::Instance().SampleRate()) * frame_size; // in nanoseconds
     float cpu_usage = static_cast<float>(duration) / allowed_time;
     fdn_cpu_usage_.store(cpu_usage);
+
+    static size_t highwater_mark = 0;
+    if (duration > highwater_mark)
+    {
+        highwater_mark = duration;
+        LOG_WARNING(Settings::Instance().GetLogger(), "New CPU highwater mark: {:.2f}%", cpu_usage * 100.f);
+    }
 }
 
 void FDNToolboxApp::loop()
@@ -280,7 +288,6 @@ void FDNToolboxApp::loop()
     }
 
     ImGui::Begin("FDNToolbox", nullptr, window_flags);
-    static bool show_audio_config_window = false;
 
     ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
     ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
@@ -292,14 +299,15 @@ void FDNToolboxApp::loop()
         ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
 
         ImGuiID dock_main_id = dockspace_id;
+
         ImGuiID dock_id_fdn = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.25f, nullptr, &dock_main_id);
         ImGuiID dock_id_ir = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.25f, nullptr, &dock_main_id);
-        // ImGuiID dock_id_viz = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_None, 1.f, nullptr,
-        // &dock_main_id);
 
         ImGui::DockBuilderDockWindow("Impulse Response", dock_id_ir);
         ImGui::DockBuilderDockWindow("Audio Player", dock_id_ir);
+        ImGui::DockBuilderDockWindow("Settings", dock_id_ir);
         ImGui::DockBuilderDockWindow("FDN Configurator", dock_id_fdn);
+        ImGui::DockBuilderDockWindow("Extras", dock_id_fdn);
         ImGui::DockBuilderDockWindow("Visualization", dock_main_id);
         ImGui::DockBuilderDockWindow("Spectrogram", dock_main_id);
         ImGui::DockBuilderDockWindow("Spectrum", dock_main_id);
@@ -312,39 +320,11 @@ void FDNToolboxApp::loop()
         ImGui::DockBuilderFinish(dockspace_id);
     }
 
-    if (ImGui::BeginMainMenuBar())
-    {
-        if (ImGui::BeginMenu("File"))
-        {
-            ImGui::MenuItem("Save IR");
-            constexpr const char* default_filename = "impulse_response.wav";
-            utils::WriteAudioFile(default_filename, fdn_analyzer_.GetImpulseResponse(),
-                                  Settings::Instance().SampleRate());
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Options"))
-        {
-            ImGui::MenuItem("Audio Menu", nullptr, &show_audio_config_window);
-
-            ImGui::EndMenu();
-        }
-        ImGui::EndMainMenuBar();
-    }
-
-    ImGui::ShowMetricsWindow();
-
-    if (show_audio_config_window)
-    {
-        if (ImGui::Begin("Audio", &show_audio_config_window))
-        {
-            DrawAudioDeviceGUI();
-            ImGui::End();
-        }
-    }
+    DrawMainMenuBar();
 
     bool config_changed = false;
-    config_changed = DrawFDNConfigurator(fdn_config_);
+    config_changed = DrawFDNConfigurator();
+    config_changed |= DrawFDNExtras(config_changed);
 
     if (config_changed)
     {
@@ -354,6 +334,8 @@ void FDNToolboxApp::loop()
     DrawImpulseResponse();
 
     DrawAudioPlayer();
+
+    DrawSettingsWindow();
 
     DrawVisualization();
 
@@ -368,21 +350,164 @@ void FDNToolboxApp::loop()
 
 void FDNToolboxApp::UpdateFDN()
 {
-    std::cout << "Configuration changed, updating FDN...\n";
+    LOG_INFO(Settings::Instance().GetLogger(), "Configuration changed, updating FDN...");
+    auto start = std::chrono::high_resolution_clock::now();
 
-    gui_fdn_ = CreateFDN(fdn_config_);
+    gui_fdn_ = CreateFDNFromConfig(fdn_config_, Settings::Instance().SampleRate());
     gui_fdn_->SetDirectGain(0.f);
-    fdn_analyzer_.SetFDN(CreateFDN(fdn_config_));
 
-    other_fdn_ = CreateFDN(fdn_config_);
+    fdn_analyzer_.SetFDN(CreateFDNFromConfig(fdn_config_, Settings::Instance().SampleRate()));
+
+    other_fdn_ = CreateFDNFromConfig(fdn_config_, Settings::Instance().SampleRate());
+
+    auto end = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> duration = end - start;
+    LOG_INFO(Settings::Instance().GetLogger(), "FDN updated in {} milliseconds", duration.count());
 }
 
-bool FDNToolboxApp::DrawFDNConfigurator(FDNConfig& fdn_config)
+void FDNToolboxApp::DrawMainMenuBar()
+{
+    static bool show_audio_config_window = false;
+    if (ImGui::BeginMainMenuBar())
+    {
+        if (ImGui::BeginMenu("File"))
+        {
+            if (ImGui::MenuItem("Save IR"))
+            {
+                save_ir_browser.Open();
+            }
+
+            if (ImGui::MenuItem("Load Config"))
+            {
+                load_config_browser.Open();
+            }
+
+            if (ImGui::MenuItem("Save Config"))
+            {
+                save_config_browser.Open();
+            }
+
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Options"))
+        {
+            ImGui::MenuItem("Audio Menu", nullptr, &show_audio_config_window);
+
+            ImGui::Separator();
+
+            if (ImGui::MenuItem("Save current to B"))
+            {
+                fdn_config_B_ = fdn_config_;
+            }
+
+            if (ImGui::MenuItem("Save current to A"))
+            {
+                fdn_config_A_ = fdn_config_;
+            }
+
+            ImGui::EndMenu();
+        }
+
+        static uint32_t selected_config = 0;
+        if (FancyButtons("A", "B", selected_config))
+        {
+            if (selected_config == 0)
+            {
+                fdn_config_B_ = fdn_config_;
+                fdn_config_ = fdn_config_A_;
+            }
+            else
+            {
+                fdn_config_A_ = fdn_config_;
+                fdn_config_ = fdn_config_B_;
+            }
+
+            UpdateFDN();
+        }
+
+        float fps = ImGui::GetIO().Framerate;
+        if (fps >= 58.f)
+        {
+            ImGui::Text("FPS: %.1f", fps);
+        }
+        else if (fps >= 50.f)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "FPS: %.1f", fps);
+        }
+        else
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "FPS: %.1f", fps);
+        }
+
+        ImGui::EndMainMenuBar();
+    }
+
+    if (show_audio_config_window)
+    {
+        if (ImGui::Begin("Audio", &show_audio_config_window))
+        {
+            DrawAudioDeviceGUI();
+            ImGui::End();
+        }
+    }
+
+    save_ir_browser.Display();
+    load_config_browser.Display();
+    save_config_browser.Display();
+
+    if (save_ir_browser.HasSelected())
+    {
+        std::string filename = save_ir_browser.GetSelected().string();
+        if (!filename.ends_with(".wav"))
+        {
+            filename += ".wav"; // Ensure the file has a .wav extension
+        }
+        utils::WriteAudioFile(filename, fdn_analyzer_.GetImpulseResponse(), Settings::Instance().SampleRate());
+        save_ir_browser.ClearSelected();
+    }
+
+    if (load_config_browser.HasSelected())
+    {
+        std::string filename = load_config_browser.GetSelected().string();
+        try
+        {
+            fdn_config_ = FDNConfig::LoadFromFile(filename);
+            UpdateFDN();
+        }
+        catch (const std::exception& e)
+        {
+            LOG_ERROR(Settings::Instance().GetLogger(), "Error loading configuration: {}", e.what());
+        }
+        load_config_browser.ClearSelected();
+    }
+
+    if (save_config_browser.HasSelected())
+    {
+        std::string filename = save_config_browser.GetSelected().string();
+        if (!filename.ends_with(".json"))
+        {
+            filename += ".json"; // Ensure the file has a .json extension
+        }
+
+        try
+        {
+            FDNConfig::SaveToFile(filename, fdn_config_);
+        }
+        catch (const std::exception& e)
+        {
+            LOG_ERROR(Settings::Instance().GetLogger(), "Error saving configuration: {}", e.what());
+        }
+        save_config_browser.ClearSelected();
+    }
+}
+
+bool FDNToolboxApp::DrawFDNConfigurator()
 {
     static uint32_t random_seed = 0;
 
-    static int min_delay = kBlockSize * 2;
-    static int max_delay = *std::max_element(fdn_config.delays.begin(), fdn_config.delays.end());
+    static int min_delay = Settings::Instance().BlockSize() * 2;
+    static int max_delay = 6000;
 
     // Limit FDN size between 4 and 32 channels
     constexpr uint32_t kNMin = 4;
@@ -412,73 +537,72 @@ bool FDNToolboxApp::DrawFDNConfigurator(FDNConfig& fdn_config)
         random_seed = 0; // Reset to zero when unchecked
     }
 
-    DrawInputOutputGainsPlot(gui_fdn_.get());
-    DrawDelaysPlot(gui_fdn_.get(), max_delay);
-    DrawFeedbackMatrixPlot(gui_fdn_.get());
+    DrawInputOutputGainsPlot(fdn_config_);
+    DrawDelaysPlot(fdn_config_, max_delay);
+    DrawFeedbackMatrixPlot(fdn_config_);
 
+    uint32_t N = fdn_config_.N;
     bool fdn_size_changed = false;
-    fdn_size_changed = ImGui::SliderScalar("N", ImGuiDataType_U32, (&fdn_config.N), &kNMin, &kNMax, nullptr,
-                                           ImGuiSliderFlags_AlwaysClamp);
+    fdn_size_changed =
+        ImGui::SliderScalar("N", ImGuiDataType_U32, (&N), &kNMin, &kNMax, nullptr, ImGuiSliderFlags_AlwaysClamp);
 
     config_changed |= fdn_size_changed;
-    if (fdn_size_changed)
+    fdn_config_.N = N;
+
+    static bool transpose = false;
+    if (ImGui::Checkbox("Transpose", &transpose))
     {
-        gui_fdn_->SetN(fdn_config.N);
-        if (fdn_config.N != fdn_config.input_gains.size())
-        {
-            fdn_config.input_gains.resize(fdn_config.N, 0.5f);
-        }
-        if (fdn_config.N != fdn_config.output_gains.size())
-        {
-            fdn_config.output_gains.resize(fdn_config.N, 0.5f);
-        }
-        if (fdn_config.N != fdn_config.delays.size())
-        {
-            fdn_config.delays.resize(fdn_config.N, 500);
-        }
-        if (fdn_config.N * fdn_config.N != fdn_config.feedback_matrix.size())
-        {
-            fdn_config.feedback_matrix.resize(fdn_config.N * fdn_config.N, 0.0f);
-        }
+        fdn_config_.transposed = transpose;
+        config_changed = true;
     }
 
-    if (ImGui::TreeNode("Edit input gains"))
+    config_changed |= DrawInputGainsWidget(fdn_config_);
+    config_changed |= DrawOutputGainsWidget(fdn_config_);
+    config_changed |= DrawDelayLengthsWidget(fdn_config_, min_delay, max_delay, random_seed);
+    config_changed |= DrawScalarMatrixWidget(fdn_config_, random_seed);
+    config_changed |= DrawDelayFilterWidget(fdn_config_);
+    config_changed |= DrawToneCorrectionFilterDesigner(fdn_config_);
+
+    ImGui::End();
+    return config_changed;
+}
+
+bool FDNToolboxApp::DrawFDNExtras(bool force_update)
+{
+    bool config_changed = force_update;
+    if (!ImGui::Begin("Extras"))
     {
-        config_changed |= DrawGainsWidget(fdn_config.input_gains);
-        ImGui::TreePop();
-    }
-    if (ImGui::TreeNode("Edit output gains"))
-    {
-        config_changed |= DrawGainsWidget(fdn_config.output_gains);
-        ImGui::TreePop();
-    }
-
-    config_changed |=
-        DrawDelayLengthsWidget(fdn_config.N, fdn_config.delays, min_delay, max_delay, random_seed, fdn_size_changed);
-
-    config_changed |= DrawScalarMatrixWidget(fdn_config, random_seed, fdn_size_changed);
-
-    if (ImGui::TreeNode("Delay Filters"))
-    {
-        config_changed |= DrawDelayFilterWidget(fdn_config);
-
-        ImGui::TreePop();
+        ImGui::End();
+        return config_changed; // If the window is not open, return early
     }
 
-    if (ImGui::TreeNode("Tone Correction Filters"))
-    {
-        if (ImGui::Button("Edit"))
-        {
-            std::cout << "Opening filter designer...\n";
-            show_tc_filter_designer_ = true;
-            config_changed = true;
-        }
+    ImGui::Text("Input Gain Stage");
+    ImGui::Separator();
+    ImGui::TextWrapped(
+        "The following extras are added after the input gain stage but before entering the feedback loop");
 
-        if (show_tc_filter_designer_)
-        {
-            config_changed |= DrawToneCorrectionFilterDesigner(fdn_config);
-        }
-        ImGui::TreePop();
+    config_changed |= ImGui::Checkbox("Extra Delays", &fdn_config_.use_extra_delays);
+
+    if (fdn_config_.use_extra_delays)
+    {
+        config_changed |= DrawExtraDelayWidget(fdn_config_, config_changed);
+    }
+    else
+    {
+        fdn_config_.input_stage_delays.clear();
+    }
+
+    static bool extra_schroeder_allpass = false;
+    config_changed |= ImGui::Checkbox("Extra Schroeder Allpass", &extra_schroeder_allpass);
+
+    if (extra_schroeder_allpass)
+    {
+        config_changed |= DrawExtraSchroederAllpassWidget(fdn_config_, config_changed);
+    }
+    else
+    {
+        fdn_config_.schroeder_allpass_delays.clear();
+        fdn_config_.schroeder_allpass_gains.clear();
     }
 
     ImGui::End();
@@ -539,10 +663,10 @@ void FDNToolboxApp::DrawAudioPlayer()
     if (ImGui::Button("Impulse"))
     {
         audio_state_ = AudioState::ImpulseRequested;
-        std::cout << "Playing impulse response...\n";
+        LOG_INFO(Settings::Instance().GetLogger(), "Playing impulse response...");
     }
 
-    constexpr const char* kAudioFiles[] = {"drumloop.wav", "guitar_2003.wav", "bleepsandbloops.wav"};
+    constexpr const char* kAudioFiles[] = {"drumloop.wav", "guitar.wav", "bleepsandbloops.wav", "saxophone.wav"};
     static int selected_audio_file = 0;
 
     ImGui::SameLine();
@@ -557,13 +681,17 @@ void FDNToolboxApp::DrawAudioPlayer()
     {
         if (ImGui::Button("Play"))
         {
-            if (audio_file_manager_->open_audio_file(kAudioFiles[selected_audio_file]))
+            auto exe_path = boost::dll::program_location();
+            auto parent_path = exe_path.parent_path();
+            auto audio_path = parent_path / "audio" / kAudioFiles[selected_audio_file];
+            LOG_INFO(Settings::Instance().GetLogger(), "Playing audio file: {}", audio_path.string());
+            if (audio_file_manager_->open_audio_file(audio_path.string()))
             {
                 audio_file_manager_->play(true);
             }
             else
             {
-                std::cerr << "Failed to open audio file.\n";
+                LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file.");
             }
         }
     }
@@ -605,6 +733,94 @@ void FDNToolboxApp::DrawAudioPlayer()
     ImGui::End();
 }
 
+void FDNToolboxApp::DrawSettingsWindow()
+{
+    if (!ImGui::Begin("Settings"))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("Sample Rate: %u Hz", Settings::Instance().SampleRate());
+    ImGui::Separator();
+
+    ImGui::Text("Spectrogram Settings");
+    ImGui::Separator();
+
+    constexpr int kColOffset = 100;
+
+    constexpr std::array kSpectrogramTypes = {"STFT", "Mel"};
+    static int selected_spectrogram_type = static_cast<int>(spectrogram_type_);
+    ImGui::Text("Type:");
+    ImGui::SameLine(kColOffset);
+    ImGui::SetNextItemWidth(100);
+    if (ImGui::Combo("##Type", &selected_spectrogram_type, kSpectrogramTypes.data(),
+                     static_cast<int>(kSpectrogramTypes.size())))
+    {
+        spectrogram_type_ = static_cast<SpectrogramType>(selected_spectrogram_type);
+        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+    }
+    constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};
+    constexpr std::array kWindowSizeOptions = {"256", "512", "1024", "2048", "4096", "8192"};
+    static int selected_fft_size_index = 1;    // Default to 1024
+    static int selected_window_size_index = 2; // Default to 512
+    static float overlap = 0.5f;
+
+    ImGui::Text("FFT Size:");
+    ImGui::SameLine(kColOffset);
+    ImGui::SetNextItemWidth(100);
+    if (ImGui::Combo("##FFTSize", &selected_fft_size_index, kFFTSizeOptions.data(),
+                     static_cast<int>(kFFTSizeOptions.size())))
+    {
+        spectrogram_info_.fft_size = 512 * (1 << selected_fft_size_index);
+        if (spectrogram_info_.fft_size < spectrogram_info_.window_size)
+        {
+            spectrogram_info_.window_size = spectrogram_info_.fft_size;
+            spectrogram_info_.overlap = static_cast<uint32_t>(overlap * spectrogram_info_.window_size);
+            selected_window_size_index = selected_fft_size_index + 1;
+        }
+
+        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+    }
+
+    ImGui::Text("Window Size:");
+    ImGui::SameLine(kColOffset);
+    ImGui::SetNextItemWidth(100);
+    if (ImGui::Combo("##WindowSize", &selected_window_size_index, kWindowSizeOptions.data(),
+                     static_cast<int>(kWindowSizeOptions.size())))
+    {
+        spectrogram_info_.window_size = 256 * (1 << selected_window_size_index);
+        spectrogram_info_.overlap = static_cast<uint32_t>(overlap * spectrogram_info_.window_size);
+        if (spectrogram_info_.window_size > spectrogram_info_.fft_size)
+        {
+            spectrogram_info_.fft_size = spectrogram_info_.window_size;
+            selected_fft_size_index = selected_window_size_index - 1;
+        }
+        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+    }
+
+    ImGui::Text("Overlap:");
+    ImGui::SameLine(kColOffset);
+    ImGui::SetNextItemWidth(100);
+    if (ImGui::SliderFloat("##Overlap", &overlap, 0.01f, 0.95f, "%.2f"))
+    {
+        spectrogram_info_.overlap = static_cast<uint32_t>(overlap * spectrogram_info_.window_size);
+        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+    }
+
+    ImGui::Text("Window Type:");
+    ImGui::SameLine(kColOffset);
+    static int selected_window_type = 2; // Default to Hann
+    ImGui::SetNextItemWidth(100);
+    if (ImGui::Combo("##WindowType", &selected_window_type, "Rectangular\0Hamming\0Hann\0Blackman\0"))
+    {
+        spectrogram_info_.window_type = static_cast<audio_utils::FFTWindowType>(selected_window_type);
+        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+    }
+
+    ImGui::End(); // End the Settings window
+}
+
 void FDNToolboxApp::DrawVisualization()
 {
     DrawSpectrogram();
@@ -625,34 +841,48 @@ void FDNToolboxApp::DrawSpectrogram()
         return;
     }
 
-    static float min_dB = -50.0;
+    static float min_dB = -80.0;
     static float max_dB = 10.0;
+    static std::vector<float> mels{};
+    static MelFormatterContext ctx{.mel_frequencies = mels};
 
     ImPlot::PushColormap(ImPlotColormap_Plasma);
 
-    if (ImPlot::BeginPlot("##Spectrogram", ImVec2(-1, -1), ImPlotFlags_NoMouseText))
+    if (ImPlot::BeginPlot("##Spectrogram", ImVec2(ImGui::GetCurrentWindow()->Size[0] * 0.92f, -1),
+                          ImPlotFlags_NoMouseText))
     {
-        fdn_analysis::SpectrogramData spectrogram_data = fdn_analyzer_.GetSpectrogram();
+        fdn_analysis::SpectrogramData spectrogram_data =
+            fdn_analyzer_.GetSpectrogram(spectrogram_info_, spectrogram_type_ == SpectrogramType::Mel);
+
+        double bin_count = Settings::Instance().SampleRate() / 2.0;
+
+        if (spectrogram_type_ == SpectrogramType::Mel)
+        {
+            mels = audio_utils::GetMelFrequencies(spectrogram_data.bin_count, 0.f,
+                                                  Settings::Instance().SampleRate() / 2.f);
+            ctx.mel_frequencies = mels;
+            ImPlot::SetupAxisFormat(ImAxis_Y1, MelFormatter, &ctx);
+            bin_count = spectrogram_data.bin_count;
+        }
 
         const double tmin = 0.f;
         const double tmax =
             fdn_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
         ImPlot::SetupAxisLimits(ImAxis_X1, tmin, tmax, ImGuiCond_Always);
-        ImPlot::SetupAxisFormat(ImAxis_Y1, MelFormatter, nullptr);
-
-        const std::array frequencies_ticks = {5.0, 10.0, 50.0};
-        ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_ticks.data(), frequencies_ticks.size(), nullptr, false);
-
-        double bin_count = static_cast<double>(spectrogram_data.bin_count);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.f, bin_count, ImGuiCond_Always);
 
         ImPlot::PlotHeatmap("##Spectrogram", spectrogram_data.data.data(), spectrogram_data.bin_count,
-                            spectrogram_data.frame_count, min_dB, max_dB, nullptr, {tmin, 0}, {tmax, bin_count});
+                            spectrogram_data.frame_count, min_dB, max_dB, nullptr, {tmin, 0}, {tmax, bin_count},
+                            ImPlotHeatmapFlags_ColMajor);
+
+        // Add colorbar
 
         ImPlot::EndPlot();
     }
-    ImPlot::PopColormap();
 
     ImGui::SameLine();
+
+    ImPlot::ColormapScale("##HeatScale", min_dB, max_dB, ImVec2(-1, -1));
 
     if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
@@ -664,6 +894,7 @@ void FDNToolboxApp::DrawSpectrogram()
         ImGui::SliderFloat("Min", &min_dB, -100, max_dB);
         ImGui::EndPopup();
     }
+    ImPlot::PopColormap();
 
     ImGui::End(); // End the Spectrogram window
 }
@@ -821,11 +1052,16 @@ void FDNToolboxApp::DrawFilterResponse()
         return;
     }
 
-    auto filter_data = fdn_analyzer_.GetFilterData();
-    assert(fdn_config_.N == filter_data.mag_responses.size());
-
     if (ImGui::BeginTabBar("Filter Responses"))
     {
+        auto filter_data = fdn_analyzer_.GetFilterData();
+        float min_mag = 0.f;
+        for (const auto& mag_response : filter_data.mag_responses)
+        {
+            auto min_response = *std::ranges::min_element(mag_response);
+            min_mag = std::min(min_response, min_mag);
+        }
+
         if (ImGui::BeginTabItem("Attenuation filters"))
         {
             if (ImPlot::BeginSubplots("Attenuation Filters Mag/Phase", 2, 1, ImVec2(-1, -1),
@@ -835,7 +1071,10 @@ void FDNToolboxApp::DrawFilterResponse()
                                       ImPlotFlags_None))
                 {
                     ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_None);
-                    ImPlot::SetupAxes("Frequency", "Magnitude (dB)", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+                    // ImPlot::SetupAxes("Frequency", "Magnitude (dB)", ImPlotAxisFlags_AutoFit,
+                    // ImPlotAxisFlags_AutoFit);
+
+                    // ImPlot::SetupAxisLimits(ImAxis_Y1, 0, min_mag * 1.5f, ImPlotCond_Once);
 
                     ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
                     ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_ticks.data(), frequencies_ticks.size(), nullptr,
@@ -977,9 +1216,12 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
         }
         else
         {
-            for (auto [octave_band_name, edc] : std::views::zip(octave_band_names, edc_data.edc_octaves))
+            for (auto i = 0; i < octave_band_names.size(); ++i)
             {
-                ImPlot::PlotLine(octave_band_name, fdn_analyzer_.GetTimeData().data(), edc.data(), edc.size());
+                constexpr uint32_t kDownsampleFactor = 4;
+                ImPlot::PlotLine(octave_band_names[i], fdn_analyzer_.GetTimeData().data(),
+                                 edc_data.edc_octaves[i].data(), edc_data.edc_octaves[i].size() / kDownsampleFactor,
+                                 ImPlotLineFlags_None, 0, kDownsampleFactor * sizeof(float));
             }
         }
 
@@ -1046,16 +1288,17 @@ void FDNToolboxApp::DrawEchoDensity()
 
     if (ImPlot::BeginPlot("Impulse Response", ImVec2(-1, -1), ImPlotFlags_NoLegend))
     {
-
-        ImPlot::SetupAxes("Sample", "Amplitude");
-        ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0f, 1.5f, ImPlotCond_Once);
-
         auto ir = fdn_analyzer_.GetImpulseResponse();
+        auto time_data = fdn_analyzer_.GetTimeData();
 
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, ir.size() - 1);
+        ImPlot::SetupAxes("Sample", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_None);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0f, 1.5f, ImPlotCond_Once);
+        ImPlot::SetupAxisLimits(ImAxis_X1, -0.01f, time_data.back(), ImPlotCond_Once);
+
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, -0.01, time_data.back());
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -1.0f, 2.0f);
 
-        ImPlot::PlotLine("Impulse Response", ir.data(), ir.size());
+        ImPlot::PlotLine("Impulse Response", time_data.data(), ir.data(), ir.size());
 
         ImPlot::PlotLine("Echo Density", echo_density_data.sparse_indices.data(), echo_density_data.echo_density.data(),
                          echo_density_data.sparse_indices.size());
@@ -1075,7 +1318,7 @@ void FDNToolboxApp::DrawT60s()
     }
 
     const float db_start = -5;
-    const float db_end = -20;
+    const float db_end = -15;
 
     if (ImPlot::BeginPlot("RT60s", ImVec2(-1, -1), ImPlotFlags_NoLegend))
     {
@@ -1099,118 +1342,6 @@ void FDNToolboxApp::DrawT60s()
     ImGui::End();
 }
 
-bool FDNToolboxApp::DrawToneCorrectionFilterDesigner(FDNConfig& fdn_config)
-{
-    if (!ImGui::Begin("Filter Designer", &show_tc_filter_designer_))
-    {
-        ImGui::End();
-        return false;
-    }
-
-    bool config_changed = false;
-
-    constexpr size_t kNBands = 10; // Number of bands in the filter designer
-    static std::vector<float> gains(kNBands, 0.0f);
-    static std::vector<float> frequencies(0, 0.f);
-
-    // Oversampled vectors for plotting
-    static std::vector<float> gains_plot;
-    static std::vector<float> frequencies_plot;
-
-    bool point_changed = false;
-
-    // Initialize with default values if empty
-    if (fdn_config.tc_gains.size() == 0)
-    {
-        fdn_config.tc_gains = gains;
-    }
-    else // Use the existing tc_gains from the config
-    {
-        gains = fdn_config.tc_gains;
-    }
-
-    if (frequencies.size() == 0)
-    {
-        frequencies.resize(kNBands);
-        constexpr float kUpperLimit = 16000.0f;
-        for (size_t i = 0; i < kNBands; ++i)
-        {
-            frequencies[i] = kUpperLimit / std::pow(2.0f, static_cast<float>(kNBands - 1 - i));
-        }
-    }
-
-    if (frequencies_plot.size() == 0) // Only runs on first call
-    {
-        frequencies_plot =
-            utils::LogSpace(std::log10(frequencies[0] + 1e-6f), std::log10(frequencies.back() - 1.f), 512);
-        gains_plot = utils::pchip(frequencies, gains, frequencies_plot);
-
-        point_changed = true; // Force initial plot update
-    }
-
-    static std::vector<float> H;
-
-    if (ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.95f), ImPlotFlags_None))
-    {
-        ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)");
-        ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, 20000.0f, ImPlotCond_Always);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, -10.0f, 10.0f, ImPlotCond_Once);
-        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, Settings::Instance().SampleRate() / 2);
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -60.f, 60.f);
-
-        static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
-        ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), frequencies_d.size(), nullptr, false);
-
-        for (size_t i = 0; i < frequencies.size(); ++i)
-        {
-            double freq = frequencies[i]; // The frequency should stay constant
-            double gain = gains[i];
-            point_changed |= ImPlot::DragPoint(i, &freq, &gain, ImVec4(0, 0.9f, 0, 0), 10);
-            gains[i] = std::clamp(static_cast<float>(gain), -10.f, 10.0f); // Update the gain value
-        }
-
-        if (point_changed)
-        {
-            gains_plot = utils::pchip(frequencies, gains, frequencies_plot);
-
-            std::vector<float> sos = sfFDN::DesignGraphicEQ(gains, frequencies, Settings::Instance().SampleRate());
-            H = utils::AbsFreqz(sos, frequencies_plot, Settings::Instance().SampleRate());
-
-            // To db gain
-            for (size_t i = 0; i < H.size(); ++i)
-            {
-                H[i] = 20.f * std::log10(H[i]);
-            }
-        }
-
-        ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
-        ImPlot::PlotScatter("RT60", frequencies.data(), gains.data(), gains.size());
-
-        if (H.size() > 0)
-        {
-            ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
-            ImPlot::PlotLine("Filter Response", frequencies_plot.data(), H.data(), frequencies_plot.size());
-        }
-
-        ImPlot::EndPlot();
-    }
-
-    fdn_config.tc_gains = gains;
-
-    if (ImGui::Button("Apply"))
-    {
-        std::cout << "Applying filter design..." << std::endl;
-        show_tc_filter_designer_ = false;
-        fdn_config.tc_gains = gains;
-        config_changed = true;
-    }
-
-    ImGui::End();
-    return config_changed;
-}
-
 void FDNToolboxApp::DrawAudioDeviceGUI()
 {
     static std::vector<std::string> supported_audio_drivers = audio_manager_->get_supported_audio_drivers();
@@ -1228,7 +1359,7 @@ void FDNToolboxApp::DrawAudioDeviceGUI()
             if (ImGui::Selectable(supported_audio_drivers[i].c_str(), is_selected))
             {
                 selected_audio_driver = i;
-                std::cout << "Selected Audio Driver: " << supported_audio_drivers[i] << std::endl;
+                LOG_INFO(Settings::Instance().GetLogger(), "Switching audio driver to {}", supported_audio_drivers[i]);
                 audio_manager_->set_audio_driver(supported_audio_drivers[i]);
                 // Refresh audio devices
                 output_devices = audio_manager_->get_output_devices_name();
@@ -1255,7 +1386,7 @@ void FDNToolboxApp::DrawAudioDeviceGUI()
             if (ImGui::Selectable(output_devices[i].c_str(), is_selected))
             {
                 selected_output_device = i;
-                std::cout << "Selected Output Device: " << output_devices[i] << "\n";
+                LOG_INFO(Settings::Instance().GetLogger(), "Switching output device to {}", output_devices[i]);
                 audio_manager_->set_output_device(output_devices[i]);
             }
 
@@ -1279,7 +1410,7 @@ void FDNToolboxApp::DrawAudioDeviceGUI()
                     },
                     kSystemBlockSize))
             {
-                std::cerr << "Failed to start audio stream" << std::endl;
+                LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
                 stream_running = false;
             }
         }
