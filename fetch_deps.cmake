@@ -37,6 +37,7 @@ target_include_directories(
 )
 target_link_libraries(imgui ${OPENGL_LIBRARIES} glfw)
 
+if (APPLE)
 add_library(
     imgui_metal STATIC
     ${IMGUI_SOURCES}
@@ -47,6 +48,8 @@ add_library(
 
 target_include_directories(imgui_metal PUBLIC ${IMGUI_INCLUDE_DIR} ${GLFW_INCLUDE_DIR} ${GLAD_INCLUDE_DIR})
 target_link_libraries(imgui_metal glfw)
+endif()
+
 
 FetchContent_Declare(implot GIT_REPOSITORY https://github.com/epezent/implot.git GIT_TAG master)
 FetchContent_MakeAvailable(implot)

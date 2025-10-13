@@ -1,9 +1,11 @@
 #include "fdn_config.h"
 
 #include "settings.h"
+
+#include "sffdn/sffdn.h"
+
 #include "sffdn/audio_processor.h"
 #include "sffdn/filter_design.h"
-#include "sffdn/sffdn.h"
 
 #include <fstream>
 
@@ -21,13 +23,13 @@ class MatrixVisitor
 
     void operator()(const sfFDN::CascadedFeedbackMatrixInfo& matrix_info) const
     {
-        auto filter_matrix = sfFDN::MakeFilterFeedbackMatrix(matrix_info);
+        auto filter_matrix = std::make_unique<sfFDN::FilterFeedbackMatrix>(matrix_info);
         fdn_->SetFeedbackMatrix(std::move(filter_matrix));
     }
 
     void operator()(const std::vector<float>& matrix_info) const
     {
-        auto scalar_matrix = std::make_unique<sfFDN::ScalarFeedbackMatrix>(fdn_->GetN(), matrix_info);
+        auto scalar_matrix = std::make_unique<sfFDN::ScalarFeedbackMatrix>(fdn_->GetOrder(), matrix_info);
         fdn_->SetFeedbackMatrix(std::move(scalar_matrix));
     }
 
@@ -37,8 +39,7 @@ class MatrixVisitor
 
 std::unique_ptr<sfFDN::AudioProcessor> CreateInputGainsFromConfig(const FDNConfig& config)
 {
-    auto input_gains =
-        std::make_unique<sfFDN::ParallelGains>(sfFDN::ParallelGainsMode::Multiplexed, config.input_gains);
+    auto input_gains = std::make_unique<sfFDN::ParallelGains>(sfFDN::ParallelGainsMode::Split, config.input_gains);
 
     if (!config.use_extra_delays && config.schroeder_allpass_delays.empty())
     {
@@ -51,9 +52,7 @@ std::unique_ptr<sfFDN::AudioProcessor> CreateInputGainsFromConfig(const FDNConfi
     {
         assert(config.input_stage_delays.size() == config.N);
 
-        auto delaybank = std::make_unique<sfFDN::DelayBank>();
-        delaybank->SetDelays(config.input_stage_delays, 128);
-
+        auto delaybank = std::make_unique<sfFDN::DelayBank>(config.input_stage_delays, 128);
         chain_processor->AddProcessor(std::move(delaybank));
     }
 
@@ -98,8 +97,8 @@ void to_json(nlohmann::json& j, const FDNConfig& p)
             else if constexpr (std::is_same_v<T, sfFDN::CascadedFeedbackMatrixInfo>)
             {
                 j["filter_matrix"] = {
-                    {"N", arg.N},
-                    {"num_stages", arg.K},
+                    {"N", arg.channel_count},
+                    {"num_stages", arg.stage_count},
                     {"delays", arg.delays},
                     {"matrices", arg.matrices},
                 };
@@ -145,8 +144,8 @@ void from_json(const nlohmann::json& j, FDNConfig& p)
     else if (j.contains("filter_matrix"))
     {
         sfFDN::CascadedFeedbackMatrixInfo matrix_info;
-        j.at("filter_matrix").at("N").get_to(matrix_info.N);
-        j.at("filter_matrix").at("num_stages").get_to(matrix_info.K);
+        j.at("filter_matrix").at("N").get_to(matrix_info.channel_count);
+        j.at("filter_matrix").at("num_stages").get_to(matrix_info.stage_count);
         j.at("filter_matrix").at("delays").get_to(matrix_info.delays);
         j.at("filter_matrix").at("matrices").get_to(matrix_info.matrices);
 

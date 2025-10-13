@@ -208,7 +208,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
 {
     // 2 stage per row
-    int num_rows = (info.K + 1) / 2; // +1 to handle odd K
+    int num_rows = (info.stage_count + 1) / 2; // +1 to handle odd K
 
     int subplot_height = num_rows * 200; // Height of each subplot row
 
@@ -216,31 +216,34 @@ void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
     if (ImPlot::BeginSubplots("Cascaded Feedback Matrix", num_rows, 4, ImVec2(800, subplot_height),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
-        for (size_t i = 0; i < info.K; ++i)
+        for (size_t i = 0; i < info.stage_count; ++i)
         {
 
-            std::span<const float> matrix = std::span(info.matrices).subspan(i * info.N * info.N, info.N * info.N);
+            std::span<const float> matrix =
+                std::span(info.matrices)
+                    .subspan(i * info.channel_count * info.channel_count, info.channel_count * info.channel_count);
 
             if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
             {
                 ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
-                const char* label_fmt = info.N < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
-                ImPlot::PlotHeatmap("heat", matrix.data(), info.N, info.N, -1, 1, label_fmt, ImPlotPoint(0, 0),
-                                    ImPlotPoint(1, 1), 0);
+                const char* label_fmt =
+                    info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
+                ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
+                                    ImPlotPoint(0, 0), ImPlotPoint(1, 1), 0);
 
                 ImPlot::EndPlot();
             }
 
             // The last stage does not have delays
-            if (i < info.K - 1)
+            if (i < info.stage_count - 1)
             {
-                std::span<const uint32_t> delays =
-                    std::span(info.delays.data() + i * info.N, info.N); // Delays for the current stage
+                std::span<const uint32_t> delays = std::span(info.delays.data() + i * info.channel_count,
+                                                             info.channel_count); // Delays for the current stage
                 if (ImPlot::BeginPlot("##delays", ImVec2(50, 50), ImPlotFlags_NoLegend))
                 {
                     ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_None, axes_flags);
 
-                    ImPlot::PlotBars("delays", delays.data(), info.N, 0.5, 0, ImPlotBarsFlags_Horizontal);
+                    ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, ImPlotBarsFlags_Horizontal);
                     ImPlot::EndPlot();
                 }
             }

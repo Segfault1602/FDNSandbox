@@ -1,15 +1,16 @@
 {
-    "dependencies": [
-        "boost-dll",
-        "boost-math",
-        "eigen3",
-        "kissfft",
-        "libsamplerate",
-        "libsndfile",
-        "nanobench",
-        "nlohmann-json",
-        "pffft",
-        "quill",
-        "rtaudio"
-    ]
+  "dependencies": [
+    "boost-dll",
+    "boost-math",
+    "eigen3",
+    "kissfft",
+    "libsamplerate",
+    "libsndfile",
+    "nanobench",
+    "nlohmann-json",
+    "pffft",
+    "quill",
+    "rtaudio",
+    "glfw3"
+  ]
 }

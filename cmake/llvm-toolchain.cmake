@@ -8,7 +8,11 @@ else()
     set(CMAKE_C_COMPILER "clang")
 endif()
 
-set(FDNSANDBOX_SANITIZER $<$<CONFIG:Debug>:-fsanitize=address>)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if (APPLE)
+        set(FDNSANDBOX_SANITIZER -fsanitize=address)
+    endif()
+endif()
 
 set(FDNSANDBOX_CXX_COMPILE_OPTIONS
     -Wall
