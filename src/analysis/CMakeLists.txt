@@ -23,4 +23,6 @@ target_link_libraries(
             quill::quill
 )
 
-# if(OpenMP_CXX_FOUND) target_link_libraries(fdn_analysis PRIVATE OpenMP::OpenMP_CXX) endif()
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(fdn_analysis PRIVATE OpenMP::OpenMP_CXX)
+endif()

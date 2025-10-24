@@ -8,6 +8,8 @@
 #include "sffdn/filter_design.h"
 
 #include <fstream>
+#include <iostream>
+#include <random>
 
 #include <nlohmann/json.hpp>
 
@@ -39,14 +41,84 @@ class MatrixVisitor
 
 std::unique_ptr<sfFDN::AudioProcessor> CreateInputGainsFromConfig(const FDNConfig& config)
 {
-    auto input_gains = std::make_unique<sfFDN::ParallelGains>(sfFDN::ParallelGainsMode::Split, config.input_gains);
+    std::unique_ptr<sfFDN::AudioProcessor> input_gains;
+    if (config.time_varying_input_gains.has_value())
+    {
+        auto tv_input_gains =
+            std::make_unique<sfFDN::TimeVaryingParallelGains>(sfFDN::ParallelGainsMode::Split, config.input_gains);
 
-    if (!config.use_extra_delays && config.schroeder_allpass_delays.empty())
+        std::vector<float> lfo_freqs(config.N, config.time_varying_input_gains->lfo_frequency);
+        std::vector<float> lfo_amps(config.N, config.time_varying_input_gains->lfo_amplitude);
+        tv_input_gains->SetLfoFrequency(lfo_freqs);
+        tv_input_gains->SetLfoAmplitude(lfo_amps);
+
+        std::vector<float> phase_offsets(config.N, 0.f);
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dis(0.f, 1.f);
+        for (auto& phase_offset : phase_offsets)
+        {
+            phase_offset = dis(gen);
+        }
+
+        tv_input_gains->SetLfoPhaseOffset(phase_offsets);
+
+        input_gains = std::move(tv_input_gains);
+    }
+    else
+    {
+        input_gains = std::make_unique<sfFDN::ParallelGains>(sfFDN::ParallelGainsMode::Split, config.input_gains);
+    }
+
+    if (!config.use_extra_delays && !config.input_schroeder_allpass_config.has_value() &&
+        !config.input_series_schroeder_config.has_value() && !config.input_diffuser.has_value() &&
+        !config.input_velvet_decorrelator.has_value() && !config.input_velvet_decorrelator_mc.has_value())
     {
         return input_gains;
     }
+
     auto chain_processor = std::make_unique<sfFDN::AudioProcessorChain>(Settings::Instance().BlockSize());
+
+    if (config.input_velvet_decorrelator.has_value())
+    {
+        auto sparse_fir = std::make_unique<sfFDN::SparseFir>();
+        std::vector<float> coeffs;
+        std::vector<uint32_t> indices;
+
+        std::vector<float> seq = config.input_velvet_decorrelator->sequence[0];
+
+        for (auto i = 0u; i < seq.size(); ++i)
+        {
+            if (seq[i] != 0.f)
+            {
+                coeffs.push_back(seq[i]);
+                indices.push_back(i);
+            }
+        }
+
+        sparse_fir->SetCoefficients(coeffs, indices);
+        chain_processor->AddProcessor(std::move(sparse_fir));
+    }
+
+    // The Schroeder allpass section is 1-in, 1-out, so it goes before the input gains stage.
+    if (config.input_series_schroeder_config.has_value())
+    {
+        assert(config.input_series_schroeder_config->delays.size() == config.input_series_schroeder_config->order);
+        assert(config.input_series_schroeder_config->gains.size() == config.input_series_schroeder_config->order);
+
+        auto schroeder_section = std::make_unique<sfFDN::SchroederAllpassSection>();
+
+        schroeder_section->SetFilterCount(config.input_series_schroeder_config->order);
+        schroeder_section->SetParallel(config.input_series_schroeder_config->parallel);
+        schroeder_section->SetDelays(config.input_series_schroeder_config->delays);
+        schroeder_section->SetGains(config.input_series_schroeder_config->gains);
+
+        chain_processor->AddProcessor(std::move(schroeder_section));
+    }
+
     chain_processor->AddProcessor(std::move(input_gains));
+
+    // Everything else should be multichannel
 
     if (config.use_extra_delays && config.input_stage_delays.size() > 0)
     {
@@ -56,18 +128,135 @@ std::unique_ptr<sfFDN::AudioProcessor> CreateInputGainsFromConfig(const FDNConfi
         chain_processor->AddProcessor(std::move(delaybank));
     }
 
-    if (config.schroeder_allpass_delays.size() > 0)
+    if (config.input_schroeder_allpass_config.has_value())
     {
-        assert(config.schroeder_allpass_delays.size() % config.N == 0);
-        assert(config.schroeder_allpass_gains.size() == config.N);
+        const uint32_t order = config.input_schroeder_allpass_config->order;
+        if (!config.input_schroeder_allpass_config->delays.empty())
+        {
+            auto schroeder_allpass = std::make_unique<sfFDN::ParallelSchroederAllpassSection>(config.N, order);
+            schroeder_allpass->SetDelays(config.input_schroeder_allpass_config->delays);
+            schroeder_allpass->SetGains(config.input_schroeder_allpass_config->gains);
+            chain_processor->AddProcessor(std::move(schroeder_allpass));
+        }
+    }
 
-        const uint32_t order = config.schroeder_allpass_delays.size() / config.N;
+    if (config.input_diffuser.has_value())
+    {
+        auto diffuser = std::make_unique<sfFDN::FilterFeedbackMatrix>(config.input_diffuser.value());
+        chain_processor->AddProcessor(std::move(diffuser));
+    }
 
-        auto schroeder_allpass = std::make_unique<sfFDN::ParallelSchroederAllpassSection>(config.N, order);
-        schroeder_allpass->SetDelays(config.schroeder_allpass_delays);
-        schroeder_allpass->SetGains(config.schroeder_allpass_gains);
+    if (config.input_velvet_decorrelator_mc.has_value())
+    {
+        auto filterbank = std::make_unique<sfFDN::FilterBank>();
+        for (auto ch = 0u; ch < config.N; ++ch)
+        {
+            auto sparse_fir = std::make_unique<sfFDN::SparseFir>();
+            std::vector<float> coeffs;
+            std::vector<uint32_t> indices;
 
-        chain_processor->AddProcessor(std::move(schroeder_allpass));
+            std::vector<float> seq = config.input_velvet_decorrelator_mc
+                                         ->sequence[ch % config.input_velvet_decorrelator_mc->sequence.size()];
+
+            for (auto i = 0u; i < seq.size(); ++i)
+            {
+                if (seq[i] != 0.f)
+                {
+                    coeffs.push_back(seq[i]);
+                    indices.push_back(i);
+                }
+            }
+
+            sparse_fir->SetCoefficients(coeffs, indices);
+            filterbank->AddFilter(std::move(sparse_fir));
+        }
+
+        chain_processor->AddProcessor(std::move(filterbank));
+    }
+
+    return chain_processor;
+}
+
+std::unique_ptr<sfFDN::AudioProcessor> CreateOutputGainsFromConfig(const FDNConfig& config)
+{
+    std::unique_ptr<sfFDN::AudioProcessor> output_gains;
+    if (config.time_varying_output_gains.has_value())
+    {
+        auto tv_output_gains =
+            std::make_unique<sfFDN::TimeVaryingParallelGains>(sfFDN::ParallelGainsMode::Merge, config.output_gains);
+
+        std::vector<float> lfo_freqs(config.N, config.time_varying_output_gains->lfo_frequency);
+        std::vector<float> lfo_amps(config.N, config.time_varying_output_gains->lfo_amplitude);
+        tv_output_gains->SetLfoFrequency(lfo_freqs);
+        tv_output_gains->SetLfoAmplitude(lfo_amps);
+
+        std::vector<float> phase_offsets(config.N, 0.f);
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dis(0.f, 1.f);
+        for (auto& phase_offset : phase_offsets)
+        {
+            phase_offset = dis(gen);
+        }
+        tv_output_gains->SetLfoPhaseOffset(phase_offsets);
+        output_gains = std::move(tv_output_gains);
+    }
+    else
+    {
+        output_gains = std::make_unique<sfFDN::ParallelGains>(sfFDN::ParallelGainsMode::Merge, config.output_gains);
+    }
+
+    if (!config.output_schroeder_allpass_config.has_value() && !config.output_velvet_decorrelator_mc.has_value())
+    {
+        return output_gains;
+    }
+
+    auto chain_processor = std::make_unique<sfFDN::AudioProcessorChain>(Settings::Instance().BlockSize());
+
+    if (config.output_velvet_decorrelator_mc.has_value())
+    {
+        auto filterbank = std::make_unique<sfFDN::FilterBank>();
+        for (auto ch = 0u; ch < config.N; ++ch)
+        {
+            auto sparse_fir = std::make_unique<sfFDN::SparseFir>();
+            std::vector<float> coeffs;
+            std::vector<uint32_t> indices;
+
+            std::vector<float> seq =
+                config.output_velvet_decorrelator_mc
+                    ->sequence[(ch + config.N) % config.output_velvet_decorrelator_mc->sequence.size()];
+
+            for (auto i = 0u; i < seq.size(); ++i)
+            {
+                if (seq[i] != 0.f)
+                {
+                    coeffs.push_back(seq[i]);
+                    indices.push_back(i);
+                }
+            }
+
+            sparse_fir->SetCoefficients(coeffs, indices);
+            filterbank->AddFilter(std::move(sparse_fir));
+        }
+
+        chain_processor->AddProcessor(std::move(filterbank));
+    }
+
+    chain_processor->AddProcessor(std::move(output_gains));
+
+    if (config.output_schroeder_allpass_config.has_value())
+    {
+        assert(config.output_schroeder_allpass_config->delays.size() == config.output_schroeder_allpass_config->order);
+        assert(config.output_schroeder_allpass_config->gains.size() == config.output_schroeder_allpass_config->order);
+
+        auto schroeder_section = std::make_unique<sfFDN::SchroederAllpassSection>();
+
+        schroeder_section->SetFilterCount(config.output_schroeder_allpass_config->order);
+        schroeder_section->SetParallel(config.output_schroeder_allpass_config->parallel);
+        schroeder_section->SetDelays(config.output_schroeder_allpass_config->delays);
+        schroeder_section->SetGains(config.output_schroeder_allpass_config->gains);
+
+        chain_processor->AddProcessor(std::move(schroeder_section));
     }
 
     return chain_processor;
@@ -118,11 +307,12 @@ void to_json(nlohmann::json& j, const FDNConfig& p)
         j["input_stage_delays"] = p.input_stage_delays;
     }
 
-    if (p.schroeder_allpass_delays.size() > 0 && p.schroeder_allpass_gains.size() > 0)
+    if (p.input_schroeder_allpass_config.has_value())
     {
-        assert(p.schroeder_allpass_delays.size() == p.schroeder_allpass_gains.size());
-        j["schroeder_allpass_delays"] = p.schroeder_allpass_delays;
-        j["schroeder_allpass_gains"] = p.schroeder_allpass_gains;
+        assert(p.input_schroeder_allpass_config->delays.size() == p.input_schroeder_allpass_config->gains.size());
+        j["schroeder_allpass_order"] = p.input_schroeder_allpass_config->order;
+        j["schroeder_allpass_delays"] = p.input_schroeder_allpass_config->delays;
+        j["schroeder_allpass_gains"] = p.input_schroeder_allpass_config->gains;
     }
 }
 
@@ -173,10 +363,13 @@ void from_json(const nlohmann::json& j, FDNConfig& p)
 
     if (j.contains("schroeder_allpass_delays"))
     {
+        SchroederAllpassConfig config;
         assert(j.contains("schroeder_allpass_gains"));
-        j.at("schroeder_allpass_delays").get_to(p.schroeder_allpass_delays);
-        j.at("schroeder_allpass_gains").get_to(p.schroeder_allpass_gains);
-        assert(p.schroeder_allpass_delays.size() == p.schroeder_allpass_gains.size());
+        j.at("schroeder_allpass_order").get_to(config.order);
+        j.at("schroeder_allpass_delays").get_to(config.delays);
+        j.at("schroeder_allpass_gains").get_to(config.gains);
+        assert(config.delays.size() == config.gains.size());
+        p.input_schroeder_allpass_config = config;
     }
 }
 
@@ -214,14 +407,62 @@ std::unique_ptr<sfFDN::FDN> CreateFDNFromConfig(const FDNConfig& config, uint32_
 
     fdn->SetTranspose(config.transposed);
     fdn->SetInputGains(CreateInputGainsFromConfig(config));
-    fdn->SetOutputGains(config.output_gains);
+    fdn->SetOutputGains(CreateOutputGainsFromConfig(config));
     fdn->SetDelays(config.delays);
 
     std::visit(MatrixVisitor(fdn.get()), config.matrix_info);
 
-    auto filter_bank = sfFDN::CreateAttenuationFilterBank(config.attenuation_t60s, config.delays, samplerate);
+    // If we have a cascaded feedback matrix, we need to adjust the attenuation filter to take into account the extra
+    // delays
+    std::vector<uint32_t> adjusted_delays = config.delays;
+    std::visit(
+        [&](auto&& arg) {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, sfFDN::CascadedFeedbackMatrixInfo>)
+            {
+                uint32_t extra_delay = 0;
+                for (auto stage_delay : arg.delays)
+                {
+                    uint32_t max_stage_delay = *std::max_element(stage_delay.begin(), stage_delay.end());
+                    extra_delay += max_stage_delay;
+                }
+                extra_delay /= 2;
 
-    fdn->SetFilterBank(std::move(filter_bank));
+                // Add the extra delay to each delay in the FDN
+                for (auto& d : adjusted_delays)
+                {
+                    d += extra_delay;
+                }
+            }
+        },
+        config.matrix_info);
+
+    auto filter_bank = sfFDN::CreateAttenuationFilterBank(config.attenuation_t60s, adjusted_delays, samplerate);
+
+    auto chain_processor = std::make_unique<sfFDN::AudioProcessorChain>(Settings::Instance().BlockSize());
+
+    if (config.feedback_schroeder_allpass_config.has_value())
+    {
+        auto fb_schroeder_config = config.feedback_schroeder_allpass_config.value();
+        const uint32_t order = fb_schroeder_config.order;
+        if (!fb_schroeder_config.delays.empty())
+        {
+            auto schroeder_allpass = std::make_unique<sfFDN::ParallelSchroederAllpassSection>(config.N, order);
+            schroeder_allpass->SetDelays(fb_schroeder_config.delays);
+            schroeder_allpass->SetGains(fb_schroeder_config.gains);
+            chain_processor->AddProcessor(std::move(schroeder_allpass));
+        }
+    }
+
+    if (chain_processor->GetProcessorCount() > 0)
+    {
+        chain_processor->AddProcessor(std::move(filter_bank));
+        fdn->SetFilterBank(std::move(chain_processor));
+    }
+    else
+    {
+        fdn->SetFilterBank(std::move(filter_bank));
+    }
 
     if (config.tc_gains.size() > 0)
     {

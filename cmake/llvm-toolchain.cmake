@@ -14,12 +14,17 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     endif()
 endif()
 
+if (WIN32)
+    set(CMAKE_SYSTEM_LIBRARY_PATH "$ENV{ProgramFiles}/LLVM/lib")
+endif()
+
 set(FDNSANDBOX_CXX_COMPILE_OPTIONS
     -Wall
     -Wextra
     -Wpedantic
     -Werror
     -Wno-sign-compare
+    -Wno-language-extension-token
     # -Wunsafe-buffer-usage
     ${FDNSANDBOX_SANITIZER}
 )

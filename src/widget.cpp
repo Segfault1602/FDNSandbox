@@ -2,17 +2,19 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
+#include <format>
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <string>
 
+#include <imgui.h>
 #include <implot.h>
 
 #include <sffdn/sffdn.h>
-#include <string>
-#include <sys/types.h>
 
-#include "imgui.h"
+#include "fdn_info.h"
 #include "settings.h"
 #include "utils.h"
 
@@ -208,20 +210,32 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
 {
     // 2 stage per row
-    int num_rows = (info.stage_count + 1) / 2; // +1 to handle odd K
+    const int num_plots = info.stage_count * 2 + 1; // Each stage has a matrix and a delay, plus one initial matrix
+    constexpr int kPlotsPerRow = 4;
+    int num_rows = (num_plots + kPlotsPerRow - 1) / kPlotsPerRow;
 
     int subplot_height = num_rows * 200; // Height of each subplot row
 
     constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
-    if (ImPlot::BeginSubplots("Cascaded Feedback Matrix", num_rows, 4, ImVec2(800, subplot_height),
+    if (ImPlot::BeginSubplots("Cascaded Feedback Matrix", num_rows, kPlotsPerRow, ImVec2(800, subplot_height),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
+        // Plot the initial matrix
+        if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
+        {
+            const auto& matrix = info.matrices[0];
+            ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
+            const char* label_fmt = info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
+            ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
+                                ImPlotPoint(0, 0), ImPlotPoint(1, 1), 0);
+
+            ImPlot::EndPlot();
+        }
+
         for (size_t i = 0; i < info.stage_count; ++i)
         {
-
-            std::span<const float> matrix =
-                std::span(info.matrices)
-                    .subspan(i * info.channel_count * info.channel_count, info.channel_count * info.channel_count);
+            const auto& matrix = info.matrices[i + 1];
+            const auto& delays = info.delays[i];
 
             if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
             {
@@ -234,18 +248,12 @@ void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
                 ImPlot::EndPlot();
             }
 
-            // The last stage does not have delays
-            if (i < info.stage_count - 1)
+            if (ImPlot::BeginPlot("##delays", ImVec2(50, 50), ImPlotFlags_NoLegend))
             {
-                std::span<const uint32_t> delays = std::span(info.delays.data() + i * info.channel_count,
-                                                             info.channel_count); // Delays for the current stage
-                if (ImPlot::BeginPlot("##delays", ImVec2(50, 50), ImPlotFlags_NoLegend))
-                {
-                    ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_None, axes_flags);
+                ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, axes_flags);
 
-                    ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, ImPlotBarsFlags_Horizontal);
-                    ImPlot::EndPlot();
-                }
+                ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, ImPlotBarsFlags_Horizontal);
+                ImPlot::EndPlot();
             }
         }
 
@@ -323,27 +331,37 @@ bool DrawGainsWidget(std::span<float> gains)
 }
 } // namespace
 
-void DrawInputOutputGainsPlot(const FDNConfig& config)
+void DrawInputOutputGainsPlot(const FDNConfig& config, sfFDN::FDN* fdn)
 {
     if (ImPlot::BeginSubplots("##Input/Output_Gains", 2, 1, ImVec2(300, 200),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
+        std::vector<float> input_gains(config.N, 0.0f);
+        std::vector<float> output_gains(config.N, 0.0f);
+        if (fdn)
+        {
+            fdn_info::GetInputAndOutputGains(fdn, input_gains, output_gains);
+        }
+        else
+        {
+            input_gains = config.input_gains;
+            output_gains = config.output_gains;
+        }
+
         constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
         if (ImPlot::BeginPlot("Input Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, config.input_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Input Gains", config.input_gains.data(), config.input_gains.size(), 0.90, 0,
-                             ImPlotBarsFlags_None);
+            ImPlot::SetupAxesLimits(-0.45, input_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
+            ImPlot::PlotBars("Input Gains", input_gains.data(), input_gains.size(), 0.90, 0, ImPlotBarsFlags_None);
             ImPlot::EndPlot();
         }
 
         if (ImPlot::BeginPlot("Output Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, config.output_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Output Gains", config.output_gains.data(), config.output_gains.size(), 0.90, 0,
-                             ImPlotBarsFlags_None);
+            ImPlot::SetupAxesLimits(-0.45, output_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
+            ImPlot::PlotBars("Output Gains", output_gains.data(), output_gains.size(), 0.90, 0, ImPlotBarsFlags_None);
             ImPlot::EndPlot();
         }
 
@@ -381,10 +399,7 @@ void DrawFeedbackMatrixPlot(const FDNConfig& config)
             }
             else if constexpr (std::is_same_v<T, sfFDN::CascadedFeedbackMatrixInfo>)
             {
-                auto first_matrix = std::span(arg.matrices).first(N * N);
-
-                feedback_matrix.resize(N * N);
-                std::copy(first_matrix.begin(), first_matrix.end(), feedback_matrix.begin());
+                feedback_matrix = arg.matrices[0]; // Just show the first stage for simplicity
             }
         },
         config.matrix_info);
@@ -416,6 +431,30 @@ bool DrawInputGainsWidget(FDNConfig& config)
     if (ImGui::TreeNode("Edit input gains"))
     {
         config_changed |= DrawGainsWidget(config.input_gains);
+
+        bool is_time_varying = config.time_varying_input_gains.has_value();
+        config_changed |= ImGui::Checkbox("Time Varying Input Gains", &is_time_varying);
+
+        if (is_time_varying)
+        {
+            if (!config.time_varying_input_gains.has_value())
+            {
+                config.time_varying_input_gains = TimeVaryingGainsConfig{};
+            }
+
+            float freq_hz = config.time_varying_input_gains->lfo_frequency * Settings::Instance().SampleRate();
+            config_changed |= ImGui::SliderFloat("LFO Frequency (Hz)", &freq_hz, 0.01f, 5.f, "%.2f Hz");
+
+            config.time_varying_input_gains->lfo_frequency = freq_hz / Settings::Instance().SampleRate();
+
+            config_changed |=
+                ImGui::SliderFloat("LFO Amplitude", &config.time_varying_input_gains->lfo_amplitude, 0.f, 1.f, "%.2f");
+        }
+        else
+        {
+            config.time_varying_input_gains = std::nullopt;
+        }
+
         ImGui::TreePop();
     }
 
@@ -433,6 +472,30 @@ bool DrawOutputGainsWidget(FDNConfig& config)
     if (ImGui::TreeNode("Edit output gains"))
     {
         config_changed |= DrawGainsWidget(config.output_gains);
+
+        bool is_time_varying = config.time_varying_output_gains.has_value();
+        config_changed |= ImGui::Checkbox("Time Varying Output Gains", &is_time_varying);
+
+        if (is_time_varying)
+        {
+            if (!config.time_varying_output_gains.has_value())
+            {
+                config.time_varying_output_gains = TimeVaryingGainsConfig{};
+            }
+
+            float freq_hz = config.time_varying_output_gains->lfo_frequency * Settings::Instance().SampleRate();
+            config_changed |= ImGui::SliderFloat("LFO Frequency (Hz)", &freq_hz, 0.01f, 5.f, "%.2f Hz");
+
+            config.time_varying_output_gains->lfo_frequency = freq_hz / Settings::Instance().SampleRate();
+
+            config_changed |=
+                ImGui::SliderFloat("LFO Amplitude", &config.time_varying_output_gains->lfo_amplitude, 0.f, 1.f, "%.2f");
+        }
+        else
+        {
+            config.time_varying_output_gains = std::nullopt;
+        }
+
         ImGui::TreePop();
     }
 
@@ -585,29 +648,221 @@ bool DrawExtraDelayWidget(FDNConfig& config, bool force_update)
     return config_changed;
 }
 
-bool DrawExtraSchroederAllpassWidget(FDNConfig& config, bool force_update)
+bool DrawInputVelvetNoiseDecorrelator(VelvetNoiseDecorrelatorConfig& config, bool force_update)
 {
     bool config_changed = force_update;
 
-    const uint32_t N = config.N;
-    config.schroeder_allpass_delays.resize(N, 0);
-    config.schroeder_allpass_gains.resize(N, 0.0f);
-
-    if (ImGui::Button("Edit"))
+    constexpr const char* kOvnSequences[] = {"decorrelator32_oVND15.wav", "decorrelator32_oVND30.wav"};
+    static uint32_t selected_file = 0;
+    if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_file]))
     {
-        ImGui::OpenPopup("Edit Schroeder Section");
+        for (int i = 0; i < IM_ARRAYSIZE(kOvnSequences); i++)
+        {
+            bool is_selected = (selected_file == i);
+            if (ImGui::Selectable(kOvnSequences[i], is_selected))
+            {
+                selected_file = i;
+                config_changed = true;
+            }
+        }
+        ImGui::EndCombo();
     }
 
-    if (ImGui::BeginPopupModal("Edit Schroeder Section", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
+    uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
+
+    static uint32_t channel = 0;
+    config_changed |= ImGui::InputInt("Channel", reinterpret_cast<int*>(&channel), 1, 1);
+    channel = std::clamp(channel, 0u, max_channels > 0 ? max_channels - 1 : 0u);
+
+    if (config_changed)
     {
-        static int section_count = 1;
-        ImGui::InputInt("Section Count", &section_count, 1, 1);
+        config.sequence.clear();
+        config.sequence.push_back(utils::ReadAudioFile(file_path.string(), channel));
+    }
+
+    if (ImPlot::BeginPlot("Velvet decorrelator", ImVec2(-1, 200), ImPlotFlags_NoLegend))
+    {
+        ImPlot::SetupAxes("Samples", "Amplitude");
+        // ImPlot::SetupAxisLimits(ImAxis_X1, 0, config.sequence.size(), ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0, 1.0, ImPlotCond_Always);
+
+        for (const auto& channel_sequence : config.sequence)
+        {
+            ImPlot::PlotLine("Velvet Noise", channel_sequence.data(), channel_sequence.size());
+        }
+        ImPlot::EndPlot();
+    }
+
+    return config_changed;
+}
+
+bool DrawInputVelvetNoiseDecorrelatorMultiChannel(VelvetNoiseDecorrelatorConfig& config, uint32_t& selected_sequence,
+                                                  bool force_update)
+{
+    bool config_changed = force_update;
+
+    constexpr const char* kOvnSequences[] = {"decorrelator32_oVND15.wav", "decorrelator32_oVND30.wav"};
+    selected_sequence = std::clamp(selected_sequence, 0u, static_cast<uint32_t>(IM_ARRAYSIZE(kOvnSequences) - 1));
+    ImGui::PushID(&config);
+    if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_sequence]))
+    {
+        for (int i = 0; i < IM_ARRAYSIZE(kOvnSequences); i++)
+        {
+            bool is_selected = (selected_sequence == i);
+            if (ImGui::Selectable(kOvnSequences[i], is_selected))
+            {
+                selected_sequence = i;
+                config_changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::PopID();
+
+    std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_sequence];
+    uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
+
+    if (config_changed)
+    {
+        config.sequence.clear();
+        for (uint32_t channel = 0; channel < max_channels; ++channel)
+        {
+            config.sequence.push_back(utils::ReadAudioFile(file_path.string(), channel));
+        }
+    }
+
+    ImGui::PushID(&config + 1);
+    if (ImPlot::BeginPlot("Velvet decorrelator", ImVec2(-1, 200), ImPlotFlags_NoLegend))
+    {
+        ImPlot::SetupAxes("Samples", "Amplitude");
+
+        uint32_t id = 0;
+
+        for (const auto& channel_sequence : config.sequence)
+        {
+            ImGui::PushID(id++);
+            ImPlot::PlotStems("Velvet Noise", channel_sequence.data(), channel_sequence.size());
+            ImGui::PopID();
+        }
+
+        ImPlot::EndPlot();
+    }
+    ImGui::PopID();
+
+    return config_changed;
+}
+
+bool DrawInputSeriesSchroederAllpassWidget(SchroederAllpassConfig& config, bool force_update)
+{
+    bool config_changed = force_update;
+
+    int section_count = config.order;
+    config_changed |= ImGui::InputInt("Section Count", &section_count, 1, 1);
+    section_count = std::clamp(section_count, 1, 10);
+    config.order = section_count;
+
+    config.gains.resize(section_count, 0.0f);
+    config.delays.resize(section_count, 0);
+
+    config_changed |= ImGui::Checkbox("Parallel", &config.parallel);
+
+    static int delay_min = 1;
+    static int delay_max = 1000;
+    if (ImGui::Button("Rand. Delays"))
+    {
+        std::random_device rd;
+        std::mt19937 eng(rd());
+        std::uniform_int_distribution<uint32_t> distr(delay_min, delay_max);
+
+        for (uint32_t i = 0; i < section_count; ++i)
+        {
+            config.delays[i] = distr(eng); // Generate random delays
+        }
+
+        config_changed = true;
+    }
+    ImGui::SameLine();
+
+    ImGui::DragIntRange2("Delay Range", &delay_min, &delay_max, 1, 1, 9999, "%d samples", "%d samples",
+                         ImGuiSliderFlags_AlwaysClamp);
+
+    if (ImGui::BeginTable("Schroeder Table", section_count + 1))
+    {
+        ImGui::TableSetupColumn("Delay", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+        ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+
+        ImGui::TableHeadersRow();
+
+        for (int row = 0; row < config.order; ++row)
+        {
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            int delay = static_cast<int>(config.delays[row]);
+            ImGui::PushID(row);
+            config_changed |= ImGui::DragInt("##delay", &delay, 1, 1, 9999);
+            delay = std::clamp(delay, 1, 9999);
+            config.delays[row] = delay;
+            ImGui::PopID();
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::PushID(row + 1000);
+            config_changed |= ImGui::DragFloat("##gain", &config.gains[row], 0.01f, -1.0f, 1.0f);
+            config.gains[row] = std::clamp(config.gains[row], -1.0f, 1.0f);
+            ImGui::PopID();
+        }
+
+        ImGui::EndTable();
+    }
+
+    return config_changed;
+}
+
+bool DrawExtraSchroederAllpassWidget(SchroederAllpassConfig& config, uint32_t channel_count, bool force_update)
+{
+    bool config_changed = force_update;
+
+    std::string id_suffix = std::format("##{}", static_cast<const void*>(&config));
+
+    std::string popup_id = "Edit Schroeder Section" + id_suffix;
+
+    std::string button_label = "Edit" + id_suffix;
+    if (ImGui::Button(button_label.c_str()))
+    {
+        ImGui::OpenPopup(popup_id.c_str());
+    }
+
+    if (ImGui::BeginPopupModal(popup_id.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        int section_count = config.order;
+        config_changed |= ImGui::InputInt("Section Count", &section_count, 1, 1);
         section_count = std::clamp(section_count, 1, 10);
+        config.order = section_count;
 
-        static std::vector<uint32_t> delays(section_count * config.N, 0);
-        delays.resize(section_count * config.N, 0);
+        config.delays.resize(section_count * channel_count, 0);
 
-        static std::vector<float> gains(config.N, 0.0f);
+        config.gains.resize(channel_count, 0.0f);
+
+        static int delay_min = 1;
+        static int delay_max = 1500;
+        if (ImGui::Button("Randomize Delays"))
+        {
+            std::random_device rd;
+            std::mt19937 eng(rd());
+            std::uniform_int_distribution<uint32_t> distr(delay_min, delay_max);
+
+            for (uint32_t i = 0; i < channel_count * section_count; ++i)
+            {
+                config.delays[i] = distr(eng); // Generate random delays
+            }
+
+            config_changed = true;
+        }
+        ImGui::SameLine();
+
+        ImGui::DragIntRange2("Delay Range", &delay_min, &delay_max, 1, 1, 9999, "%d samples", "%d samples",
+                             ImGuiSliderFlags_AlwaysClamp);
 
         if (ImGui::BeginTable("Schroeder Table", section_count + 1))
         {
@@ -620,42 +875,75 @@ bool DrawExtraSchroederAllpassWidget(FDNConfig& config, bool force_update)
 
             ImGui::TableHeadersRow();
 
-            for (int row = 0; row < config.N; ++row)
+            for (int row = 0; row < channel_count; ++row)
             {
                 ImGui::TableNextRow();
 
                 for (int col = 0; col < section_count; ++col)
                 {
                     ImGui::TableSetColumnIndex(col);
-                    int delay = static_cast<int>(delays[(row * section_count) + col]);
+                    int delay = static_cast<int>(config.delays[(row * section_count) + col]);
                     ImGui::PushID((row * section_count) + col);
 
-                    ImGui::DragInt("##delay", &delay, 1, 1, 9999);
+                    config_changed |= ImGui::DragInt("##delay", &delay, 1, 1, 9999);
                     delay = std::clamp(delay, 1, 9999);
-                    delays[(row * section_count) + col] = delay;
+                    config.delays[(row * section_count) + col] = delay;
                     ImGui::PopID();
                 }
 
                 ImGui::TableSetColumnIndex(section_count);
                 ImGui::PushID(row + 1000);
-                ImGui::DragFloat("##gain", &gains[row], 0.01f, -1.0f, 1.0f);
-                gains[row] = std::clamp(gains[row], -1.0f, 1.0f);
+                config_changed |= ImGui::DragFloat("##gain", &config.gains[row], 0.01f, -1.0f, 1.0f);
+                config.gains[row] = std::clamp(config.gains[row], -1.0f, 1.0f);
                 ImGui::PopID();
             }
 
             ImGui::EndTable();
         }
 
-        if (ImGui::Button("Apply"))
+        if (ImGui::Button("Ok"))
         {
-            config.schroeder_allpass_delays = delays;
-            config.schroeder_allpass_gains = gains;
             config_changed = true;
             ImGui::CloseCurrentPopup();
         }
 
         ImGui::EndPopup();
     }
+
+    return config_changed;
+}
+
+bool DrawDiffuserWidget(FDNConfig& config, bool force_update)
+{
+    bool config_changed = force_update;
+    const uint32_t N = config.N;
+
+    if (!config.input_diffuser.has_value())
+    {
+        config.input_diffuser = sfFDN::ConstructCascadedFeedbackMatrix(N, 1, 1.f, sfFDN::ScalarMatrixType::Hadamard);
+        config_changed = true;
+    }
+
+    static int diffuser_stages = 1;
+    config_changed |= ImGui::InputInt("Diffuser Stages", &diffuser_stages, 1, 1);
+    diffuser_stages = std::clamp(diffuser_stages, 0, 10);
+
+    static float diffuser_sparsity = 1.f;
+    config_changed |= ImGui::SliderFloat("Diffuser Sparsity", &diffuser_sparsity, 1.f, 10.f);
+    diffuser_sparsity = std::clamp(diffuser_sparsity, 1.f, 10.f);
+
+    static float diffuser_t60 = 2.0f;
+    config_changed |= ImGui::SliderFloat("Diffuser T60 (s)", &diffuser_t60, 0.1f, 10.f);
+
+    if (config_changed)
+    {
+        float gain_per_samples = -60.f / (diffuser_t60 * Settings::Instance().SampleRate());
+        gain_per_samples = std::pow(10.f, gain_per_samples / 20.f);
+        std::cout << "Diffuser gain per sample: " << gain_per_samples << std::endl;
+        config.input_diffuser = sfFDN::ConstructCascadedFeedbackMatrix(
+            N, diffuser_stages, diffuser_sparsity, sfFDN::ScalarMatrixType::Hadamard, gain_per_samples);
+    }
+
     return config_changed;
 }
 
@@ -678,6 +966,20 @@ bool DrawScalarMatrixWidget(FDNConfig& config, uint32_t random_seed)
         feedback_matrix.resize(N * N, 0.0f);
         should_update_feedback_matrix = true;
     }
+
+    std::visit(
+        [&](auto&& arg) {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, sfFDN::CascadedFeedbackMatrixInfo>)
+            {
+                cascade_matrix = true;
+            }
+            else
+            {
+                cascade_matrix = false;
+            }
+        },
+        config.matrix_info);
 
     static int selected_matrix_type = 4; // Default to Hadamard
     if (ImGui::TreeNode("Edit matrix"))
@@ -780,7 +1082,7 @@ bool DrawScalarMatrixWidget(FDNConfig& config, uint32_t random_seed)
             should_update_feedback_matrix |= ImGui::SliderFloat("Sparsity", &sparsity, 1.f, 10.0f);
             should_update_feedback_matrix |= ImGui::InputInt("Num Stages", &num_stages, 1, 1);
 
-            num_stages = std::clamp(num_stages, 1, 10);
+            num_stages = std::clamp(num_stages, 0, 10);
             sparsity = std::clamp(sparsity, 1.f, 10.f);
 
             if (ImGui::Button("View"))
@@ -951,6 +1253,7 @@ bool DrawToneCorrectionFilterDesigner(FDNConfig& config)
     static std::vector<float> frequencies(0);
     static std::vector<float> frequencies_plot;   // Oversampled vectors for plotting
     static std::vector<float> frequency_response; // Frequency response for plotting
+    static std::vector<std::vector<float>> freq_response_per_filter;
     static bool enabled = false;
 
     if (frequencies.size() == 0)
@@ -966,7 +1269,7 @@ bool DrawToneCorrectionFilterDesigner(FDNConfig& config)
     bool point_changed = false;
     if (frequencies_plot.size() == 0) // Only runs on first call
     {
-        frequencies_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 1024);
+        frequencies_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 512);
 
         point_changed = true; // Force initial plot update
     }
@@ -999,7 +1302,7 @@ bool DrawToneCorrectionFilterDesigner(FDNConfig& config)
         {
             ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
             ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);
-            // ImPlot::SetupAxisLimits(ImAxis_Y1, -10.0f, 10.0f, ImPlotCond_Once);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, -10.0f, 10.0f, ImPlotCond_Once);
             ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
 
             ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0.f, Settings::Instance().SampleRate() / 2.0f);
@@ -1024,6 +1327,20 @@ bool DrawToneCorrectionFilterDesigner(FDNConfig& config)
                     sfFDN::DesignGraphicEQ(tc_gains, frequencies, Settings::Instance().SampleRate());
                 frequency_response = utils::AbsFreqz(sos, frequencies_plot, Settings::Instance().SampleRate());
 
+                uint32_t filter_order = sos.size() / 6; // Each biquad has 6 coefficients
+                freq_response_per_filter.resize(filter_order);
+                for (uint32_t i = 0; i < filter_order; ++i)
+                {
+                    std::span<const float> single_sos = std::span(sos).subspan(i * 6, 6);
+                    freq_response_per_filter[i] =
+                        utils::AbsFreqz(single_sos, frequencies_plot, Settings::Instance().SampleRate());
+
+                    for (float& j : freq_response_per_filter[i])
+                    {
+                        j = 20.f * std::log10(j);
+                    }
+                }
+
                 // To db gain
                 for (float& i : frequency_response)
                 {
@@ -1038,6 +1355,14 @@ bool DrawToneCorrectionFilterDesigner(FDNConfig& config)
             {
                 ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
                 ImPlot::PlotLine("Filter Response", frequencies_plot.data(), frequency_response.data(),
+                                 frequencies_plot.size());
+            }
+
+            for (size_t i = 0; i < freq_response_per_filter.size(); ++i)
+            {
+                ImPlot::SetNextLineStyle(ImVec4(0.2f, 0.2f, 0.8f, 0.5f), 1.0f);
+                std::string label = "Filter " + std::to_string(i + 1);
+                ImPlot::PlotLine(label.c_str(), frequencies_plot.data(), freq_response_per_filter[i].data(),
                                  frequencies_plot.size());
             }
 
@@ -1080,11 +1405,7 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
     ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -1.0f, 1.0f);
     ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, time_data.back());
 
-    ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
-    ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.70f, 0.70f, 0.90f, 1.0f));
     ImPlot::PlotLine("IR", time_data.data(), impulse_response.data(), impulse_response.size());
-    ImPlot::PopStyleColor();
-    ImPlot::PopStyleVar();
 
     duration_changed = ImPlot::DragLineX(0, &ir_duration, ImVec4(1.f, 1.f, 1.f, 1.f), 1.f, ImPlotDragToolFlags_None);
 

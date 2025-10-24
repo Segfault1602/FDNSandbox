@@ -105,6 +105,7 @@ SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::SpectrogramInf
         spectrogram_data_ = std::move(result.data);
 
         float max_val = *std::ranges::max_element(spectrogram_data_);
+        max_val = (max_val < 1e-6f) ? 1.f : max_val; // Prevent log of zero
 
         for (auto& v : spectrogram_data_)
         {

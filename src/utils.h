@@ -78,6 +78,10 @@ std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w
  */
 void WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate);
 
+uint32_t GetChannelCountFromAudioFile(const std::string_view filename);
+
+std::vector<float> ReadAudioFile(const std::string_view filename, uint32_t channel);
+
 std::array<std::array<float, 6>, 10> GetOctaveBandsSOS();
 
 std::string GetMatrixName(sfFDN::ScalarMatrixType type);

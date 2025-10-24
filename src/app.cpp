@@ -537,7 +537,7 @@ bool FDNToolboxApp::DrawFDNConfigurator()
         random_seed = 0; // Reset to zero when unchecked
     }
 
-    DrawInputOutputGainsPlot(fdn_config_);
+    DrawInputOutputGainsPlot(fdn_config_, gui_fdn_.get());
     DrawDelaysPlot(fdn_config_, max_delay);
     DrawFeedbackMatrixPlot(fdn_config_);
 
@@ -576,10 +576,50 @@ bool FDNToolboxApp::DrawFDNExtras(bool force_update)
         return config_changed; // If the window is not open, return early
     }
 
-    ImGui::Text("Input Gain Stage");
+    ImGui::SeparatorText("Input Gain Stage");
+    ImGui::Separator();
+    ImGui::TextWrapped("The following extras are added before the input gain stage.");
+
+    bool use_input_delays = fdn_config_.input_velvet_decorrelator.has_value();
+    config_changed |= ImGui::Checkbox("Velvet Decorrelator", &use_input_delays);
+    if (use_input_delays)
+    {
+        VelvetNoiseDecorrelatorConfig vn_config;
+        if (fdn_config_.input_velvet_decorrelator.has_value())
+        {
+            vn_config = *(fdn_config_.input_velvet_decorrelator);
+        }
+
+        config_changed |= DrawInputVelvetNoiseDecorrelator(vn_config, config_changed);
+
+        fdn_config_.input_velvet_decorrelator = vn_config;
+    }
+    else
+    {
+        fdn_config_.input_velvet_decorrelator.reset();
+    }
+
+    bool use_series_schroeder = fdn_config_.input_series_schroeder_config.has_value();
+    config_changed |= ImGui::Checkbox("Schroeder Allpass", &use_series_schroeder);
+    if (use_series_schroeder)
+    {
+        SchroederAllpassConfig schroeder_config;
+        if (fdn_config_.input_series_schroeder_config.has_value())
+        {
+            schroeder_config = *(fdn_config_.input_series_schroeder_config);
+        }
+        config_changed |= DrawInputSeriesSchroederAllpassWidget(schroeder_config, config_changed);
+
+        fdn_config_.input_series_schroeder_config = schroeder_config;
+    }
+    else
+    {
+        fdn_config_.input_series_schroeder_config.reset();
+    }
+
     ImGui::Separator();
     ImGui::TextWrapped(
-        "The following extras are added after the input gain stage but before entering the feedback loop");
+        "The following extras are added after the input gain stage but before entering the feedback loop.");
 
     config_changed |= ImGui::Checkbox("Extra Delays", &fdn_config_.use_extra_delays);
 
@@ -592,17 +632,122 @@ bool FDNToolboxApp::DrawFDNExtras(bool force_update)
         fdn_config_.input_stage_delays.clear();
     }
 
-    static bool extra_schroeder_allpass = false;
-    config_changed |= ImGui::Checkbox("Extra Schroeder Allpass", &extra_schroeder_allpass);
+    bool use_schroeder_allpass = fdn_config_.input_schroeder_allpass_config.has_value();
+    config_changed |= ImGui::Checkbox("Extra Schroeder Allpass", &use_schroeder_allpass);
 
-    if (extra_schroeder_allpass)
+    if (use_schroeder_allpass)
     {
-        config_changed |= DrawExtraSchroederAllpassWidget(fdn_config_, config_changed);
+        SchroederAllpassConfig schroeder_config;
+        if (fdn_config_.input_schroeder_allpass_config.has_value())
+        {
+            schroeder_config = *(fdn_config_.input_schroeder_allpass_config);
+        }
+
+        config_changed |= DrawExtraSchroederAllpassWidget(schroeder_config, fdn_config_.N, config_changed);
+        fdn_config_.input_schroeder_allpass_config = schroeder_config;
     }
     else
     {
-        fdn_config_.schroeder_allpass_delays.clear();
-        fdn_config_.schroeder_allpass_gains.clear();
+        fdn_config_.input_schroeder_allpass_config.reset();
+    }
+
+    bool use_diffuser = fdn_config_.input_diffuser.has_value();
+    config_changed |= ImGui::Checkbox("Input Diffuser", &use_diffuser);
+    if (use_diffuser)
+    {
+        config_changed |= DrawDiffuserWidget(fdn_config_, config_changed);
+    }
+    else
+    {
+        fdn_config_.input_diffuser.reset();
+    }
+
+    bool use_mc_velvet = fdn_config_.input_velvet_decorrelator_mc.has_value();
+    config_changed |= ImGui::Checkbox("Velvet Decorrelator MC", &use_mc_velvet);
+    if (use_mc_velvet)
+    {
+        VelvetNoiseDecorrelatorConfig vn_config;
+        if (fdn_config_.input_velvet_decorrelator_mc.has_value())
+        {
+            vn_config = *(fdn_config_.input_velvet_decorrelator_mc);
+        }
+
+        static uint32_t selected_ovn_input = 0;
+        config_changed |= DrawInputVelvetNoiseDecorrelatorMultiChannel(vn_config, selected_ovn_input, config_changed);
+
+        fdn_config_.input_velvet_decorrelator_mc = vn_config;
+    }
+    else
+    {
+        fdn_config_.input_velvet_decorrelator_mc.reset();
+    }
+
+    ImGui::SeparatorText("Feedback Loop");
+    ImGui::Separator();
+    ImGui::TextWrapped(
+        "The following extras are added inside the feedback loop, between the delay lines and the attenuation filter.");
+
+    bool use_feedback_schroeder = fdn_config_.feedback_schroeder_allpass_config.has_value();
+    config_changed |= ImGui::Checkbox("Feedback Schroeder Allpass", &use_feedback_schroeder);
+    if (use_feedback_schroeder)
+    {
+        SchroederAllpassConfig schroeder_config;
+        if (fdn_config_.feedback_schroeder_allpass_config.has_value())
+        {
+            schroeder_config = *(fdn_config_.feedback_schroeder_allpass_config);
+        }
+        config_changed |= DrawExtraSchroederAllpassWidget(schroeder_config, fdn_config_.N, config_changed);
+
+        fdn_config_.feedback_schroeder_allpass_config = schroeder_config;
+    }
+    else
+    {
+        fdn_config_.feedback_schroeder_allpass_config.reset();
+    }
+
+    ImGui::SeparatorText("Output Gain Stage");
+    ImGui::Separator();
+    ImGui::TextWrapped("The following extras are added before the output gain stage, outside the feedback loop.");
+
+    bool use_output_velvet_mc = fdn_config_.output_velvet_decorrelator_mc.has_value();
+    config_changed |= ImGui::Checkbox("Velvet Decorrelator MC ##Output", &use_output_velvet_mc);
+    if (use_output_velvet_mc)
+    {
+        VelvetNoiseDecorrelatorConfig vn_config;
+        if (fdn_config_.output_velvet_decorrelator_mc.has_value())
+        {
+            vn_config = *(fdn_config_.output_velvet_decorrelator_mc);
+        }
+
+        static uint32_t selected_ovn_output = 0;
+        config_changed |= DrawInputVelvetNoiseDecorrelatorMultiChannel(vn_config, selected_ovn_output, config_changed);
+
+        fdn_config_.output_velvet_decorrelator_mc = vn_config;
+    }
+    else
+    {
+        fdn_config_.output_velvet_decorrelator_mc.reset();
+    }
+
+    ImGui::Separator();
+    ImGui::TextWrapped("The following extras are added after the output gain stage.");
+
+    bool use_output_schroeder = fdn_config_.output_schroeder_allpass_config.has_value();
+    config_changed |= ImGui::Checkbox("Output Schroeder Allpass", &use_output_schroeder);
+    if (use_output_schroeder)
+    {
+        SchroederAllpassConfig schroeder_config;
+        if (fdn_config_.output_schroeder_allpass_config.has_value())
+        {
+            schroeder_config = *(fdn_config_.output_schroeder_allpass_config);
+        }
+        config_changed |= DrawInputSeriesSchroederAllpassWidget(schroeder_config, config_changed);
+
+        fdn_config_.output_schroeder_allpass_config = schroeder_config;
+    }
+    else
+    {
+        fdn_config_.output_schroeder_allpass_config.reset();
     }
 
     ImGui::End();
@@ -628,16 +773,11 @@ void FDNToolboxApp::DrawImpulseResponse()
 
     if (ImPlot::BeginPlot("Impulse Response", ImVec2(-1, -1), ImPlotFlags_NoLegend))
     {
-        ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
         auto imp_response = fdn_analyzer_.GetImpulseResponse();
 
         if (fdn_analyzer_.IsClipping())
         {
-            ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(1.0f, 0.0f, 0.0f, 1.0f)); // Red for clipping
-        }
-        else
-        {
-            ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.70f, 0.70f, 0.90f, 1.0f));
+            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Warning: Impulse response is clipping!");
         }
 
         ImPlot::SetupAxes("Sample", "Amplitude", ImPlotAxisFlags_AutoFit);
@@ -648,9 +788,6 @@ void FDNToolboxApp::DrawImpulseResponse()
 
         ImPlot::PlotLine("Impulse Response", imp_response.data(), imp_response.size());
         ImPlot::EndPlot();
-
-        ImPlot::PopStyleVar();
-        ImPlot::PopStyleColor();
     }
 
     ImGui::End(); // End the Impulse Response window
@@ -818,6 +955,29 @@ void FDNToolboxApp::DrawSettingsWindow()
         fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
     }
 
+    ImGui::SeparatorText("Style Settings");
+
+    ImPlotStyle& style = ImPlot::GetStyle();
+
+    float line_weight = style.LineWeight;
+    ImGui::SetNextItemWidth(200);
+    if (ImGui::SliderFloat("Line Weight", &line_weight, 1.0f, 5.0f))
+    {
+        style.LineWeight = line_weight;
+    }
+
+    ImGui::SetNextItemWidth(200);
+    ImGui::ShowFontSelector("ImGui Font");
+
+    ImGui::SetNextItemWidth(200);
+    ImGui::ShowStyleSelector("ImGui Style");
+
+    ImGui::SetNextItemWidth(200);
+    ImPlot::ShowStyleSelector("ImPlot Style");
+
+    ImGui::SetNextItemWidth(200);
+    ImPlot::ShowColormapSelector("ImPlot Colormap");
+
     ImGui::End(); // End the Settings window
 }
 
@@ -915,6 +1075,8 @@ void FDNToolboxApp::DrawSpectrum()
     ImGui::RadioButton("Only Peaks", &peak_radio, 1);
     ImGui::SameLine();
     ImGui::RadioButton("Both", &peak_radio, 2);
+    ImGui::SameLine();
+    ImGui::RadioButton("Histogram", &peak_radio, 3);
 
     static float frequency_range_min = 0.f;
     static float frequency_range_max = Settings::Instance().SampleRate() / 2.f;
@@ -938,26 +1100,34 @@ void FDNToolboxApp::DrawSpectrum()
         if (ImPlot::BeginPlot(plot_title.c_str(), ImVec2(), ImPlotFlags_NoLegend))
         {
 
-            ImPlot::SetupAxes("Frequency (Hz)", "Magnitude (dB)");
-            ImPlot::SetupAxesLimits(frequency_range_min, frequency_range_max, -60.0, 0.0,
-                                    (lock_freq_range) ? ImPlotCond_Always : ImPlotCond_Once);
-
-            ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, spectrum_data.frequency_bins.back());
-
-            if (peak_radio != 1)
+            if (peak_radio < 3)
             {
-                ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.70f, 0.70f, 0.90f, 1.0f));
+                ImPlot::SetupAxes("Frequency (Hz)", "Magnitude (dB)");
+                // ImPlot::SetupAxesLimits(frequency_range_min, frequency_range_max, -60.0, 0.0,
+                //                         (lock_freq_range) ? ImPlotCond_Always : ImPlotCond_Once);
+
+                ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, spectrum_data.frequency_bins.back());
+            }
+
+            if (peak_radio == 0 || peak_radio == 2)
+            {
                 ImPlot::PlotLine("Spectrum", spectrum_data.frequency_bins.data(), spectrum_data.spectrum.data(),
                                  spectrum_data.spectrum.size());
-                ImPlot::PopStyleColor();
             }
-            if (peak_radio != 0)
+            if (peak_radio == 1 || peak_radio == 2)
             {
-                ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.98f, 0.45f, 0.04f, 1.0f));
                 ImPlot::SetNextMarkerStyle(ImPlotMarker_Asterisk, 2.0f);
                 ImPlot::PlotScatter("Peaks", spectrum_data.peaks_freqs.data(), spectrum_data.peaks.data(),
                                     spectrum_data.peaks.size(), ImPlotFlags_NoLegend);
-                ImPlot::PopStyleColor();
+            }
+
+            if (peak_radio == 3)
+            {
+                ImPlot::SetupAxes("Magnitude (dB)", "Count");
+                ImPlot::SetupAxesLimits(-60.0, 0.0, 0.0, 600.0, ImPlotCond_Always);
+
+                ImPlot::PlotHistogram("Histogram", spectrum_data.peaks.data(), spectrum_data.peaks.size(),
+                                      ImPlotBin_Sqrt, 0.95f, ImPlotRange(-60, 0), ImPlotHistogramFlags_None);
             }
 
             if (!lock_freq_range)
@@ -1013,17 +1183,11 @@ void FDNToolboxApp::DrawAutocorrelation()
 
         if (ImPlot::BeginPlot("Autocorrelation", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
-            ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
-            ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.70f, 0.70f, 0.90f, 1.0f));
-
             ImPlot::SetupAxisLimits(ImAxis_X1, -1000.0f, xcorr_span.size(), ImPlotCond_Once);
             ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, -1000, xcorr_span.size() + 100);
 
             ImPlot::PlotLine("Autocorrelation", xcorr_span.data(), xcorr_span.size());
             ImPlot::EndPlot();
-
-            ImPlot::PopStyleVar();
-            ImPlot::PopStyleColor();
         }
         ImPlot::EndSubplots();
     }
@@ -1080,7 +1244,6 @@ void FDNToolboxApp::DrawFilterResponse()
                     ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_ticks.data(), frequencies_ticks.size(), nullptr,
                                            false);
 
-                    ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
                     for (uint32_t i = 0; i < filter_data.mag_responses.size(); ++i)
                     {
                         auto mag_response = filter_data.mag_responses[i];
@@ -1088,7 +1251,6 @@ void FDNToolboxApp::DrawFilterResponse()
                         ImPlot::PlotLine(line_name.c_str(), filter_data.frequency_bins.data(), mag_response.data(),
                                          mag_response.size());
                     }
-                    ImPlot::PopStyleVar();
                     ImPlot::EndPlot();
                 }
 
@@ -1101,8 +1263,6 @@ void FDNToolboxApp::DrawFilterResponse()
                     ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_ticks.data(), frequencies_ticks.size(), nullptr,
                                            false);
 
-                    ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
-
                     for (uint32_t i = 0; i < filter_data.mag_responses.size(); ++i)
                     {
                         auto phase_response = filter_data.phase_responses[i];
@@ -1111,7 +1271,6 @@ void FDNToolboxApp::DrawFilterResponse()
                                          phase_response.size());
                     }
 
-                    ImPlot::PopStyleVar();
                     ImPlot::EndPlot();
                 }
                 ImPlot::EndSubplots();
@@ -1133,10 +1292,8 @@ void FDNToolboxApp::DrawFilterResponse()
                     ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_ticks.data(), frequencies_ticks.size(), nullptr,
                                            false);
 
-                    ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
                     ImPlot::PlotLine("TC Filter", filter_data.frequency_bins.data(), filter_data.tc_mag_response.data(),
                                      filter_data.tc_mag_response.size());
-                    ImPlot::PopStyleVar();
                     ImPlot::EndPlot();
                 }
 
@@ -1148,12 +1305,9 @@ void FDNToolboxApp::DrawFilterResponse()
                     ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_ticks.data(), frequencies_ticks.size(), nullptr,
                                            false);
 
-                    ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
-
                     ImPlot::PlotLine("TC Filter", filter_data.frequency_bins.data(),
                                      filter_data.tc_phase_response.data(), filter_data.tc_phase_response.size());
 
-                    ImPlot::PopStyleVar();
                     ImPlot::EndPlot();
                 }
                 ImPlot::EndSubplots();
@@ -1196,7 +1350,6 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
     if (ImPlot::BeginPlot(edc_title.c_str(), ImVec2(-1, -1), ImPlotFlags_None))
     {
         ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_None);
-        ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 2.0f);
 
         // ImPlot::SetupAxes("Sample", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
 
@@ -1226,8 +1379,6 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
         }
 
         ImPlot::EndPlot();
-
-        ImPlot::PopStyleVar();
     }
 
     ImGui::End();
@@ -1291,7 +1442,7 @@ void FDNToolboxApp::DrawEchoDensity()
         auto ir = fdn_analyzer_.GetImpulseResponse();
         auto time_data = fdn_analyzer_.GetTimeData();
 
-        ImPlot::SetupAxes("Sample", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_None);
+        ImPlot::SetupAxes("Sample", "Amplitude", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
         ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0f, 1.5f, ImPlotCond_Once);
         ImPlot::SetupAxisLimits(ImAxis_X1, -0.01f, time_data.back(), ImPlotCond_Once);
 
@@ -1318,7 +1469,7 @@ void FDNToolboxApp::DrawT60s()
     }
 
     const float db_start = -5;
-    const float db_end = -15;
+    const float db_end = -50;
 
     if (ImPlot::BeginPlot("RT60s", ImVec2(-1, -1), ImPlotFlags_NoLegend))
     {

@@ -178,6 +178,43 @@ void WriteAudioFile(const std::string& filename, std::span<const float> audio_da
     sf_close(sndfile);
 }
 
+uint32_t GetChannelCountFromAudioFile(const std::string_view filename)
+{
+    SF_INFO sf_info{};
+    SNDFILE* sndfile = sf_open(filename.data(), SFM_READ, &sf_info);
+    if (sndfile == nullptr)
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file for reading: {}", sf_strerror(nullptr));
+        return {};
+    }
+    return sf_info.channels;
+}
+
+std::vector<float> ReadAudioFile(const std::string_view filename, uint32_t channel)
+{
+    SF_INFO sf_info{};
+    SNDFILE* sndfile = sf_open(filename.data(), SFM_READ, &sf_info);
+    if (sndfile == nullptr)
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file for reading: {}", sf_strerror(nullptr));
+        return {};
+    }
+
+    channel = std::min(channel, static_cast<uint32_t>(sf_info.channels - 1));
+
+    std::vector<float> frame(sf_info.channels, 0.0f);
+
+    std::vector<float> audio_data(sf_info.frames, 0.0f);
+    for (size_t i = 0; i < static_cast<size_t>(sf_info.frames); ++i)
+    {
+        sf_readf_float(sndfile, frame.data(), 1);
+        audio_data[i] = frame[channel];
+    }
+
+    sf_close(sndfile);
+    return audio_data;
+}
+
 uint32_t GetClosestPrime(uint32_t n)
 {
     if (n < 2)

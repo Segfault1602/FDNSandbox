@@ -33,7 +33,7 @@ int main()
     // Create window with graphics context
     float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
     GLFWwindow* window =
-        glfwCreateWindow((int)(1880 * main_scale), (int)(1400 * main_scale), "FDN Sandbox", nullptr, nullptr);
+        glfwCreateWindow((int)(1880 * main_scale), (int)(1300 * main_scale), "FDN Sandbox", nullptr, nullptr);
     if (window == nullptr)
         return 1;
     glfwMakeContextCurrent(window);

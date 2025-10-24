@@ -21,9 +21,8 @@ const FDNConfig kDefaultFDNConfig = {
     .tc_frequencies = {},          // Default tone correction frequencies
     .use_extra_delays = false,
     .input_stage_delays = {},
-    .schroeder_allpass_delays = {},
-    .schroeder_allpass_gains = {}
-
+    .input_schroeder_allpass_config = std::nullopt,
+    .input_diffuser = std::nullopt,
 };
 
 } // namespace presets

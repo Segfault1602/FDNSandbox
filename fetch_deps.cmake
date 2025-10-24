@@ -44,11 +44,22 @@ add_library(
     ${IMGUI_SOURCES}
     ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-)
-
-target_include_directories(imgui_metal PUBLIC ${IMGUI_INCLUDE_DIR} ${GLFW_INCLUDE_DIR} ${GLAD_INCLUDE_DIR})
-target_link_libraries(imgui_metal glfw)
+    )
+    target_include_directories(imgui_metal PUBLIC ${IMGUI_INCLUDE_DIR} ${GLFW_INCLUDE_DIR} ${GLAD_INCLUDE_DIR})
+    target_link_libraries(imgui_metal glfw)
 endif()
+
+if (WIN32)
+    add_library(imgui_win32_dx12 STATIC
+        ${IMGUI_SOURCES}
+        ${IMGUI_SOURCES}
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
+    )
+    target_include_directories(imgui_win32_dx12 PUBLIC ${IMGUI_INCLUDE_DIR})
+    target_link_libraries(imgui_win32_dx12 dxgi d3d12)
+endif()
+
 
 
 FetchContent_Declare(implot GIT_REPOSITORY https://github.com/epezent/implot.git GIT_TAG master)

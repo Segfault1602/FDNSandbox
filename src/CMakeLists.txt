@@ -44,6 +44,17 @@ if(APPLE)
                 "-framework CoreVideo"
                 "-framework QuartzCore"
     )
+elseif(WIN32)
+    add_executable(${PROJECT_NAME} main_win32_dx12.cpp)
+    target_link_libraries(
+        ${PROJECT_NAME}
+        PRIVATE fdn_sandbox_app
+                imgui_win32_dx12
+                implot
+    )
+    target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DIMGUI_USER_CONFIG="app_imconfig.h")
+
 else()
     # ========= OpenGL implementation =========
     add_executable(${PROJECT_NAME} main.cpp)
@@ -59,7 +70,6 @@ else()
     target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 
     target_compile_definitions(${PROJECT_NAME} PUBLIC GL_SILENCE_DEPRECATION -DIMGUI_USER_CONFIG="app_imconfig.h")
-
 endif()
 target_compile_options(${PROJECT_NAME} PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
 target_link_options(${PROJECT_NAME} PUBLIC ${FDNSANDBOX_LINK_OPTIONS})

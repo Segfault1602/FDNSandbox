@@ -1,7 +1,6 @@
 #include "analysis.h"
 
 #include <Eigen/Core>
-#include <algorithm>
 #include <boost/math/statistics/linear_regression.hpp>
 #include <sndfile.h>
 
@@ -11,7 +10,6 @@
 #include "audio_utils/fft.h"
 #include "octave_band_coeff.h"
 #include "octave_band_filters_fir.h"
-#include "sffdn/partitioned_convolver.h"
 #include <audio_utils/fft_utils.h>
 
 #include <sffdn/sffdn.h>
@@ -121,14 +119,8 @@ std::array<std::vector<float>, 10> EnergyDecayRelief(std::span<const float> sign
 
         // The filters introduce a delay of roughly half the filter length
         const size_t delay = (fir_coeffs.size() / 2) * 0.9;
-        if (delay < result.size())
-        {
-            std::ranges::rotate(result, result.begin() + delay);
-            std::fill(result.end() - delay, result.end(), 0.0f);
-        }
-
-        result.erase(result.begin() + signal.size(), result.end());
-        edc_octaves[i] = EnergyDecayCurve(result, to_db);
+        std::span<float> result_span = std::span(result).subspan(delay, signal.size());
+        edc_octaves[i] = EnergyDecayCurve(result_span, to_db);
     }
 
     return edc_octaves;

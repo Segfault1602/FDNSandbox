@@ -15,12 +15,22 @@ if __name__ == "__main__":
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
     # OUT_PATH = os.path.join(CURRENT_DIR, "octave_band_filters")
 
-    filter, freqs = pf.dsp.filter.reconstructing_fractional_octave_bands(None, num_fractions=FRACTION, frequency_range=FREQUENCY_RANGE, overlap=OVERLAP, slope=SLOPE, n_samples=N_SAMPLES, sampling_rate=SAMPLING_RATE)
+    filter, freqs = pf.dsp.filter.reconstructing_fractional_octave_bands(
+        None,
+        num_fractions=FRACTION,
+        frequency_range=FREQUENCY_RANGE,
+        overlap=OVERLAP,
+        slope=SLOPE,
+        n_samples=N_SAMPLES,
+        sampling_rate=SAMPLING_RATE,
+    )
 
     OUT_PATH = os.path.join(CURRENT_DIR, f"octave_band_filters_fir.h")
 
     f = open(OUT_PATH, "w")
-    f.write("// This file was generated with src/analysis/generate_octave_band_filter.py\n")
+    f.write(
+        "// This file was generated with src/analysis/generate_octave_band_filter.py\n"
+    )
     f.write(f"// Sampling rate: {SAMPLING_RATE} Hz\n")
     f.write(f"// Number of samples: {N_SAMPLES}\n")
     f.write(f"// Fraction: {FRACTION}\n")
@@ -30,9 +40,14 @@ if __name__ == "__main__":
     f.write("#pragma once\n\n")
     f.write("#include <array>\n\n")
 
-    f.write(f"constexpr std::array<std::array<float, {N_SAMPLES}>, {len(freqs)}> kOctaveBandFirFilters = {{{{\n")
+    f.write(
+        f"constexpr std::array<std::array<float, {N_SAMPLES}>, {len(freqs)}> kOctaveBandFirFilters = {{{{\n"
+    )
 
-    for idx, freq, in enumerate(freqs):
+    for (
+        idx,
+        freq,
+    ) in enumerate(freqs):
         print(f"Band {idx}: {freq} Hz")
         var_name = f"kOctaveBandFir_{int(freq)}Hz"
         c_array = "    {"
