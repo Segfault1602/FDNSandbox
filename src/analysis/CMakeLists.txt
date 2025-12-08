@@ -26,3 +26,7 @@ target_link_libraries(
 if(OpenMP_CXX_FOUND)
     target_link_libraries(fdn_analysis PRIVATE OpenMP::OpenMP_CXX)
 endif()
+
+target_compile_options(fdn_analysis PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
+target_link_options(fdn_analysis PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
+target_compile_definitions(fdn_analysis PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})

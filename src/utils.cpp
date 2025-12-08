@@ -50,6 +50,13 @@ bool isPrime(uint32_t n)
     return true;
 }
 
+float ComputeRMSImpl(std::span<const float> buffer)
+{
+    Eigen::Map<const Eigen::ArrayXf> buffer_map(buffer.data(), buffer.size());
+    float rms = std::sqrt(buffer_map.square().mean());
+    return rms;
+}
+
 } // namespace
 
 namespace utils
@@ -315,6 +322,18 @@ std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, siz
     }
 
     return gains;
+}
+
+std::vector<float> ComputeRMS(std::span<const float> buffer, uint32_t block_size, uint32_t hop_size)
+{
+    std::vector<float> rms_values;
+    for (size_t i = 0; i + block_size <= buffer.size(); i += hop_size)
+    {
+        auto block = buffer.subspan(i, block_size);
+        float rms = ComputeRMSImpl(block);
+        rms_values.push_back(rms);
+    }
+    return rms_values;
 }
 
 template std::vector<double> LogSpace(double start, double stop, size_t num);

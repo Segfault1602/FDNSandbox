@@ -11,7 +11,6 @@
 namespace
 {
 constexpr size_t kSpectrumNFFT = 48000;
-constexpr uint32_t kFilterNFFT = 8192; // Number of FFT points for filter response
 
 struct Stopwatch
 {
@@ -37,16 +36,13 @@ namespace fdn_analysis
 IRAnalyzer::IRAnalyzer(uint32_t samplerate, quill::Logger* logger)
     : samplerate_(samplerate)
     , logger_(logger)
-    , impulse_response_size_samples_(0)
+    , is_clipping_(false)
     , spectrogram_bin_count_(0)
     , spectrogram_frame_count_(0)
     , spectrum_early_rir_time_(0.5f)
-    , is_clipping_(false)
     , cepstrum_early_rir_time_(0.5f)
     , autocorrelation_early_rir_time_(0.5f)
     , overall_t60_(0.0f)
-    , decay_db_start_(-5.0f)
-    , decay_db_end_(-25.0f)
     , echo_density_window_size_ms_(25)
     , echo_density_hop_size_ms_(10)
 {
@@ -152,7 +148,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         frequency_bins_.resize(kNumFrequencyBins);
         for (size_t i = 0; i < kNumFrequencyBins; ++i)
         {
-            frequency_bins_[i] = static_cast<float>(i) * samplerate_ / kSpectrumNFFT;
+            frequency_bins_[i] = static_cast<float>(i) * samplerate_ / nfft;
         }
 
         spectrum_peaks_.clear();
@@ -172,6 +168,13 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
 
         analysis_flags_.reset(static_cast<size_t>(AnalysisType::Spectrum));
         LOG_INFO(logger_, "Computing spectrum took {} ms", stopwatch.ElapsedMs());
+
+        // Compute Spectral Flatness for fun
+        std::vector<float> temp_spectrum;
+        temp_spectrum.resize(spectrum_data_.size());
+        fft.ForwardAbs(early_rir, temp_spectrum, false, false);
+        float flatness = audio_utils::analysis::SpectralFlatness(temp_spectrum);
+        LOG_INFO(logger_, "Spectral Flatness: {:.4f}", flatness);
     }
 
     assert(spectrum_data_.size() == frequency_bins_.size());
@@ -323,6 +326,7 @@ EchoDensityData IRAnalyzer::GetEchoDensityData(uint32_t window_size_ms, uint32_t
         echo_density_indices_.assign(echo_density_result.sparse_indices.begin(),
                                      echo_density_result.sparse_indices.end());
 
+        mixing_time_ = echo_density_result.mixing_time;
         // Convert indices to time in seconds
         for (auto& idx : echo_density_indices_)
         {
@@ -333,6 +337,7 @@ EchoDensityData IRAnalyzer::GetEchoDensityData(uint32_t window_size_ms, uint32_t
         LOG_INFO(logger_, "Analyzing echo density took {} ms", stopwatch.ElapsedMs());
     }
 
-    return EchoDensityData{.echo_density = echo_density_, .sparse_indices = echo_density_indices_};
+    return EchoDensityData{
+        .echo_density = echo_density_, .sparse_indices = echo_density_indices_, .mixing_time = mixing_time_};
 }
 } // namespace fdn_analysis

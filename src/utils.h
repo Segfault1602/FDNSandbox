@@ -90,4 +90,6 @@ std::string GetDelayLengthTypeName(int type);
 
 std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate);
 
+std::vector<float> ComputeRMS(std::span<const float> buffer, uint32_t block_size, uint32_t hop_size);
+
 } // namespace utils

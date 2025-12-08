@@ -1,4 +1,5 @@
 add_subdirectory(analysis)
+add_subdirectory(optimization)
 
 # ====== FDN Sandbox App logic =======
 add_library(fdn_sandbox_app STATIC)
@@ -9,7 +10,6 @@ target_sources(
             app.cpp
             fdn_info.cpp
             presets.cpp
-            fdn_config.cpp
 )
 target_link_libraries(
     fdn_sandbox_app
@@ -17,6 +17,7 @@ target_link_libraries(
     PRIVATE imgui
             implot
             fdn_analysis
+            fdn_optimization
             SndFile::sndfile
             Boost::math
             Boost::filesystem
@@ -27,6 +28,7 @@ target_include_directories(fdn_sandbox_app PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DI
 target_compile_features(fdn_sandbox_app PRIVATE cxx_std_23)
 target_compile_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
 target_link_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
+target_compile_definitions(fdn_sandbox_app PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})
 
 # ====== Metal implementation ======
 if(APPLE)
@@ -46,12 +48,7 @@ if(APPLE)
     )
 elseif(WIN32)
     add_executable(${PROJECT_NAME} main_win32_dx12.cpp)
-    target_link_libraries(
-        ${PROJECT_NAME}
-        PRIVATE fdn_sandbox_app
-                imgui_win32_dx12
-                implot
-    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE fdn_sandbox_app imgui_win32_dx12 implot)
     target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${PROJECT_NAME} PUBLIC -DIMGUI_USER_CONFIG="app_imconfig.h")
 

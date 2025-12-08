@@ -1,0 +1,88 @@
+clearvars;close all;
+addpath(genpath("../../FDNToolbox"));
+
+[init_ir, init_fs] = audioread('../optim_output/initial_ir.wav');
+[opt_ir, opt_fs] = audioread('../optim_output/optimized_ir.wav');
+
+irLen = size(init_ir,1);
+
+noise = randn(irLen,1);
+noise = noise / max(abs(noise));
+
+figure(1);
+subplot(2,1,1);
+plot(init_ir);
+title('Initial Impulse Response');
+xlabel('Samples');
+ylabel('Amplitude');
+
+subplot(2,1,2);
+plot(opt_ir);
+title('Optimized Impulse Response');
+xlabel('Samples');
+ylabel('Amplitude');
+
+WIN_LEN = 2^14;
+OVL_LEN = round(0.99*WIN_LEN);
+
+figure(2);
+spectralFlatness(init_ir, init_fs, Window=rectwin(WIN_LEN), OverlapLength=OVL_LEN, ...
+              Range=[0,init_fs/2]);
+
+init_flat = spectralFlatness(init_ir, init_fs, Window=rectwin(size(init_ir,1)), OverlapLength=OVL_LEN, ...
+              Range=[0,init_fs/2]);
+
+hold on;
+spectralFlatness(opt_ir, opt_fs, Window=rectwin(WIN_LEN), OverlapLength=OVL_LEN, ...
+              Range=[0,opt_fs/2]);
+optim_flat = spectralFlatness(opt_ir, opt_fs, Window=rectwin(size(opt_ir,1)), OverlapLength=OVL_LEN, ...
+              Range=[0,opt_fs/2]);
+
+spectralFlatness(noise, opt_fs, Window=rectwin(WIN_LEN), OverlapLength=OVL_LEN, ...
+              Range=[0,opt_fs/2]);
+noise_flat = spectralFlatness(noise, opt_fs, Window=rectwin(size(noise,1)), OverlapLength=OVL_LEN, ...
+              Range=[0,opt_fs/2]);
+
+yline(init_flat, "b--", DisplayName="Initial Flatness");
+yline(optim_flat, "r--", DisplayName="Optimized Flatness");
+yline(noise_flat, "k--", DisplayName="Noise Flatness");
+
+hold off;
+ylim([0 1]);
+legend("initial", "optimized", "Noise");
+title("Spectral Flatness");
+
+figure(3);
+sparsity_win = 2^13;
+sparsity_ovl = round(0.9*sparsity_win);
+[sparsity_losses, init_sparsity_loss] = SparsityLoss(init_ir, sparsity_win, sparsity_ovl);
+plot(sparsity_losses, DisplayName="Initial IR");
+yline(init_sparsity_loss, "b--");
+
+hold on;
+[sparsity_losses_opt, total_sparsity_loss_opt] = SparsityLoss(opt_ir, sparsity_win, sparsity_ovl);
+plot(sparsity_losses_opt, "r-", DisplayName="Optimized IR");
+yline(total_sparsity_loss_opt, "r--");
+disp({""})
+
+[sparsity_losses, init_sparsity_loss] = SparsityLoss(noise, sparsity_win, sparsity_ovl);
+plot(sparsity_losses, "k-", DisplayName="Noise");
+yline(init_sparsity_loss, "k--");
+
+hold off;
+legend();
+title("Sparsity Loss");
+grid on;
+
+
+figure(4);
+losses = readtable("../optim_output/loss_history.txt", "VariableNamingRule","preserve");
+total_loss = losses{:,1};
+plot(total_loss, DisplayName=losses.Properties.VariableNames{1});
+hold on;
+for n = 2:size(losses,2)
+    plot(losses{:, n}, DisplayName=losses.Properties.VariableNames{n});
+end
+hold off;
+grid on;
+legend();

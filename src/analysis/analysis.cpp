@@ -5,6 +5,7 @@
 #include <sndfile.h>
 
 #include <algorithm>
+#include <limits>
 #include <numbers>
 
 #include "audio_utils/fft.h"
@@ -145,9 +146,10 @@ EchoDensityResults EchoDensity(std::span<const float> signal, uint32_t window_si
     }
 
     const int half_win = window_size / 2;
+    results.echo_densities.reserve((signal.size() + hop_size - 1) / hop_size);
+    results.sparse_indices.reserve((signal.size() + hop_size - 1) / hop_size);
 
-    std::vector<int> sparse_index;
-    std::vector<float> echo_dens;
+    results.mixing_time = std::numeric_limits<float>::infinity();
 
     for (int n = 0; n < signal.size(); n += hop_size)
     {
@@ -188,6 +190,12 @@ EchoDensityResults EchoDensity(std::span<const float> signal, uint32_t window_si
 
         results.sparse_indices.push_back(n);
         results.echo_densities.push_back(echo_density);
+
+        // Estimate mixing time as the time when echo density first exceeds 0.9
+        if (results.mixing_time == std::numeric_limits<float>::infinity() && echo_density >= 0.9f)
+        {
+            results.mixing_time = static_cast<float>(n) / static_cast<float>(sample_rate);
+        }
     }
 
     return results;

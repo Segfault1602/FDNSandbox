@@ -11,7 +11,7 @@
 
 namespace
 {
-constexpr size_t kSpectrumNFFT = 48000;
+
 constexpr uint32_t kFilterNFFT = 8192; // Number of FFT points for filter response
 
 struct Stopwatch
@@ -114,7 +114,6 @@ std::span<const float> FDNAnalyzer::GetImpulseResponse()
             std::ranges::any_of(impulse_response, [](float sample) { return sample < -1.0f || sample > 1.0f; });
         analysis_flags_.reset(static_cast<size_t>(AnalysisType::ImpulseResponse));
 
-        auto end = std::chrono::high_resolution_clock::now();
         LOG_INFO(logger_, "Rendering new impulse response took {} ms", stopwatch.ElapsedMs());
 
         ir_analyzer_.SetImpulseResponse(std::move(impulse_response));

@@ -122,8 +122,8 @@ int main(int, char**)
     WNDCLASSEXW wc = {sizeof(wc), CS_CLASSDC, WndProc,       0L,     0L, GetModuleHandle(nullptr), nullptr, nullptr,
                       nullptr,    nullptr,    L"FDNSandbox", nullptr};
     ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"FDN Sandbox", WS_OVERLAPPEDWINDOW, 400, 0, (int)(1680 * main_scale),
-                                (int)(1200 * main_scale), nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"FDN Sandbox", WS_OVERLAPPEDWINDOW, 400, 0, (int)(1880 * main_scale),
+                                (int)(1400 * main_scale), nullptr, nullptr, wc.hInstance, nullptr);
 
     // Initialize Direct3D
     if (!CreateDeviceD3D(hwnd))

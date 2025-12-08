@@ -261,7 +261,7 @@ void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
     }
 }
 
-bool DrawGainsWidget(std::span<float> gains)
+bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 {
     bool config_changed = false;
     const size_t N = gains.size();
@@ -277,9 +277,9 @@ bool DrawGainsWidget(std::span<float> gains)
     if (ImGui::Button("Randomize"))
     {
         config_changed = true;
-        std::random_device rd;                                    // Obtain a random number from hardware
-        std::mt19937 eng(rd());                                   // Seed the generator
-        std::uniform_real_distribution<float> distr(-1.0f, 1.0f); // Define the range
+        std::random_device rd;                                           // Obtain a random number from hardware
+        std::mt19937 eng(rd());                                          // Seed the generator
+        std::uniform_real_distribution<float> distr(min_gain, max_gain); // Define the range
 
         for (uint32_t i = 0; i < N; ++i)
         {
@@ -321,17 +321,40 @@ bool DrawGainsWidget(std::span<float> gains)
         ImGui::OpenPopup("Gains Popup");
     }
 
+    ImGui::DragFloatRange2("Gain Range", &min_gain, &max_gain, 0.01f, -1.0f, 1.0f, "%.2f");
+
     for (uint32_t i = 0; i < N; ++i)
     {
-        std::string label = "Input Gain " + std::to_string(i + 1);
+        std::string label = "Gain " + std::to_string(i + 1);
         config_changed |= ImGui::SliderFloat(label.c_str(), &gains[i], -1.f, 1.0f, "%.2f");
+    }
+
+    ImGui::Text("Adjust all:");
+    ImGui::SameLine();
+    if (ImGui::Button("-"))
+    {
+        config_changed = true;
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            gains[i] *= 0.9f;
+        }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("+"))
+    {
+        config_changed = true;
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            gains[i] *= 1.1f;
+        }
     }
 
     return config_changed;
 }
 } // namespace
 
-void DrawInputOutputGainsPlot(const FDNConfig& config, sfFDN::FDN* fdn)
+void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 {
     if (ImPlot::BeginSubplots("##Input/Output_Gains", 2, 1, ImVec2(300, 200),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
@@ -369,7 +392,7 @@ void DrawInputOutputGainsPlot(const FDNConfig& config, sfFDN::FDN* fdn)
     }
 }
 
-void DrawDelaysPlot(const FDNConfig& config, uint32_t max_delay)
+void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
 {
     if (ImPlot::BeginPlot("Delays", ImVec2(300, 100), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
@@ -383,7 +406,7 @@ void DrawDelaysPlot(const FDNConfig& config, uint32_t max_delay)
     }
 }
 
-void DrawFeedbackMatrixPlot(const FDNConfig& config)
+void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config)
 {
     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_Plasma;
 
@@ -420,7 +443,7 @@ void DrawFeedbackMatrixPlot(const FDNConfig& config)
     ImPlot::PopColormap();
 }
 
-bool DrawInputGainsWidget(FDNConfig& config)
+bool DrawInputGainsWidget(sfFDN::FDNConfig& config)
 {
     if (config.input_gains.size() != config.N)
     {
@@ -430,7 +453,9 @@ bool DrawInputGainsWidget(FDNConfig& config)
     bool config_changed = false;
     if (ImGui::TreeNode("Edit input gains"))
     {
-        config_changed |= DrawGainsWidget(config.input_gains);
+        static float min_gain = -1.0f;
+        static float max_gain = 1.0f;
+        config_changed |= DrawGainsWidget(config.input_gains, min_gain, max_gain);
 
         bool is_time_varying = config.time_varying_input_gains.has_value();
         config_changed |= ImGui::Checkbox("Time Varying Input Gains", &is_time_varying);
@@ -439,7 +464,7 @@ bool DrawInputGainsWidget(FDNConfig& config)
         {
             if (!config.time_varying_input_gains.has_value())
             {
-                config.time_varying_input_gains = TimeVaryingGainsConfig{};
+                config.time_varying_input_gains = sfFDN::TimeVaryingGainsConfig{};
             }
 
             float freq_hz = config.time_varying_input_gains->lfo_frequency * Settings::Instance().SampleRate();
@@ -461,7 +486,7 @@ bool DrawInputGainsWidget(FDNConfig& config)
     return config_changed;
 }
 
-bool DrawOutputGainsWidget(FDNConfig& config)
+bool DrawOutputGainsWidget(sfFDN::FDNConfig& config)
 {
     if (config.output_gains.size() != config.N)
     {
@@ -471,7 +496,9 @@ bool DrawOutputGainsWidget(FDNConfig& config)
     bool config_changed = false;
     if (ImGui::TreeNode("Edit output gains"))
     {
-        config_changed |= DrawGainsWidget(config.output_gains);
+        static float min_gain = -1.0f;
+        static float max_gain = 1.0f;
+        config_changed |= DrawGainsWidget(config.output_gains, min_gain, max_gain);
 
         bool is_time_varying = config.time_varying_output_gains.has_value();
         config_changed |= ImGui::Checkbox("Time Varying Output Gains", &is_time_varying);
@@ -480,7 +507,7 @@ bool DrawOutputGainsWidget(FDNConfig& config)
         {
             if (!config.time_varying_output_gains.has_value())
             {
-                config.time_varying_output_gains = TimeVaryingGainsConfig{};
+                config.time_varying_output_gains = sfFDN::TimeVaryingGainsConfig{};
             }
 
             float freq_hz = config.time_varying_output_gains->lfo_frequency * Settings::Instance().SampleRate();
@@ -502,7 +529,7 @@ bool DrawOutputGainsWidget(FDNConfig& config)
     return config_changed;
 }
 
-bool DrawDelayLengthsWidget(FDNConfig& config, int& min_delay, int& max_delay, uint32_t random_seed)
+bool DrawDelayLengthsWidget(sfFDN::FDNConfig& config, int& min_delay, int& max_delay, uint32_t random_seed)
 {
     bool config_changed = false;
     bool should_update_delays = false;
@@ -626,7 +653,7 @@ bool DrawDelayLengthsWidget(FDNConfig& config, int& min_delay, int& max_delay, u
     return config_changed;
 }
 
-bool DrawExtraDelayWidget(FDNConfig& config, bool force_update)
+bool DrawExtraDelayWidget(sfFDN::FDNConfig& config, bool force_update)
 {
     bool config_changed = force_update;
 
@@ -648,7 +675,7 @@ bool DrawExtraDelayWidget(FDNConfig& config, bool force_update)
     return config_changed;
 }
 
-bool DrawInputVelvetNoiseDecorrelator(VelvetNoiseDecorrelatorConfig& config, bool force_update)
+bool DrawInputVelvetNoiseDecorrelator(sfFDN::VelvetNoiseDecorrelatorConfig& config, bool force_update)
 {
     bool config_changed = force_update;
 
@@ -697,8 +724,8 @@ bool DrawInputVelvetNoiseDecorrelator(VelvetNoiseDecorrelatorConfig& config, boo
     return config_changed;
 }
 
-bool DrawInputVelvetNoiseDecorrelatorMultiChannel(VelvetNoiseDecorrelatorConfig& config, uint32_t& selected_sequence,
-                                                  bool force_update)
+bool DrawInputVelvetNoiseDecorrelatorMultiChannel(sfFDN::VelvetNoiseDecorrelatorConfig& config,
+                                                  uint32_t& selected_sequence, bool force_update)
 {
     bool config_changed = force_update;
 
@@ -753,7 +780,7 @@ bool DrawInputVelvetNoiseDecorrelatorMultiChannel(VelvetNoiseDecorrelatorConfig&
     return config_changed;
 }
 
-bool DrawInputSeriesSchroederAllpassWidget(SchroederAllpassConfig& config, bool force_update)
+bool DrawInputSeriesSchroederAllpassWidget(sfFDN::SchroederAllpassConfig& config, bool force_update)
 {
     bool config_changed = force_update;
 
@@ -819,7 +846,7 @@ bool DrawInputSeriesSchroederAllpassWidget(SchroederAllpassConfig& config, bool 
     return config_changed;
 }
 
-bool DrawExtraSchroederAllpassWidget(SchroederAllpassConfig& config, uint32_t channel_count, bool force_update)
+bool DrawExtraSchroederAllpassWidget(sfFDN::SchroederAllpassConfig& config, uint32_t channel_count, bool force_update)
 {
     bool config_changed = force_update;
 
@@ -913,7 +940,70 @@ bool DrawExtraSchroederAllpassWidget(SchroederAllpassConfig& config, uint32_t ch
     return config_changed;
 }
 
-bool DrawDiffuserWidget(FDNConfig& config, bool force_update)
+bool DrawTimeVaryingDelayWidget(sfFDN::TimeVaryingDelayConfig& config, uint32_t channel_count, bool force_update)
+{
+    bool config_changed = force_update;
+
+    config.lfo_amplitudes.resize(channel_count, 0.0f);
+    config.lfo_frequencies.resize(channel_count, 0.0f);
+    config.lfo_initial_phases.resize(channel_count, 0.0f);
+
+    std::string id_suffix = std::format("##{}", static_cast<const void*>(&config));
+
+    constexpr std::array<const char*, 2> kInterpolationTypesString = {"Linear", "Allpass"};
+    static int selected_interpolation_type = static_cast<int>(config.interp_type);
+    if (ImGui::BeginCombo(("Interpolation Type" + id_suffix).c_str(),
+                          kInterpolationTypesString[selected_interpolation_type]))
+    {
+        for (int i = 0; i < kInterpolationTypesString.size(); i++)
+        {
+            bool is_selected = (selected_interpolation_type == i);
+            if (ImGui::Selectable(kInterpolationTypesString[i], is_selected))
+            {
+                selected_interpolation_type = i;
+                config.interp_type = static_cast<sfFDN::DelayInterpolationType>(i);
+                config_changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if (ImGui::BeginTable("##TimeVaryingDelayTable", 3))
+    {
+        ImGui::TableSetupColumn("Channel", ImGuiTableColumnFlags_WidthFixed, 75.0f);
+        ImGui::TableSetupColumn("Amplitude (samples)", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("Frequency (Hz)", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+
+        ImGui::TableHeadersRow();
+
+        for (uint32_t channel = 0; channel < channel_count; ++channel)
+        {
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", channel + 1);
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::PushID(channel * 2 + 0);
+            config_changed |=
+                ImGui::SliderFloat(("##LFOAmp" + id_suffix).c_str(), &config.lfo_amplitudes[channel], 0.f, 100.f);
+            ImGui::PopID();
+
+            ImGui::TableSetColumnIndex(2);
+            ImGui::PushID(channel * 2 + 1);
+            float freq_hz = config.lfo_frequencies[channel] * Settings::Instance().SampleRate();
+            config_changed |= ImGui::SliderFloat(("##LFOFreq" + id_suffix).c_str(), &freq_hz, 0.01f, 5.f, "%.2f Hz");
+            config.lfo_frequencies[channel] = freq_hz / Settings::Instance().SampleRate();
+            ImGui::PopID();
+        }
+
+        ImGui::EndTable();
+    }
+
+    return config_changed;
+}
+
+bool DrawDiffuserWidget(sfFDN::FDNConfig& config, bool force_update)
 {
     bool config_changed = force_update;
     const uint32_t N = config.N;
@@ -947,7 +1037,7 @@ bool DrawDiffuserWidget(FDNConfig& config, bool force_update)
     return config_changed;
 }
 
-bool DrawScalarMatrixWidget(FDNConfig& config, uint32_t random_seed)
+bool DrawScalarMatrixWidget(sfFDN::FDNConfig& config, uint32_t random_seed)
 {
     bool config_changed = false;
     bool should_update_feedback_matrix = false;
@@ -974,8 +1064,10 @@ bool DrawScalarMatrixWidget(FDNConfig& config, uint32_t random_seed)
             {
                 cascade_matrix = true;
             }
-            else
+
+            if constexpr (std::is_same_v<T, std::vector<float>>)
             {
+                feedback_matrix = arg;
                 cascade_matrix = false;
             }
         },
@@ -1150,7 +1242,7 @@ bool DrawScalarMatrixWidget(FDNConfig& config, uint32_t random_seed)
     return config_changed;
 }
 
-bool DrawDelayFilterWidget(FDNConfig& config)
+bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
 {
     bool config_changed = false;
     static float feedback_gain = 0.9999f;
@@ -1159,7 +1251,7 @@ bool DrawDelayFilterWidget(FDNConfig& config)
     static std::vector<float> t60s(kNBands, 2.f);
 
     static bool show_delay_filter_designer = false;
-    static DelayFilterType delay_filter_type = DelayFilterType::Proportional;
+    static sfFDN::DelayFilterType delay_filter_type = sfFDN::DelayFilterType::Proportional;
     if (ImGui::TreeNode("Delay Filters"))
     {
         constexpr std::array<const char*, 3> kFilterTypeNames = {"Proportional", "One Pole", "Octave Band Filter"};
@@ -1172,7 +1264,7 @@ bool DrawDelayFilterWidget(FDNConfig& config)
                 bool is_selected = (selected_filter_type == i);
                 if (ImGui::Selectable(kFilterTypeNames[i], is_selected))
                 {
-                    delay_filter_type = static_cast<DelayFilterType>(i);
+                    delay_filter_type = static_cast<sfFDN::DelayFilterType>(i);
                     selected_filter_type = i;
                     config_changed = true;
                 }
@@ -1181,7 +1273,7 @@ bool DrawDelayFilterWidget(FDNConfig& config)
         }
 
         // Proportinal feedback Gain
-        if (delay_filter_type == DelayFilterType::Proportional)
+        if (delay_filter_type == sfFDN::DelayFilterType::Proportional)
         {
             const float kFbGainStep = 0.01f;
             const float kFbGainStepFast = 0.25f;
@@ -1189,7 +1281,7 @@ bool DrawDelayFilterWidget(FDNConfig& config)
                                                  &kFbGainStepFast, "%.5f", 0);
             feedback_gain = std::clamp(feedback_gain, 0.1f, 10.0f);
         }
-        else if (delay_filter_type == DelayFilterType::OnePole) // One Pole
+        else if (delay_filter_type == sfFDN::DelayFilterType::OnePole) // One Pole
         {
             constexpr float kOffsetFromStart = 125.f;
             ImGui::Text("RT60 DC: ");
@@ -1206,7 +1298,7 @@ bool DrawDelayFilterWidget(FDNConfig& config)
             config_changed |= (ImGui::InputFloat("RT60 Nyquist", &t60_ny, 0.01f, 0.1f, "%.2f"));
             t60_ny = std::clamp(t60_ny, 0.01f, 10.0f);
         }
-        else if (delay_filter_type == DelayFilterType::TwoFilter)
+        else if (delay_filter_type == sfFDN::DelayFilterType::TwoFilter)
         {
             if (t60s.size() != kNBands)
             {
@@ -1228,16 +1320,16 @@ bool DrawDelayFilterWidget(FDNConfig& config)
 
     if (config_changed)
     {
-        if (delay_filter_type == DelayFilterType::Proportional)
+        if (delay_filter_type == sfFDN::DelayFilterType::Proportional)
         {
             config.attenuation_t60s.resize(1);
             config.attenuation_t60s[0] = feedback_gain;
         }
-        else if (delay_filter_type == DelayFilterType::OnePole)
+        else if (delay_filter_type == sfFDN::DelayFilterType::OnePole)
         {
             config.attenuation_t60s = {{t60_dc, t60_ny}};
         }
-        else if (delay_filter_type == DelayFilterType::TwoFilter)
+        else if (delay_filter_type == sfFDN::DelayFilterType::TwoFilter)
         {
             config.attenuation_t60s = t60s;
         }
@@ -1246,7 +1338,7 @@ bool DrawDelayFilterWidget(FDNConfig& config)
     return config_changed;
 }
 
-bool DrawToneCorrectionFilterDesigner(FDNConfig& config)
+bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
 {
     static bool show_tc_filter_designer = false;
     static std::vector<float> tc_gains(kNBands, 0.f);
@@ -1398,7 +1490,7 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
 {
     bool duration_changed = false;
 
-    ImPlot::SetupAxes("Sample", nullptr, ImPlotAxisFlags_AutoFit);
+    ImPlot::SetupAxes("Sample", nullptr, ImPlotAxisFlags_None);
     ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0f, 1.0f, ImPlotCond_Once);
     ImPlot::SetupAxisLimits(ImAxis_X1, 0, time_data.back(), ImPlotCond_Always);
 

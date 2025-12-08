@@ -60,6 +60,7 @@ struct EchoDensityData
 {
     std::span<const float> echo_density;
     std::span<const float> sparse_indices;
+    float mixing_time;
 };
 
 enum class AnalysisType : uint8_t
@@ -108,10 +109,9 @@ class IRAnalyzer
     }
 
   private:
-    quill::Logger* logger_;
     uint32_t samplerate_;
+    quill::Logger* logger_;
 
-    uint32_t impulse_response_size_samples_;
     std::vector<float> impulse_response_;
     std::vector<float> time_data_;
     bool is_clipping_;
@@ -139,13 +139,12 @@ class IRAnalyzer
 
     fdn_analysis::EstimateT60Results overall_t60_;
     std::vector<float> t60_octaves_;
-    float decay_db_start_;
-    float decay_db_end_;
 
     std::vector<float> echo_density_;
     std::vector<float> echo_density_indices_;
     uint32_t echo_density_window_size_ms_;
     uint32_t echo_density_hop_size_ms_;
+    float mixing_time_;
 
     std::bitset<static_cast<size_t>(AnalysisType::AnalysisTypeCount)> analysis_flags_ = 0;
 };

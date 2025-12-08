@@ -5,7 +5,6 @@
 
 #include <sffdn/sffdn.h>
 
-#include "fdn_config.h"
 #include "settings.h"
 
 namespace presets

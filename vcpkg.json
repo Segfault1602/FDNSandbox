@@ -3,6 +3,7 @@
     "boost-dll",
     "boost-math",
     "eigen3",
+    "glfw3",
     "kissfft",
     "libsamplerate",
     "libsndfile",
@@ -11,6 +12,6 @@
     "pffft",
     "quill",
     "rtaudio",
-    "glfw3"
+    "armadillo"
   ]
 }

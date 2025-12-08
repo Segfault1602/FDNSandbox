@@ -49,6 +49,7 @@ struct EchoDensityResults
 {
     std::vector<float> echo_densities;
     std::vector<int> sparse_indices;
+    float mixing_time;
 };
 
 /**

@@ -9,12 +9,12 @@
 
 #include <audio_utils/audio_file_manager.h>
 #include <audio_utils/audio_manager.h>
+#include <audio_utils/ring_buffer.h>
 
 #include "analysis/fdn_analyzer.h"
+#include "optimization/optimizer.h"
 
 #include <sffdn/sffdn.h>
-
-#include "fdn_config.h"
 
 class FDNToolboxApp
 {
@@ -36,6 +36,7 @@ class FDNToolboxApp
     void DrawImpulseResponse();
     void DrawAudioPlayer();
     void DrawSettingsWindow();
+    void DrawOptimizationWindow();
     void DrawVisualization();
     void DrawSpectrogram();
     void DrawSpectrum();
@@ -60,10 +61,10 @@ class FDNToolboxApp
     std::unique_ptr<sfFDN::FDN> audio_fdn_;
     std::unique_ptr<sfFDN::FDN> other_fdn_;
 
-    FDNConfig fdn_config_;
+    sfFDN::FDNConfig fdn_config_;
 
-    FDNConfig fdn_config_A_;
-    FDNConfig fdn_config_B_;
+    sfFDN::FDNConfig fdn_config_A_;
+    sfFDN::FDNConfig fdn_config_B_;
 
     enum class AudioState
     {
@@ -77,6 +78,7 @@ class FDNToolboxApp
     std::atomic<float> fdn_cpu_usage_ = 0.0f;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
+    fdn_optimization::FDNOptimizer fdn_optimizer_;
 
     ImGui::FileBrowser save_ir_browser;
     ImGui::FileBrowser load_config_browser;
@@ -88,4 +90,6 @@ class FDNToolboxApp
         STFT,
         Mel
     } spectrogram_type_ = SpectrogramType::STFT;
+
+    ring_buffer<float> audio_output_buffer_;
 };

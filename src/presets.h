@@ -9,13 +9,13 @@ namespace presets
 
 std::unique_ptr<sfFDN::FDN> CreateDefaultFDN();
 
-const FDNConfig kDefaultFDNConfig = {
+const sfFDN::FDNConfig kDefaultFDNConfig = {
     .N = 8, // Default number of channels
     .transposed = false,
-    .input_gains = std::vector<float>(8, 0.5f),                                        // Default input gains
-    .output_gains = std::vector<float>(8, 0.5f),                                       // Default output gains
-    .delays = sfFDN::GetDelayLengths(8, 500, 3000, sfFDN::DelayLengthType::Primes, 1), // Default delays in milliseconds
-    .matrix_info = sfFDN::GenerateMatrix(8, sfFDN::ScalarMatrixType::Hadamard),        // Default feedback matrix
+    .input_gains = std::vector<float>(8, 0.5f),                               // Default input gains
+    .output_gains = std::vector<float>(8, 0.5f),                              // Default output gains
+    .delays = {809, 877, 937, 1049, 1151, 1249, 1373, 1499},                  // Default delays in milliseconds
+    .matrix_info = sfFDN::GenerateMatrix(8, sfFDN::ScalarMatrixType::Random), // Default feedback matrix
     .attenuation_t60s = {0.9999f}, // Default feedback gain for proportional feedback
     .tc_gains = {},                // Default tone correction gains
     .tc_frequencies = {},          // Default tone correction frequencies

@@ -123,11 +123,13 @@
         "xstring": "cpp",
         "xtr1common": "cpp",
         "xtree": "cpp",
-        "xutility": "cpp"
+        "xutility": "cpp",
+        "regex": "cpp",
+        "armadillo": "cpp"
     },
     "C_Cpp.intelliSenseEngine": "default",
     "C_Cpp.default.compileCommands": [
-        "${workspaceFolder}/build/debug/compile_commands.json"
+        "${workspaceFolder}/build/ninja/compile_commands.json"
     ],
     "C_Cpp.default.intelliSenseMode": "windows-clang-x64",
     "C_Cpp.default.compilerPath": ""
