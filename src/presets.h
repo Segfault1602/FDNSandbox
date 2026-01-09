@@ -12,6 +12,7 @@ std::unique_ptr<sfFDN::FDN> CreateDefaultFDN();
 const sfFDN::FDNConfig kDefaultFDNConfig = {
     .N = 8, // Default number of channels
     .transposed = false,
+    .direct_gain = 0.0f,
     .input_gains = std::vector<float>(8, 0.5f),                               // Default input gains
     .output_gains = std::vector<float>(8, 0.5f),                              // Default output gains
     .delays = {809, 877, 937, 1049, 1151, 1249, 1373, 1499},                  // Default delays in milliseconds

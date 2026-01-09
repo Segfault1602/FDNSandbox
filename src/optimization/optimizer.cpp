@@ -1,15 +1,18 @@
 #include "optimizer.h"
 
+#include "analysis.h"
 #include "model.h"
 #include "random_searcher.h"
+#include <analysis.h>
 
 #include <armadillo>
 #include <ensmallen.hpp>
 
-namespace
-{
+#include <iostream>
+#include <thread>
 
-} // namespace
+template <typename T>
+concept HasStepSize = requires(T a) { a.StepSize(); };
 
 namespace fdn_optimization
 {
@@ -24,8 +27,12 @@ class OptimCallback
     }
 
     template <typename OptimizerType, typename FunctionType, typename MatType>
-    void BeginOptimization(OptimizerType&, FunctionType& function, MatType&)
+    void BeginOptimization(OptimizerType& optimizer, FunctionType& function, MatType&)
     {
+        if constexpr (HasStepSize<OptimizerType>)
+        {
+            starting_step_size_ = optimizer.StepSize();
+        }
         auto loss_functions = function.GetLossFunctions();
         {
             std::scoped_lock lock(mutex_);
@@ -75,13 +82,20 @@ class OptimCallback
                   const double objective)
     {
         SaveLossHistory(function, objective);
-        static_assert(std::is_same_v<OptimizerType, ens::SGD<ens::AdamUpdate, ens::NoDecay>>);
 
-        if constexpr (std::is_same_v<OptimizerType, ens::SGD<ens::AdamUpdate, ens::NoDecay>>)
+        if constexpr (std::is_same_v<OptimizerType, ens::SGD<ens::AdamUpdate, ens::NoDecay>> ||
+                      std::is_same_v<OptimizerType, ens::SGD<ens::VanillaUpdate, ens::NoDecay>> ||
+                      std::is_same_v<OptimizerType, ens::SGD<ens::YogiUpdate, ens::NoDecay>>)
         {
-            if (epoch % 10 == 0)
+            if (decay_step_size_ > 0 && epoch % decay_step_size_ == 0)
             {
                 optimizer.StepSize() = optimizer.StepSize() * decay_rate_;
+            }
+
+            if (epoch_restarts_ > 0 && epoch % epoch_restarts_ == 0 && epoch != 0 && restart_count_ < max_restarts_)
+            {
+                optimizer.StepSize() = starting_step_size_;
+                ++restart_count_;
             }
         }
 
@@ -93,40 +107,14 @@ class OptimCallback
     {
         step_was_taken_ = true;
 
-        if constexpr (std::is_same_v<OptimizerType, ens::SA<ens::ExponentialSchedule>>)
+        if constexpr (std::is_same_v<OptimizerType, ens::SA<ens::ExponentialSchedule>> ||
+                      std::is_same_v<OptimizerType, ens::LBestPSO> || std::is_same_v<OptimizerType, ens::L_BFGS> ||
+                      std::is_same_v<OptimizerType, ens::GradientDescent> ||
+                      std::is_same_v<OptimizerType,
+                                     ens::CMAES<ens::FullSelection, ens::EmptyTransformation<arma::mat>>> ||
+                      std::is_same_v<OptimizerType,
+                                     ens::ActiveCMAES<ens::FullSelection, ens::EmptyTransformation<arma::mat>>>)
         {
-            // For Simulated Annealing, we only have access to StepTaken.
-            // So we save the loss history here.
-            // Note that this may include steps that were not accepted.
-            SaveLossHistory(function, function.Evaluate(iterate));
-        }
-        if constexpr (std::is_same_v<OptimizerType, ens::LBestPSO>)
-        {
-            // For PSO, we only have access to StepTaken.
-            // So we save the loss history here.
-            // Note that this may include steps that were not accepted.
-            SaveLossHistory(function, function.Evaluate(iterate));
-        }
-        if constexpr (std::is_same_v<OptimizerType, ens::L_BFGS>)
-        {
-            // For DE, we only have access to StepTaken.
-            // So we save the loss history here.
-            // Note that this may include steps that were not accepted.
-            SaveLossHistory(function, function.Evaluate(iterate));
-        }
-        if constexpr (std::is_same_v<OptimizerType, ens::GradientDescent>)
-        {
-            // For DE, we only have access to StepTaken.
-            // So we save the loss history here.
-            // Note that this may include steps that were not accepted.
-            SaveLossHistory(function, function.Evaluate(iterate));
-        }
-        if constexpr (std::is_same_v<OptimizerType,
-                                     ens::CMAES<ens::FullSelection, ens::EmptyTransformation<arma::mat>>>)
-        {
-            // For DE, we only have access to StepTaken.
-            // So we save the loss history here.
-            // Note that this may include steps that were not accepted.
             SaveLossHistory(function, function.Evaluate(iterate));
         }
 
@@ -163,6 +151,10 @@ class OptimCallback
     std::stop_token stop_token_;
     std::atomic<uint32_t> evaluation_count_;
     double decay_rate_ = 0.99;
+    size_t decay_step_size_ = 1;
+    size_t epoch_restarts_ = 0;
+    size_t restart_count_ = 0;
+    size_t max_restarts_ = 0;
 
     int de_pop_size_ = 0;
     int de_pop_evals_ = 0;
@@ -173,6 +165,7 @@ class OptimCallback
     std::mutex mutex_;
     std::vector<double> loss_history_;
     bool step_was_taken_ = false;
+    double starting_step_size_ = 0.01;
 
     std::vector<std::vector<double>> individual_losses_;
 };
@@ -187,7 +180,10 @@ struct OptimizationVisitor
     void operator()(AdamParameters& adam_params)
     {
         optim_callback->decay_rate_ = adam_params.learning_rate_decay;
-        ens::Adam optimizer(adam_params.step_size, 1, 0.9, 0.999, 1e-8, 1e6, 1e-5, false, true, true);
+        optim_callback->epoch_restarts_ = adam_params.epoch_restarts;
+        optim_callback->decay_step_size_ = adam_params.decay_step_size;
+        optim_callback->max_restarts_ = adam_params.max_restarts;
+        ens::Adam optimizer(adam_params.step_size, 1, 0.9, 0.999, 1e-8, 1e6, adam_params.tolerance, false, true, true);
 
         ens::StoreBestCoordinates<arma::mat> store_best;
         optimizer.Optimize(model, params, store_best, ens::Report(), *optim_callback);
@@ -198,7 +194,7 @@ struct OptimizationVisitor
     void operator()(SPSAParameters& spsa_params)
     {
         ens::SPSA optimizer(spsa_params.alpha, spsa_params.gamma, spsa_params.step_size, spsa_params.evaluationStepSize,
-                            spsa_params.max_iterations, 1e-7);
+                            spsa_params.max_iterations, spsa_params.tolerance);
 
         ens::StoreBestCoordinates<arma::mat> store_best;
         optimizer.Optimize(model, params, store_best, ens::Report(), *optim_callback);
@@ -283,7 +279,7 @@ struct OptimizationVisitor
 
     void operator()(GradientDescentParameters& p)
     {
-        ens::GradientDescent optimizer(p.step_size, p.max_iterations, p.tolerance);
+        ens::SGD optimizer(p.step_size, 1, p.max_iterations, p.tolerance, false);
 
         ens::StoreBestCoordinates<arma::mat> store_best;
         optimizer.Optimize(model, params, store_best, ens::Report(), *optim_callback);
@@ -294,8 +290,8 @@ struct OptimizationVisitor
     void operator()(CMAESParameters& p)
     {
         // ens::BoundaryBoxConstraint b(-1.0, 1.0);
-        ens::CMAES optimizer(p.population_size, ens::EmptyTransformation(), 1, p.max_iterations, p.tolerance,
-                             ens::FullSelection(), p.step_size);
+        ens::ActiveCMAES optimizer(p.population_size, ens::EmptyTransformation(), 1, p.max_iterations, p.tolerance,
+                                   ens::FullSelection(), p.step_size);
 
         ens::StoreBestCoordinates<arma::mat> store_best;
         optimizer.Optimize(model, params, store_best, ens::Report(), *optim_callback);
@@ -400,10 +396,98 @@ void FDNOptimizer::ThreadProc(std::stop_token stop_token, OptimizationInfo info)
     LOG_INFO(logger_, "Optimization thread started.");
     status_.store(OptimizationStatus::Running);
 
-    uint32_t fdn_order = info.initial_fdn_config.N;
-    FDNModel model(fdn_order, info.ir_size, info.initial_fdn_config.delays, info.parameters_to_optimize,
-                   info.gradient_method);
+    FDNModel model(info.initial_fdn_config, info.ir_size, info.parameters_to_optimize, info.gradient_method);
     model.SetGradientDelta(info.gradient_delta);
+
+    const bool optimizing_filters =
+        std::ranges::find(info.parameters_to_optimize, fdn_optimization::OptimizationParamType::AttenuationFilters) !=
+        info.parameters_to_optimize.end();
+
+    if (optimizing_filters && info.target_rir.empty())
+    {
+        LOG_ERROR(logger_, "Target RIR must be provided when optimizing filters. Cancelling optimization.");
+        status_.store(OptimizationStatus::Failed);
+        return;
+    }
+
+    std::vector<LossFunction> loss_functions;
+
+    if (optimizing_filters)
+    {
+        const bool normalize = false;
+        auto target_edc_octaves = fdn_analysis::EnergyDecayRelief(info.target_rir, true, normalize);
+        std::vector<float> time_data(target_edc_octaves[0].size());
+        for (size_t i = 0; i < time_data.size(); ++i)
+        {
+            time_data[i] = static_cast<float>(i) * (1.0f / 48000.0f); // assuming 48kHz sample rate
+        }
+
+        std::vector<float> estimated_t60s;
+        for (const auto& edc_octave : target_edc_octaves)
+        {
+            auto t60_results = fdn_analysis::EstimateT60(edc_octave, time_data, -5.0f, -15.0f);
+            estimated_t60s.push_back(t60_results.t60);
+            LOG_INFO(logger_, "Estimated T60: {:.2f} s", t60_results.t60);
+        }
+
+        // model.SetT60Estimates(estimated_t60s);
+
+        // use shared_ptr to capture in lambda
+        auto target_edc_octaves_ptr =
+            std::make_shared<std::array<std::vector<float>, 10>>(std::move(target_edc_octaves));
+
+        LossFunction edc_loss;
+        edc_loss.func = [target_edc_octaves_ptr](std::span<const float> signal) -> double {
+            return EDCLoss(signal, *target_edc_octaves_ptr, normalize);
+        };
+        edc_loss.weight = 1.0;
+        edc_loss.name = "EDC Relief Loss";
+        loss_functions.push_back(edc_loss);
+    }
+    else
+    {
+        LossFunction spectral_flatness_loss;
+        spectral_flatness_loss.func = [&](std::span<const float> signal) -> double {
+            double spectral_flatness = SpectralFlatnessLoss(signal);
+            return std::abs(0.5575f - spectral_flatness);
+        };
+        spectral_flatness_loss.weight = info.spectral_flatness_weight;
+        spectral_flatness_loss.name = "Spectral Flatness Loss";
+        loss_functions.push_back(spectral_flatness_loss);
+
+        LossFunction power_env_loss;
+        power_env_loss.func = [&](std::span<const float> signal) -> double {
+            constexpr uint32_t kSampleRate = 48000;
+            return PowerEnvelopeLoss(signal, 1024, 128, kSampleRate);
+        };
+        power_env_loss.weight = info.power_envelope_weight;
+        power_env_loss.name = "Power Envelope Loss";
+        loss_functions.push_back(power_env_loss);
+
+        LossFunction sparsity_loss;
+        sparsity_loss.func = [&](std::span<const float> signal) -> double {
+            double sparsity = SparsityLoss(signal.subspan(0, 4096));
+            return sparsity;
+        };
+        sparsity_loss.weight = info.sparsity_weight;
+        sparsity_loss.name = "Sparsity Loss";
+        loss_functions.push_back(sparsity_loss);
+
+        // if (info.target_rir.size() > 0)
+        // {
+        //     float target_rms = RMS(std::span(info.target_rir).subspan(0, 8192));
+        //     LossFunction rms_loss;
+        //     rms_loss.func = [&](std::span<const float> signal) -> double {
+        //         return RMSLoss(signal.subspan(0, 8192), target_rms);
+        //     };
+        //     rms_loss.weight = 1.0;
+        //     rms_loss.name = "RMS Loss";
+        //     loss_functions.push_back(rms_loss);
+        // }
+    }
+
+    model.SetLossFunctions(loss_functions);
+
     arma::mat params = model.GetInitialParams();
 
     double initial_loss = model.Evaluate(params);
@@ -415,6 +499,9 @@ void FDNOptimizer::ThreadProc(std::stop_token stop_token, OptimizationInfo info)
     OptimizationVisitor visitor{params, model, optim_callback_.get(), info};
     std::visit(visitor, info.optimizer_params);
 
+    double final_loss = model.Evaluate(params);
+    LOG_INFO(logger_, "Final loss: {}", final_loss);
+
     {
         std::scoped_lock lock(mutex_);
 
@@ -425,7 +512,9 @@ void FDNOptimizer::ThreadProc(std::stop_token stop_token, OptimizationInfo info)
         optimization_result_.total_time = std::chrono::steady_clock::now() - start_time_;
         optimization_result_.total_evaluations = optim_callback_->evaluation_count_.load();
         optimization_result_.loss_history = optim_callback_->GetLossHistory();
+        optimization_result_.best_loss = final_loss;
 
+        optimization_result_.loss_names.clear();
         auto loss_functions = model.GetLossFunctions();
         for (const auto& lf : loss_functions)
         {

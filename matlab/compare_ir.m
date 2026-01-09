@@ -1,8 +1,8 @@
-clearvars;close all;
+clearvars;
 addpath(genpath("../../FDNToolbox"));
 
-[init_ir, init_fs] = audioread('../optim_output/initial_ir.wav');
-[opt_ir, opt_fs] = audioread('../optim_output/optimized_ir.wav');
+[init_ir, init_fs] = audioread('../optim_output/colorless_initial_ir.wav');
+[opt_ir, opt_fs] = audioread('../optim_output/colorless_ir.wav');
 
 irLen = size(init_ir,1);
 
@@ -15,12 +15,15 @@ plot(init_ir);
 title('Initial Impulse Response');
 xlabel('Samples');
 ylabel('Amplitude');
+ylim([-1 1]);
 
 subplot(2,1,2);
 plot(opt_ir);
 title('Optimized Impulse Response');
 xlabel('Samples');
 ylabel('Amplitude');
+ylim([-1 1]);
+
 
 WIN_LEN = 2^14;
 OVL_LEN = round(0.99*WIN_LEN);
@@ -76,7 +79,7 @@ grid on;
 
 
 figure(4);
-losses = readtable("../optim_output/loss_history.txt", "VariableNamingRule","preserve");
+losses = readtable("../optim_output/colorless_loss_history.txt", "VariableNamingRule","preserve");
 total_loss = losses{:,1};
 plot(total_loss, DisplayName=losses.Properties.VariableNames{1});
 hold on;

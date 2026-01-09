@@ -4,6 +4,8 @@
 
 #include <audio_utils/audio_file_manager.h>
 
+#include "analysis.h"
+
 #include "quill/Logger.h"
 #include "quill/sinks/ConsoleSink.h"
 #include <armadillo>
@@ -27,6 +29,35 @@ void WriteLossHistoryToFile(const std::vector<std::vector<double>>& loss_history
                             const std::vector<std::string>& loss_names, const std::string_view filename,
                             quill::Logger* logger);
 
+fdn_optimization::OptimizationResult DoOptimization(quill::Logger* logger, fdn_optimization::OptimizationInfo& opt_info)
+{
+    fdn_optimization::FDNOptimizer optimizer(logger);
+
+    optimizer.StartOptimization(opt_info);
+
+    while (optimizer.GetStatus() != fdn_optimization::OptimizationStatus::Running)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    while (optimizer.GetStatus() != fdn_optimization::OptimizationStatus::Completed)
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        auto progress = optimizer.GetProgress();
+        float last_loss = 0.0f;
+        if (!progress.loss_history.empty() && !progress.loss_history[0].empty())
+        {
+            last_loss = static_cast<float>(progress.loss_history[0].back());
+        }
+        LOG_INFO(logger, "Elapsed Time: {:.2f} s, Evaluations: {}, Last Loss: {:.6f}", progress.elapsed_time.count(),
+                 progress.evaluation_count, last_loss);
+    }
+
+    auto result = optimizer.GetResult();
+    return result;
+}
+
 int main()
 {
     quill::Backend::start();
@@ -35,8 +66,19 @@ int main()
 
     std::cout << "FDN Optimization Tool" << std::endl;
 
-    std::vector params_to_optimize = {fdn_optimization::OptimizationParamType::Gains,
-                                      fdn_optimization::OptimizationParamType::Matrix_Householder};
+    std::vector<float> target_rir;
+    int num_channels = 0;
+    int sample_rate = kSampleRate;
+    if (audio_utils::audio_file::ReadWavFile("../rirs/py_rirs/rir_dining_room.wav", target_rir, sample_rate,
+                                             num_channels))
+    {
+        LOG_INFO(logger, "Loaded target RIR with {} samples at {} Hz.", target_rir.size(), sample_rate);
+    }
+    else
+    {
+        LOG_ERROR(logger, "Failed to load target RIR.");
+        return -1;
+    }
 
     sfFDN::FDNConfig initial_fdn_config{};
     initial_fdn_config.N = kFDNOrder;
@@ -44,6 +86,7 @@ int main()
     initial_fdn_config.input_gains = std::vector<float>(kFDNOrder, 0.5f);
     initial_fdn_config.output_gains = std::vector<float>(kFDNOrder, 0.5f);
     initial_fdn_config.attenuation_t60s = {10.f};
+    initial_fdn_config.tc_frequencies = {31.25, 62.5, 125, 250, 500, 1000, 2000, 4000, 8000, 16000};
 
     if (kFDNOrder == 4)
     {
@@ -62,39 +105,57 @@ int main()
         initial_fdn_config.delays = sfFDN::GetDelayLengths(kFDNOrder, 512, 3000, sfFDN::DelayLengthType::Random, 42);
     }
 
-    // ADAM paramaters
-    fdn_optimization::AdamParameters adam_params{.step_size = 0.6, .learning_rate_decay = 0.99};
+    initial_fdn_config.matrix_info = sfFDN::GenerateMatrix(kFDNOrder, sfFDN::ScalarMatrixType::Random, 42);
 
-    std::random_device rd;
-    auto seed = rd();
-    LOG_INFO(logger, "Using random seed: {}", seed);
+    // ADAM paramaters
+    fdn_optimization::AdamParameters opt_params{.step_size = 0.48, .learning_rate_decay = 0.98, .tolerance = 1e-5};
+
+    // fdn_optimization::CMAESParameters opt_params{.population_size = 500, .step_size = 0.01};
+
+    // std::random_device rd;
+    // auto seed = rd();
+    // LOG_INFO(logger, "Using random seed: {}", seed);
     // arma::arma_rng::set_seed(seed);
+
+    std::vector params_to_optimize = {fdn_optimization::OptimizationParamType::Gains,
+                                      fdn_optimization::OptimizationParamType::Matrix};
+    // std::vector params_to_optimize = {fdn_optimization::OptimizationParamType::AttenuationFilters,
+    //                                   fdn_optimization::OptimizationParamType::TonecorrectionFilters};
 
     fdn_optimization::OptimizationInfo opt_info{.parameters_to_optimize = params_to_optimize,
                                                 .initial_fdn_config = initial_fdn_config,
                                                 .ir_size = kSampleRate,
-                                                .optimizer_params = adam_params};
+                                                .gradient_method = fdn_optimization::GradientMethod::CentralDifferences,
+                                                .gradient_delta = 1e-4,
+                                                .target_rir = target_rir,
+                                                .optimizer_params = opt_params};
 
-    fdn_optimization::FDNOptimizer optimizer(logger);
+    auto result = DoOptimization(logger, opt_info);
+    LOG_INFO(logger, "Colorless optimization completed in {:.2f} s with {} evaluations.", result.total_time.count(),
+             result.total_evaluations);
 
-    optimizer.StartOptimization(opt_info);
+    WriteConfigToFile(result.optimized_fdn_config, "optim_output/colorless_fdn_config.txt", logger);
+    SaveImpulseResponse(result.initial_fdn_config, kSampleRate, "optim_output/colorless_initial_ir.wav", logger);
+    SaveImpulseResponse(result.optimized_fdn_config, kSampleRate, "optim_output/colorless_ir.wav", logger);
+    WriteLossHistoryToFile(result.loss_history, result.loss_names, "optim_output/colorless_loss_history.txt", logger);
 
-    while (optimizer.GetStatus() != fdn_optimization::OptimizationStatus::Running)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    opt_info.parameters_to_optimize = {fdn_optimization::OptimizationParamType::AttenuationFilters,
+                                       fdn_optimization::OptimizationParamType::TonecorrectionFilters,
+                                       fdn_optimization::OptimizationParamType::OverallGain};
 
-    while (optimizer.GetStatus() != fdn_optimization::OptimizationStatus::Completed)
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    opt_info.initial_fdn_config = result.optimized_fdn_config;
+    opt_info.ir_size = static_cast<uint32_t>(target_rir.size());
+    opt_info.gradient_method = fdn_optimization::GradientMethod::CentralDifferences;
+    opt_info.gradient_delta = 1e-2;
 
-        auto progress = optimizer.GetProgress();
-        LOG_INFO(logger, "Elapsed Time: {:.2f} s, Evaluations: {}", progress.elapsed_time.count(),
-                 progress.evaluation_count);
-    }
-
-    auto result = optimizer.GetResult();
-    LOG_INFO(logger, "Optimization completed in {:.2f} s with {} evaluations.", result.total_time.count(),
+    fdn_optimization::AdamParameters filter_opt_params{
+        .step_size = 0.6, .learning_rate_decay = 0.95, .tolerance = 1e-4};
+    // fdn_optimization::CMAESParameters filter_opt_params{
+    //     .population_size = 200, .max_iterations = 100000, .tolerance = 1e-4, .step_size = 0.5};
+    // fdn_optimization::SimulatedAnnealingParameters filter_opt_params{.initial_temperature = 100.0};
+    opt_info.optimizer_params = filter_opt_params;
+    result = DoOptimization(logger, opt_info);
+    LOG_INFO(logger, "Filter optimization completed in {:.2f} s with {} evaluations.", result.total_time.count(),
              result.total_evaluations);
 
     WriteConfigToFile(result.initial_fdn_config, "optim_output/initial_fdn_config.txt", logger);
@@ -119,6 +180,8 @@ void WriteConfigToFile(const sfFDN::FDNConfig& config, const std::string_view fi
     // Row 1: input_gains
     // Row 2: output_gains
     // Row 3: delays
+    // Row 4: t60s
+    // Row 5: tone correction gains
     // Next N rows: feedback matrix
     for (const auto& gain : config.input_gains)
     {
@@ -135,6 +198,24 @@ void WriteConfigToFile(const sfFDN::FDNConfig& config, const std::string_view fi
     for (const auto& delay : config.delays)
     {
         file << delay << " ";
+    }
+    file << std::endl;
+
+    for (const auto& t60 : config.attenuation_t60s)
+    {
+        file << t60 << " ";
+    }
+    file << std::endl;
+
+    for (const auto& freq : config.tc_frequencies)
+    {
+        file << freq << " ";
+    }
+    file << std::endl;
+
+    for (const auto& gain : config.tc_gains)
+    {
+        file << gain << " ";
     }
     file << std::endl;
 
@@ -161,7 +242,7 @@ void SaveImpulseResponse(const sfFDN::FDNConfig& config, uint32_t ir_length, con
                          quill::Logger* logger)
 {
     auto config_copy = config;
-    config_copy.attenuation_t60s = {1.f};
+    // config_copy.attenuation_t60s = {1.f};
 
     auto fdn = sfFDN::CreateFDNFromConfig(config_copy, kSampleRate);
     fdn->SetDirectGain(0.0f);

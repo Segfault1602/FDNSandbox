@@ -42,6 +42,8 @@ IRAnalyzer::IRAnalyzer(uint32_t samplerate, quill::Logger* logger)
     , spectrum_early_rir_time_(0.5f)
     , cepstrum_early_rir_time_(0.5f)
     , autocorrelation_early_rir_time_(0.5f)
+    , edr_bin_count_(0)
+    , edr_frame_count_(0)
     , overall_t60_(0.0f)
     , echo_density_window_size_ms_(25)
     , echo_density_hop_size_ms_(10)
@@ -85,7 +87,7 @@ bool IRAnalyzer::IsClipping()
 
 SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::SpectrogramInfo spec_info, bool mel_scale)
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrogram)))
+    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrogram)) && GetImpulseResponse().size() > 0)
     {
         Stopwatch stopwatch;
         constexpr size_t kNMels = 128;
@@ -105,8 +107,7 @@ SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::SpectrogramInf
 
         for (auto& v : spectrogram_data_)
         {
-            v /= max_val; // Normalize to [0, 1]
-
+            v /= max_val;                      // Normalize to [0, 1]
             v = 20.f * std::log10f(v + 1e-6f); // Convert to dB
         }
 
@@ -275,6 +276,27 @@ EnergyDecayCurveData IRAnalyzer::GetEnergyDecayCurveData()
     return EnergyDecayCurveData{
         .energy_decay_curve = energy_decay_curve_,
         .edc_octaves = edc_octaves,
+    };
+}
+
+EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
+{
+    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EnergyDecayRelief)))
+    {
+        Stopwatch stopwatch;
+
+        auto edr_data = EnergyDecayReliefSTFT(GetImpulseResponse());
+        edr_data_ = std::move(edr_data.data);
+        edr_bin_count_ = edr_data.num_bins;
+        edr_frame_count_ = edr_data.num_frames;
+
+        analysis_flags_.reset(static_cast<size_t>(AnalysisType::EnergyDecayRelief));
+        LOG_INFO(logger_, "Analyzing energy decay relief took {} ms", stopwatch.ElapsedMs());
+    }
+
+    return EnergyDecayReliefData{
+        .energy_decay_relief = std::mdspan<const float, std::dextents<size_t, 2>, std::layout_left>(
+            edr_data_.data(), edr_bin_count_, edr_frame_count_),
     };
 }
 

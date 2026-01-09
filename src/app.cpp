@@ -1,25 +1,6 @@
 #include "app.h"
 
 #include "fdn_analyzer.h"
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cstdint>
-#include <cstring>
-#include <format>
-#include <memory>
-#include <numbers>
-#include <span>
-#include <vector>
-
-#include <imgui.h>
-#include <implot.h>
-
-#include "imgui_internal.h"
-#include <boost/dll/runtime_symbol_info.hpp>
-#include <nlohmann/json.hpp>
-#include <quill/LogMacros.h>
 
 #include "analysis/analysis.h"
 #include <audio_utils/audio_analysis.h>
@@ -31,6 +12,29 @@
 #include "widget.h"
 
 #include <sffdn/sffdn.h>
+
+#include <imgui.h>
+#include <implot.h>
+#include <implot3d.h>
+
+#include "imgui_internal.h"
+#include <boost/dll/runtime_symbol_info.hpp>
+#include <nlohmann/json.hpp>
+#include <quill/LogMacros.h>
+#include <quill/std/Vector.h>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <format>
+#include <mdspan>
+#include <memory>
+#include <numbers>
+#include <span>
+#include <vector>
 
 namespace
 {
@@ -108,13 +112,16 @@ void DrawOptimizationParamGui(const std::string_view optimization_name, fdn_opti
     {
         static float step_size = 0.6f;
         static float learning_rate_decay = 0.99f;
+        static float tolerance = 1e-5f;
 
         ImGui::InputFloat("Step Size", &step_size, 0.01f, 2.0f, "%.3f");
         ImGui::InputFloat("Learning Rate Decay", &learning_rate_decay, 0.8f, 1.0f, "%.4f");
+        ImGui::InputFloat("Tolerance", &tolerance, 1e-6f, 1e-3f, "%.1e", ImGuiSliderFlags_Logarithmic);
 
         opt_info.optimizer_params = fdn_optimization::AdamParameters{
             .step_size = step_size,
             .learning_rate_decay = learning_rate_decay,
+            .tolerance = tolerance,
         };
     }
     else if (optimization_name == "SPSA")
@@ -264,11 +271,14 @@ void DrawOptimizationParamGui(const std::string_view optimization_name, fdn_opti
 } // namespace
 
 FDNToolboxApp::FDNToolboxApp()
-    : fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
+    : pre_delay_(0, Settings::Instance().SampleRate())
+    , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
     , fdn_optimizer_(Settings::Instance().GetLogger())
     , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
     , load_config_browser(0)
     , save_config_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
+    , load_rir_browser(0)
+    , rir_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
 {
     LOG_INFO(Settings::Instance().GetLogger(), "Starting FDN Toolbox");
 
@@ -307,6 +317,9 @@ FDNToolboxApp::FDNToolboxApp()
     save_config_browser.SetTitle("Save FDN Configuration");
     save_config_browser.SetTypeFilters({".json"});
 
+    load_rir_browser.SetTitle("Load RIR File");
+    load_rir_browser.SetTypeFilters({".wav"});
+
     show_tc_filter_designer_ = false;
     fdn_config_ = presets::kDefaultFDNConfig;
     fdn_config_A_ = presets::kDefaultFDNConfig;
@@ -339,7 +352,6 @@ FDNToolboxApp::~FDNToolboxApp()
 
 void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_size, size_t num_channels)
 {
-    auto start_time = std::chrono::high_resolution_clock::now();
 
     if (frame_size != kSystemBlockSize)
     {
@@ -355,6 +367,21 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         audio_fdn_->SetDirectGain(0.f); // Direct gain is controlled by the dry/wet mix instead
     }
 
+    static std::unique_ptr<sfFDN::PartitionedConvolver> rir_reverb = nullptr;
+
+    if (convolution_reverb_ != nullptr)
+    {
+        rir_reverb = std::move(convolution_reverb_);
+        convolution_reverb_ = nullptr;
+        if (rir_reverb->GetBlockSize() != frame_size)
+        {
+            LOG_ERROR(Settings::Instance().GetLogger(),
+                      "RIR PartitionedConvolver block size {} does not match system block size {}",
+                      rir_reverb->GetBlockSize(), frame_size);
+            rir_reverb = nullptr;
+        }
+    }
+
     if (audio_fdn_ == nullptr)
     {
         // If no FDN is configured, fill the output buffer with silence
@@ -362,8 +389,13 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         return;
     }
 
-    float gain = audio_gain_.load();
-    float dry_wet_mix = dry_wet_mix_.load();
+    const uint32_t new_delay_samples = pre_delay_ms_.load() * Settings::Instance().SampleRate() / 1000;
+    if (pre_delay_.GetMaximumDelay() < new_delay_samples)
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "Pre-delay samples {} exceed maximum delay {}", new_delay_samples,
+                  pre_delay_.GetMaximumDelay());
+    }
+    pre_delay_.SetDelay(new_delay_samples);
 
     std::array<float, kSystemBlockSize> input_data = {0.0f};
     std::array<float, kSystemBlockSize> output_data = {0.0f};
@@ -380,10 +412,26 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
 
     audio_file_manager_->process_block(input_data, kSystemBlockSize, 1);
 
-    // Process the FDN for this block
-    audio_fdn_->Process(input_audio_buffer, output_audio_buffer);
+    auto start_time = std::chrono::steady_clock::now();
 
-    auto end_time = std::chrono::high_resolution_clock::now();
+    float dry_mix = 0.5f;
+    float wet_mix = 0.5f;
+
+    if (rir_reverb != nullptr && reverb_engine_.load() == 1)
+    {
+        rir_reverb->Process(input_audio_buffer, output_audio_buffer);
+        dry_mix = conv_dry_level_.load();
+        wet_mix = conv_wet_level_.load();
+    }
+    else
+    {
+        // Process the FDN for this block
+        audio_fdn_->Process(input_audio_buffer, output_audio_buffer);
+        dry_mix = fdn_dry_level_.load();
+        wet_mix = fdn_wet_level_.load();
+    }
+
+    auto end_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
 
     if (audio_state_ == AudioState::ImpulseRequested)
@@ -392,16 +440,14 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         audio_state_ = AudioState::Idle;
     }
 
-    // Copy to the interleaved output buffer
-    const float wet_mix = dry_wet_mix * gain;
-    const float dry_mix = (1.f - dry_wet_mix) * gain;
+    // Apply pre-delay
+    pre_delay_.Process(input_audio_buffer, input_audio_buffer);
 
-    // static float phase = 0.f;
+    const float gain = audio_gain_.load();
+
     for (size_t i = 0; i < kSystemBlockSize; ++i)
     {
-        output_data[i] = (wet_mix * output_data[i]) + (dry_mix * input_data[i]);
-        // output_data[i] = std::sin(phase) * gain;
-        // phase += 300.f * (2.f * std::numbers::pi / Settings::Instance().SampleRate());
+        output_data[i] = gain * ((wet_mix * output_data[i]) + (dry_mix * input_data[i]));
     }
 
     audio_output_buffer_.write(output_data.data(), output_data.size());
@@ -492,6 +538,7 @@ void FDNToolboxApp::loop()
         ImGui::DockBuilderDockWindow("Autocorrelation", dock_main_id);
         ImGui::DockBuilderDockWindow("Filter Response", dock_main_id);
         ImGui::DockBuilderDockWindow("Energy Decay Curve", dock_main_id);
+        ImGui::DockBuilderDockWindow("Energy Decay Relief", dock_main_id);
         ImGui::DockBuilderDockWindow("RT60s", dock_main_id);
         ImGui::DockBuilderDockWindow("Cepstrum", dock_main_id);
         ImGui::DockBuilderDockWindow("Echo Density", dock_main_id);
@@ -567,6 +614,11 @@ void FDNToolboxApp::DrawMainMenuBar()
                 save_config_browser.Open();
             }
 
+            if (ImGui::MenuItem("Load RIR"))
+            {
+                load_rir_browser.Open();
+            }
+
             ImGui::EndMenu();
         }
 
@@ -620,6 +672,13 @@ void FDNToolboxApp::DrawMainMenuBar()
             ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "FPS: %.1f", fps);
         }
 
+        ImGui::Separator();
+        if (!loaded_rir_filename_.empty())
+        {
+            ImGui::SameLine();
+            ImGui::TextWrapped("Loaded RIR: %s", loaded_rir_filename_.c_str());
+        }
+
         ImGui::EndMainMenuBar();
     }
 
@@ -635,6 +694,7 @@ void FDNToolboxApp::DrawMainMenuBar()
     save_ir_browser.Display();
     load_config_browser.Display();
     save_config_browser.Display();
+    load_rir_browser.Display();
 
     if (save_ir_browser.HasSelected())
     {
@@ -679,6 +739,42 @@ void FDNToolboxApp::DrawMainMenuBar()
             LOG_ERROR(Settings::Instance().GetLogger(), "Error saving configuration: {}", e.what());
         }
         save_config_browser.ClearSelected();
+    }
+
+    if (load_rir_browser.HasSelected())
+    {
+        std::string filename = load_rir_browser.GetSelected().string();
+        std::vector<float> buffer;
+        int file_sample_rate = Settings::Instance().SampleRate();
+        int file_num_channels = 0;
+        if (audio_utils::audio_file::ReadWavFile(filename, buffer, file_sample_rate, file_num_channels))
+        {
+            if (file_num_channels != 1)
+            {
+                LOG_ERROR(Settings::Instance().GetLogger(), "RIR file must be mono. Loaded file has {} channels.",
+                          file_num_channels);
+            }
+            else
+            {
+                LOG_INFO(Settings::Instance().GetLogger(), "Loaded RIR file: {} ({} Hz, {} channels, {} samples)",
+                         filename, file_sample_rate, file_num_channels, buffer.size());
+                loaded_rir_filename_ = filename;
+
+                auto conv_reverb = std::make_unique<sfFDN::PartitionedConvolver>(kSystemBlockSize, buffer);
+
+                LOG_INFO(Settings::Instance().GetLogger(), "Created PartitionedConvolver with {}",
+                         conv_reverb->GetShortInfo());
+
+                rir_analyzer_.SetImpulseResponse(std::move(buffer));
+                convolution_reverb_ = std::move(conv_reverb);
+            }
+        }
+        else
+        {
+            LOG_ERROR(Settings::Instance().GetLogger(), "Failed to load RIR file: {}", filename);
+        }
+
+        load_rir_browser.ClearSelected();
     }
 }
 
@@ -970,6 +1066,21 @@ void FDNToolboxApp::DrawImpulseResponse()
         fdn_analyzer_.SetImpulseResponseSize(ir_duration * Settings::Instance().SampleRate());
     }
 
+    if (!rir_analyzer_.GetImpulseResponse().empty())
+    {
+        if (ImGui::Button("Match RIR Length"))
+        {
+            float rir_duration = static_cast<float>(rir_analyzer_.GetImpulseResponse().size()) /
+                                 static_cast<float>(Settings::Instance().SampleRate());
+            ir_duration = rir_duration;
+            Settings::Instance().SetIRDuration(ir_duration);
+            fdn_analyzer_.SetImpulseResponseSize(ir_duration * Settings::Instance().SampleRate());
+        }
+    }
+
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
     if (ImPlot::BeginPlot("Impulse Response", ImVec2(-1, -1), ImPlotFlags_NoLegend))
     {
         auto imp_response = fdn_analyzer_.GetImpulseResponse();
@@ -986,6 +1097,13 @@ void FDNToolboxApp::DrawImpulseResponse()
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -1.0f, 1.0f);
 
         ImPlot::PlotLine("Impulse Response", imp_response.data(), imp_response.size());
+
+        auto rir_response = rir_analyzer_.GetImpulseResponse();
+        if (!rir_response.empty() && show_rir)
+        {
+            ImPlot::PlotLine("RIR Response", rir_response.data(), rir_response.size());
+        }
+
         ImPlot::EndPlot();
     }
 
@@ -1046,18 +1164,60 @@ void FDNToolboxApp::DrawAudioPlayer()
         ImGui::EndCombo();
     }
 
+    ImGui::PushItemWidth(200);
     static float gain = 1.0f;
-    ImGui::SetNextItemWidth(200);
     if (ImGui::SliderFloat("Gain", &gain, 0.0f, 10.0f, "%.2f"))
     {
         audio_gain_ = gain; // Update the audio gain
     }
 
-    static float mix = 0.5f;
-    ImGui::SetNextItemWidth(200);
-    if (ImGui::SliderFloat("Dry/Wet", &mix, 0.0f, 1.0f, "%.2f"))
+    static float fdn_dry_level = 0.5f;
+    if (ImGui::SliderFloat("FDN Direct Level", &fdn_dry_level, 0.0f, 1.0f, "%.2f"))
     {
-        dry_wet_mix_ = mix; // Update the dry/wet mix
+        fdn_dry_level_ = fdn_dry_level;
+    }
+
+    static float fdn_wet_level = 0.5f;
+    if (ImGui::SliderFloat("FDN Reverb Level", &fdn_wet_level, 0.0f, 1.0f, "%.2f"))
+    {
+        fdn_wet_level_ = fdn_wet_level;
+    }
+
+    uint32_t pre_delay_ms = pre_delay_ms_.load();
+    constexpr uint32_t kMinPreDelay = 0;
+    constexpr uint32_t kMaxPreDelay = 100;
+    if (ImGui::SliderScalar("Pre-Delay (ms)", ImGuiDataType_U32, &pre_delay_ms, &kMinPreDelay, &kMaxPreDelay))
+    {
+        pre_delay_ms = std::clamp(pre_delay_ms, kMinPreDelay, kMaxPreDelay);
+        pre_delay_ms_ = pre_delay_ms;
+    }
+
+    ImGui::PopItemWidth();
+
+    if (!rir_analyzer_.GetImpulseResponse().empty())
+    {
+        int selected_reverb_engine = reverb_engine_.load();
+        ImGui::RadioButton("FDN Reverb", &selected_reverb_engine, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Convolution Reverb", &selected_reverb_engine, 1);
+        reverb_engine_.store(selected_reverb_engine);
+
+        if (selected_reverb_engine == 1)
+        {
+            static float dry_level = 0.0f;
+            static float wet_level = 1.0f;
+            ImGui::PushItemWidth(200);
+            if (ImGui::SliderFloat("Conv. Dry Level", &dry_level, 0.0f, 1.0f, "%.2f"))
+            {
+                conv_dry_level_ = dry_level;
+            }
+
+            if (ImGui::SliderFloat("Conv. Wet Level", &wet_level, 0.0f, 1.0f, "%.2f"))
+            {
+                conv_wet_level_ = wet_level;
+            }
+            ImGui::PopItemWidth();
+        }
     }
 
     static sfFDN::OnePoleFilter rms_filter;
@@ -1162,6 +1322,7 @@ void FDNToolboxApp::DrawSettingsWindow()
     {
         spectrogram_type_ = static_cast<SpectrogramType>(selected_spectrogram_type);
         fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+        rir_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
     }
     constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};
     constexpr std::array kWindowSizeOptions = {"256", "512", "1024", "2048", "4096", "8192"};
@@ -1257,25 +1418,51 @@ void FDNToolboxApp::DrawOptimizationWindow()
 
     float content_region_width = ImGui::GetContentRegionAvail().x;
 
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
+    ImGui::BeginChild("Optimization Parameters", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_None);
+    ImGui::SeparatorText("Setup");
+    static bool optimize_gains = false;
+    static bool optimize_matrix = false;
+    static int matrix_type = 0;
+    static bool optimize_filters = false;
+
+    ImGui::BeginDisabled(optimize_filters);
+
+    ImGui::Checkbox("Optimize Gains", &optimize_gains);
+    ImGui::Checkbox("Optimize Matrix", &optimize_matrix);
+    if (optimize_matrix)
     {
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
-        ImGui::BeginChild("Optimization Parameters", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
-                          ImGuiWindowFlags_None);
-        ImGui::SeparatorText("Setup");
-        static bool optimize_gains = false;
-        static bool optimize_matrix = false;
-        static bool optimize_delays = false;
-        ImGui::Checkbox("Optimize Gains", &optimize_gains);
-        ImGui::Checkbox("Optimize Matrix", &optimize_matrix);
-        ImGui::Checkbox("Optimize Delays", &optimize_delays);
+        ImGui::RadioButton("Random", &matrix_type, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Householder", &matrix_type, 1);
+        ImGui::SameLine();
+        ImGui::RadioButton("Circulant", &matrix_type, 2);
+    }
 
-        bool is_optimizing = fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Running;
-        ImGui::BeginDisabled(is_optimizing);
+    ImGui::EndDisabled();
 
+    const bool has_target_rir = !rir_analyzer_.GetImpulseResponse().empty();
+    ImGui::BeginDisabled(!has_target_rir);
+    ImGui::Checkbox("Optimize Filters", &optimize_filters);
+    ImGui::EndDisabled();
+
+    if (optimize_filters)
+    {
+        optimize_gains = false;
+        optimize_matrix = false;
+    }
+
+    bool is_optimizing = fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Running;
+    ImGui::BeginDisabled(is_optimizing);
+
+    static float spectral_flatness_weight = 1.0;
+    static float sparsity_weight = 0.5;
+    static float power_envelope_weight = 1.0;
+
+    if (optimize_gains || optimize_matrix)
+    {
         ImGui::SeparatorText("Objective Weights");
-        static float spectral_flatness_weight = 1.0;
-        static float sparsity_weight = 0.5;
-        static float power_envelope_weight = 1.0;
 
         ImGui::PushItemWidth(100);
 
@@ -1284,41 +1471,46 @@ void FDNToolboxApp::DrawOptimizationWindow()
         ImGui::InputFloat("Power Envelope Weight", &power_envelope_weight, 0.0, 10.0, "%.2f");
 
         ImGui::PopItemWidth();
+    }
 
-        ImGui::SeparatorText("Optimization Parameters");
+    ImGui::SeparatorText("Optimization Parameters");
 
-        constexpr std::array<std::string_view, 9> kOptimizationAlgorithms = {"Adam",
-                                                                             "SPSA",
-                                                                             "Simulated Annealing",
-                                                                             "Differential Evolution",
-                                                                             "Particle Swarm Optimization",
-                                                                             "Random Search",
-                                                                             "L-BFGS",
-                                                                             "Gradient Descent",
-                                                                             "CMA-ES"};
-        static int selected_algorithm = 0;
-        if (ImGui::BeginCombo("Algorithm", kOptimizationAlgorithms[selected_algorithm].data()))
+    constexpr std::array<std::string_view, 9> kOptimizationAlgorithms = {"SPSA",
+                                                                         "Simulated Annealing",
+                                                                         "Differential Evolution",
+                                                                         "Particle Swarm Optimization",
+                                                                         "Random Search",
+                                                                         "Adam",
+                                                                         "L-BFGS",
+                                                                         "Gradient Descent",
+                                                                         "CMA-ES"};
+    static int selected_algorithm = 0;
+    if (ImGui::BeginCombo("Algorithm", kOptimizationAlgorithms[selected_algorithm].data()))
+    {
+        for (int i = 0; i < static_cast<int>(kOptimizationAlgorithms.size()); ++i)
         {
-            for (int i = 0; i < static_cast<int>(kOptimizationAlgorithms.size()); ++i)
+            bool is_selected = (selected_algorithm == i);
+            if (ImGui::Selectable(kOptimizationAlgorithms[i].data(), is_selected))
             {
-                bool is_selected = (selected_algorithm == i);
-                if (ImGui::Selectable(kOptimizationAlgorithms[i].data(), is_selected))
-                {
-                    selected_algorithm = i;
-                }
+                selected_algorithm = i;
             }
-            ImGui::EndCombo();
         }
+        ImGui::EndCombo();
+    }
 
-        static fdn_optimization::OptimizationInfo opt_info;
+    static fdn_optimization::OptimizationInfo opt_info;
 
-        DrawOptimizationParamGui(kOptimizationAlgorithms[selected_algorithm], opt_info);
+    DrawOptimizationParamGui(kOptimizationAlgorithms[selected_algorithm], opt_info);
 
+    static float gradient_step_size = 1e-4f;
+    static fdn_optimization::GradientMethod gradient_method = fdn_optimization::GradientMethod::CentralDifferences;
+
+    if (selected_algorithm == 5 || selected_algorithm == 6 || selected_algorithm == 7)
+    {
         ImGui::PushItemWidth(200);
         ImGui::SeparatorText("Gradient Settings");
         constexpr std::array<std::string_view, 2> kGradientMethods = {"Central Difference", "Forward Difference"};
         static int selected_gradient_method = 0;
-        static fdn_optimization::GradientMethod gradient_method = fdn_optimization::GradientMethod::CentralDifferences;
         if (ImGui::BeginCombo("Gradient Method", kGradientMethods[selected_gradient_method].data()))
         {
             for (int i = 0; i < static_cast<int>(kGradientMethods.size()); ++i)
@@ -1334,177 +1526,207 @@ void FDNToolboxApp::DrawOptimizationWindow()
             ImGui::EndCombo();
         }
 
-        static float gradient_step_size = 1e-4f;
         ImGui::InputFloat("Gradient Step Size", &gradient_step_size, 0.0f, 1.0f, "%.1ef");
         ImGui::PopItemWidth();
+    }
 
-        if (ImGui::Button("Run Optimization"))
+    if (ImGui::Button("Run Optimization"))
+    {
+        if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
         {
-            if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
+            std::vector<fdn_optimization::OptimizationParamType> params_to_optimize;
+            if (optimize_gains)
             {
-                std::vector<fdn_optimization::OptimizationParamType> params_to_optimize;
-                if (optimize_gains)
-                {
-                    params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Gains);
-                }
-                if (optimize_matrix)
+                params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Gains);
+            }
+
+            if (optimize_matrix)
+            {
+                if (matrix_type == 0)
                 {
                     params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix);
                 }
-                if (optimize_delays)
+                else if (matrix_type == 1)
                 {
-                    params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Delays);
+                    params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Householder);
                 }
-
-                if (!params_to_optimize.empty())
+                else if (matrix_type == 2)
                 {
-
-                    opt_info.parameters_to_optimize = params_to_optimize;
-                    opt_info.initial_fdn_config = fdn_config_;
-                    opt_info.ir_size = Settings::Instance().SampleRate();
-                    opt_info.gradient_method = gradient_method;
-                    opt_info.gradient_delta = gradient_step_size;
-                    fdn_optimizer_.StartOptimization(opt_info);
-                    ImGui::OpenPopup("Optimization Progress");
+                    params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Circulant);
                 }
             }
-        }
-        ImGui::EndDisabled();
 
-        ImGui::SetNextWindowSize(ImVec2(600, -1), ImGuiCond_Always);
-        if (ImGui::BeginPopupModal("Optimization Progress", nullptr, ImGuiWindowFlags_None))
-        {
-            fdn_optimization::OptimizationProgressInfo progress = fdn_optimizer_.GetProgress();
-
-            std::chrono::duration<double, std::chrono::seconds::period> elapsed_seconds = progress.elapsed_time;
-            ImGui::Text("Elapsed Time: %.2f seconds", elapsed_seconds.count());
-
-            uint32_t eval_count = progress.evaluation_count;
-            ImGui::Text("Evaluations: %u", eval_count);
-
-            if (!progress.loss_history.empty() &&
-                ImPlot::BeginPlot("Loss Progress", ImVec2(-1, 250), ImPlotAxisFlags_None))
+            if (optimize_filters)
             {
-                const std::vector<double>& loss_history_vec = progress.loss_history[0];
-                ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-                ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history_vec.size() * 1.25),
-                                        ImPlotCond_Always);
+                params_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters);
+                params_to_optimize.push_back(fdn_optimization::OptimizationParamType::TonecorrectionFilters);
 
-                double max_loss = loss_history_vec.empty()
-                                      ? 1.0
-                                      : *std::max_element(loss_history_vec.begin(), loss_history_vec.end());
-                ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Always);
-
-                ImPlot::PlotLine("Loss", loss_history_vec.data(), static_cast<int>(loss_history_vec.size()));
-
-                for (auto i = 1u; i < progress.loss_history.size(); ++i)
+                if (optimize_gains || optimize_matrix)
                 {
-                    const std::vector<double>& other_loss_history = progress.loss_history[i];
-                    ImPlot::PlotLine(("Loss " + std::to_string(i)).c_str(), other_loss_history.data(),
-                                     static_cast<int>(other_loss_history.size()));
+                    LOG_WARNING(Settings::Instance().GetLogger(),
+                                "When optimizing filters, gains and matrix optimizations are ignored.");
+                }
+            }
+
+            if (!params_to_optimize.empty())
+            {
+                opt_info.parameters_to_optimize = params_to_optimize;
+                opt_info.initial_fdn_config = fdn_config_;
+                opt_info.ir_size = Settings::Instance().SampleRate();
+                opt_info.gradient_method = gradient_method;
+                opt_info.gradient_delta = gradient_step_size;
+                opt_info.spectral_flatness_weight = spectral_flatness_weight;
+                opt_info.sparsity_weight = sparsity_weight;
+                opt_info.power_envelope_weight = power_envelope_weight;
+                if (has_target_rir)
+                {
+                    opt_info.target_rir.clear();
+                    opt_info.target_rir.reserve(rir_analyzer_.GetImpulseResponse().size());
+                    std::ranges::copy(rir_analyzer_.GetImpulseResponse(), std::back_inserter(opt_info.target_rir));
                 }
 
-                ImPlot::EndPlot();
+                fdn_optimizer_.StartOptimization(opt_info);
+                ImGui::OpenPopup("Optimization Progress");
             }
-
-            ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), "Optimizing...");
-            if (ImGui::Button("Cancel"))
-            {
-                fdn_optimizer_.CancelOptimization();
-            }
-
-            if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
-            {
-                ImGui::CloseCurrentPopup();
-            }
-
-            ImGui::EndPopup();
         }
+    }
+    ImGui::EndDisabled();
 
-        ImGui::EndChild();
+    ImGui::SetNextWindowSize(ImVec2(600, -1), ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("Optimization Progress", nullptr, ImGuiWindowFlags_None))
+    {
+        fdn_optimization::OptimizationProgressInfo progress = fdn_optimizer_.GetProgress();
 
-        ImGui::SameLine();
+        std::chrono::duration<double, std::chrono::seconds::period> elapsed_seconds = progress.elapsed_time;
+        ImGui::Text("Elapsed Time: %.2f seconds", elapsed_seconds.count());
 
-        ImGui::BeginChild("Optimization Results", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
-                          ImGuiWindowFlags_None);
-        ImGui::SeparatorText("Results");
+        uint32_t eval_count = progress.evaluation_count;
+        ImGui::Text("Evaluations: %u", eval_count);
 
-        static double elapsed_time_sec = 0;
-        static uint32_t evaluation_count = 0;
-        static double initial_loss = 0.0;
-        static double final_loss = 0.0;
-        static std::vector<double> loss_history;
-        static std::vector<std::vector<double>> all_loss_histories;
-        static std::vector<std::string> loss_names;
-
-        if (fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Completed ||
-            fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Canceled)
+        if (!progress.loss_history.empty() && ImPlot::BeginPlot("Loss Progress", ImVec2(-1, 250), ImPlotAxisFlags_None))
         {
-            fdn_optimization::OptimizationResult result = fdn_optimizer_.GetResult();
-            elapsed_time_sec = std::chrono::duration<double, std::chrono::seconds::period>(result.total_time).count();
-            evaluation_count = result.total_evaluations;
-            initial_loss = result.loss_history[0].front();
-            final_loss = result.loss_history[0].back();
-            loss_history = result.loss_history[0];
-            all_loss_histories = result.loss_history;
-            loss_names = result.loss_names;
-            if (optimize_gains)
-            {
-                fdn_config_.input_gains = result.optimized_fdn_config.input_gains;
-                fdn_config_.output_gains = result.optimized_fdn_config.output_gains;
-            }
-            if (optimize_matrix)
-            {
-                fdn_config_.matrix_info = result.optimized_fdn_config.matrix_info;
-            }
-            if (optimize_delays)
-            {
-                fdn_config_.delays = result.optimized_fdn_config.delays;
-            }
-
-            UpdateFDN();
-        }
-        auto last_status = fdn_optimizer_.GetStatus();
-        if (last_status == fdn_optimization::OptimizationStatus::Canceled ||
-            last_status == fdn_optimization::OptimizationStatus::Completed)
-        {
-            fdn_optimizer_.ResetStatus();
-        }
-
-        ImGui::Text("Elapsed Time: %.2f seconds", elapsed_time_sec);
-        ImGui::Text("Evaluations: %u", evaluation_count);
-        ImGui::Text("Initial Loss: %.6f", initial_loss);
-        ImGui::Text("Final Loss: %.6f", final_loss);
-
-        ImGui::EndChild();
-
-        ImGui::SameLine();
-
-        ImGui::BeginChild("Loss Plot", ImVec2(-1, -1), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
-
-        if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
-        {
-            ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
+            const std::vector<double>& loss_history_vec = progress.loss_history[0];
             ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
+            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history_vec.size() * 1.25),
+                                    ImPlotCond_Always);
 
-            double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
+            double max_loss =
+                loss_history_vec.empty() ? 1.0 : *std::max_element(loss_history_vec.begin(), loss_history_vec.end());
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Always);
 
-            ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
+            ImPlot::PlotLine("Loss", loss_history_vec.data(), static_cast<int>(loss_history_vec.size()));
 
-            for (auto i = 1u; i < all_loss_histories.size(); ++i)
+            for (auto i = 1u; i < progress.loss_history.size(); ++i)
             {
-                const std::vector<double>& other_loss_history = all_loss_histories[i];
-                ImPlot::PlotLine((loss_names[i - 1]).c_str(), other_loss_history.data(),
+                const std::vector<double>& other_loss_history = progress.loss_history[i];
+                ImPlot::PlotLine(("Loss " + std::to_string(i)).c_str(), other_loss_history.data(),
                                  static_cast<int>(other_loss_history.size()));
             }
+
             ImPlot::EndPlot();
         }
-        ImGui::EndChild();
 
-        ImGui::PopStyleVar();
+        ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), "Optimizing...");
+        if (ImGui::Button("Cancel"))
+        {
+            fdn_optimizer_.CancelOptimization();
+        }
+
+        if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
+        {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
+
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    ImGui::BeginChild("Optimization Results", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_None);
+    ImGui::SeparatorText("Results");
+
+    static double elapsed_time_sec = 0;
+    static uint32_t evaluation_count = 0;
+    static double initial_loss = 0.0;
+    static double final_loss = 0.0;
+    static std::vector<double> loss_history;
+    static std::vector<std::vector<double>> all_loss_histories;
+    static std::vector<std::string> loss_names;
+
+    if (fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Completed ||
+        fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Canceled)
+    {
+        fdn_optimization::OptimizationResult result = fdn_optimizer_.GetResult();
+        elapsed_time_sec = std::chrono::duration<double, std::chrono::seconds::period>(result.total_time).count();
+        evaluation_count = result.total_evaluations;
+        initial_loss = result.loss_history[0].front();
+        final_loss = result.loss_history[0].back();
+        loss_history = result.loss_history[0];
+        all_loss_histories = result.loss_history;
+        loss_names = result.loss_names;
+        if (optimize_gains)
+        {
+            fdn_config_.input_gains = result.optimized_fdn_config.input_gains;
+            fdn_config_.output_gains = result.optimized_fdn_config.output_gains;
+        }
+        if (optimize_matrix)
+        {
+            fdn_config_.matrix_info = result.optimized_fdn_config.matrix_info;
+        }
+        if (optimize_filters)
+        {
+            fdn_config_.attenuation_t60s = result.optimized_fdn_config.attenuation_t60s;
+            LOG_INFO(Settings::Instance().GetLogger(), "Optimized T60s: {}", fdn_config_.attenuation_t60s);
+            fdn_config_.tc_gains = result.optimized_fdn_config.tc_gains;
+            LOG_INFO(Settings::Instance().GetLogger(), "Optimized Tone Correction Gains: {}", fdn_config_.tc_gains);
+            fdn_config_.tc_frequencies = result.optimized_fdn_config.tc_frequencies;
+        }
+
+        UpdateFDN();
+    }
+    auto last_status = fdn_optimizer_.GetStatus();
+    if (last_status == fdn_optimization::OptimizationStatus::Canceled ||
+        last_status == fdn_optimization::OptimizationStatus::Completed)
+    {
+        fdn_optimizer_.ResetStatus();
+    }
+
+    ImGui::Text("Elapsed Time: %.2f seconds", elapsed_time_sec);
+    ImGui::Text("Evaluations: %u", evaluation_count);
+    ImGui::Text("Initial Loss: %.6f", initial_loss);
+    ImGui::Text("Final Loss: %.6f", final_loss);
+
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    ImGui::BeginChild("Loss Plot", ImVec2(-1, -1), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
+
+    if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
+    {
+        ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
+        ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
+
+        double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
+
+        ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
+
+        for (auto i = 1u; i < all_loss_histories.size(); ++i)
+        {
+            const std::vector<double>& other_loss_history = all_loss_histories[i];
+            ImPlot::PlotLine((loss_names[i - 1]).c_str(), other_loss_history.data(),
+                             static_cast<int>(other_loss_history.size()));
+        }
+        ImPlot::EndPlot();
+    }
+    ImGui::EndChild();
+
+    ImGui::PopStyleVar();
 
     ImGui::End();
 }
@@ -1517,6 +1739,7 @@ void FDNToolboxApp::DrawVisualization()
     DrawAutocorrelation();
     DrawFilterResponse();
     DrawEnergyDecayCurve();
+    DrawEnergyDecayRelief();
     DrawT60s();
     DrawEchoDensity();
 }
@@ -1534,17 +1757,34 @@ void FDNToolboxApp::DrawSpectrogram()
     static std::vector<float> mels{};
     static MelFormatterContext ctx{.mel_frequencies = mels};
 
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
     ImPlot::PushColormap(ImPlotColormap_Plasma);
 
     if (ImPlot::BeginPlot("##Spectrogram", ImVec2(ImGui::GetCurrentWindow()->Size[0] * 0.92f, -1),
                           ImPlotFlags_NoMouseText))
     {
-        fdn_analysis::SpectrogramData spectrogram_data =
-            fdn_analyzer_.GetSpectrogram(spectrogram_info_, spectrogram_type_ == SpectrogramType::Mel);
+        const double tmin = 0.0;
+        double tmax = 1.0;
+
+        fdn_analysis::SpectrogramData spectrogram_data{};
+        if (show_rir)
+        {
+            spectrogram_data =
+                rir_analyzer_.GetSpectrogram(spectrogram_info_, spectrogram_type_ == SpectrogramType::Mel);
+            tmax = rir_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
+        }
+        else
+        {
+            spectrogram_data =
+                fdn_analyzer_.GetSpectrogram(spectrogram_info_, spectrogram_type_ == SpectrogramType::Mel);
+            tmax = fdn_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
+        }
 
         double bin_count = Settings::Instance().SampleRate() / 2.0;
 
-        if (spectrogram_type_ == SpectrogramType::Mel)
+        if (spectrogram_type_ == SpectrogramType::Mel && !spectrogram_data.data.empty())
         {
             mels = audio_utils::GetMelFrequencies(spectrogram_data.bin_count, 0.f,
                                                   Settings::Instance().SampleRate() / 2.f);
@@ -1553,9 +1793,6 @@ void FDNToolboxApp::DrawSpectrogram()
             bin_count = spectrogram_data.bin_count;
         }
 
-        const double tmin = 0.f;
-        const double tmax =
-            fdn_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
         ImPlot::SetupAxisLimits(ImAxis_X1, tmin, tmax, ImGuiCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.f, bin_count, ImGuiCond_Always);
 
@@ -1617,16 +1854,35 @@ void FDNToolboxApp::DrawSpectrum()
     ImGui::SameLine();
     ImGui::Checkbox("Lock Range", &lock_freq_range);
 
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
     static float kRowRatios[] = {0.15f, 0.85f};
     if (ImPlot::BeginSubplots("Spectrum Subplot", 2, 1, ImVec2(-1, -1), ImPlotFlags_NoLegend, kRowRatios))
     {
         if (ImPlot::BeginPlot("Impulse Response", ImVec2(), ImPlotFlags_NoLegend))
         {
-            DrawEarlyRIRPicker(fdn_analyzer_.GetImpulseResponse(), fdn_analyzer_.GetTimeData(), early_rir_duration);
+            if (!show_rir)
+            {
+                DrawEarlyRIRPicker(fdn_analyzer_.GetImpulseResponse(), fdn_analyzer_.GetTimeData(), early_rir_duration);
+            }
+            else
+            {
+                DrawEarlyRIRPicker(rir_analyzer_.GetImpulseResponse(), rir_analyzer_.GetTimeData(), early_rir_duration);
+            }
             ImPlot::EndPlot();
         }
 
-        fdn_analysis::SpectrumData spectrum_data = fdn_analyzer_.GetSpectrum(early_rir_duration);
+        fdn_analysis::SpectrumData spectrum_data{};
+        if (show_rir)
+        {
+            spectrum_data = rir_analyzer_.GetSpectrum(early_rir_duration);
+        }
+        else
+        {
+            spectrum_data = fdn_analyzer_.GetSpectrum(early_rir_duration);
+        }
+
         std::string plot_title = std::format("Spectrum ({} peaks)", spectrum_data.peaks.size());
         if (ImPlot::BeginPlot(plot_title.c_str(), ImVec2(), ImPlotFlags_NoLegend))
         {
@@ -1707,20 +1963,39 @@ void FDNToolboxApp::DrawAutocorrelation()
         selected_autocorr_type = 1;
     }
 
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
     static float kRowRatios[] = {0.15f, 0.85f};
     if (ImPlot::BeginSubplots("Autocorrelation Subplot", 2, 1, ImVec2(-1, -1), ImPlotFlags_NoLegend, kRowRatios))
     {
         if (ImPlot::BeginPlot("Impulse Response", ImVec2(), ImPlotFlags_NoLegend))
         {
-            DrawEarlyRIRPicker(fdn_analyzer_.GetImpulseResponse(), fdn_analyzer_.GetTimeData(), xcorr_duration);
+            if (show_rir)
+            {
+                DrawEarlyRIRPicker(rir_analyzer_.GetImpulseResponse(), rir_analyzer_.GetTimeData(), xcorr_duration);
+            }
+            else
+            {
+                DrawEarlyRIRPicker(fdn_analyzer_.GetImpulseResponse(), fdn_analyzer_.GetTimeData(), xcorr_duration);
+            }
             xcorr_duration = std::clamp(xcorr_duration, 0.1, 0.9);
             ImPlot::EndPlot();
         }
 
         auto xcorr_data = fdn_analyzer_.GetAutocorrelation(xcorr_duration);
 
+        fdn_analysis::AutocorrelationData rir_xcorr_data;
+        if (show_rir)
+        {
+            rir_xcorr_data = rir_analyzer_.GetAutocorrelation(xcorr_duration);
+        }
+
         std::span<const float> xcorr_span =
             (selected_autocorr_type == 0) ? xcorr_data.autocorrelation : xcorr_data.spectral_autocorrelation;
+
+        std::span<const float> rir_xcorr_span =
+            (selected_autocorr_type == 0) ? rir_xcorr_data.autocorrelation : rir_xcorr_data.spectral_autocorrelation;
 
         if (ImPlot::BeginPlot("Autocorrelation", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
@@ -1728,6 +2003,12 @@ void FDNToolboxApp::DrawAutocorrelation()
             ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, -1000, xcorr_span.size() + 100);
 
             ImPlot::PlotLine("Autocorrelation", xcorr_span.data(), xcorr_span.size());
+
+            if (show_rir && !rir_xcorr_span.empty())
+            {
+                ImPlot::PlotLine("RIR Autocorrelation", rir_xcorr_span.data(), rir_xcorr_span.size());
+            }
+
             ImPlot::EndPlot();
         }
         ImPlot::EndSubplots();
@@ -1880,19 +2161,38 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
     decay_db_start = std::clamp(decay_db_start, 0.0f, decay_db_end - 1.0f);
     decay_db_end = std::clamp(decay_db_end, decay_db_start + 1.0f, 60.0f);
 
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
     auto edc_data = fdn_analyzer_.GetEnergyDecayCurveData();
+
+    fdn_analysis::EnergyDecayCurveData rir_edc_data{};
+    if (show_rir)
+    {
+        rir_edc_data = rir_analyzer_.GetEnergyDecayCurveData();
+    }
 
     auto t60_data = fdn_analyzer_.GetT60Data(-decay_db_start, -decay_db_end);
 
     constexpr std::array<const char*, 10> octave_band_names = {"32 Hz", "63 Hz", "125 Hz", "250 Hz", "500 Hz",
                                                                "1 kHz", "2 kHz", "4 kHz",  "8 kHz",  "16 kHz"};
+    static std::array<bool, 10> octave_band_visibility{};
+    for (auto i = 0; i < octave_band_visibility.size(); ++i)
+    {
+        ImGui::Checkbox(octave_band_names[i], &octave_band_visibility[i]);
+        if (i < octave_band_visibility.size() - 1)
+        {
+            ImGui::SameLine();
+        }
+    }
 
     std::string edc_title = std::format("Energy Decay Curve (T60: {:.2f} s)", t60_data.overall_t60.t60);
     if (ImPlot::BeginPlot(edc_title.c_str(), ImVec2(-1, -1), ImPlotFlags_None))
     {
         ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_None);
 
-        // ImPlot::SetupAxes("Sample", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxes("Time (s)", "Level (dB)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, -90.0f, 5.0f, ImPlotCond_Once);
 
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, fdn_analyzer_.GetTimeData().back());
 
@@ -1902,24 +2202,115 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
             ImPlot::PlotLine("Energy Decay Curve", fdn_analyzer_.GetTimeData().data(),
                              edc_data.energy_decay_curve.data(), edc_data.energy_decay_curve.size());
 
-            std::array<float, 2> t60_x = {t60_data.overall_t60.decay_start_time, t60_data.overall_t60.decay_end_time};
-            std::array<float, 2> t60_y = {
-                (t60_data.overall_t60.decay_start_time * t60_data.overall_t60.slope) + t60_data.overall_t60.intercept,
-                (t60_data.overall_t60.decay_end_time * t60_data.overall_t60.slope) + t60_data.overall_t60.intercept};
-            ImPlot::PlotLine("T60 Decay", t60_x.data(), t60_y.data(), 2, ImPlotFlags_NoLegend);
+            if (show_rir && !rir_edc_data.energy_decay_curve.empty())
+            {
+                ImPlot::PlotLine("RIR Energy Decay Curve", rir_analyzer_.GetTimeData().data(),
+                                 rir_edc_data.energy_decay_curve.data(), rir_edc_data.energy_decay_curve.size());
+            }
         }
         else
         {
+            constexpr uint32_t kDownsampleFactor = 32;
             for (auto i = 0; i < octave_band_names.size(); ++i)
             {
-                constexpr uint32_t kDownsampleFactor = 4;
+                if (!octave_band_visibility[i])
+                {
+                    continue;
+                }
                 ImPlot::PlotLine(octave_band_names[i], fdn_analyzer_.GetTimeData().data(),
                                  edc_data.edc_octaves[i].data(), edc_data.edc_octaves[i].size() / kDownsampleFactor,
                                  ImPlotLineFlags_None, 0, kDownsampleFactor * sizeof(float));
+
+                if (show_rir && !rir_edc_data.edc_octaves.empty())
+                {
+                    ImPlot::PlotLine(std::string("RIR " + std::string(octave_band_names[i])).c_str(),
+                                     rir_analyzer_.GetTimeData().data(), rir_edc_data.edc_octaves[i].data(),
+                                     rir_edc_data.edc_octaves[i].size() / kDownsampleFactor, ImPlotLineFlags_None, 0,
+                                     kDownsampleFactor * sizeof(float));
+                }
             }
         }
 
         ImPlot::EndPlot();
+    }
+
+    ImGui::End();
+}
+
+void FDNToolboxApp::DrawEnergyDecayRelief()
+{
+
+    if (!ImGui::Begin("Energy Decay Relief"))
+    {
+        ImGui::End();
+        return;
+    }
+
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
+    fdn_analysis::EnergyDecayReliefData edr{};
+    if (show_rir)
+    {
+        edr = rir_analyzer_.GetEnergyDecayReliefData();
+    }
+    else
+    {
+        edr = fdn_analyzer_.GetEnergyDecayReliefData();
+    }
+    static std::vector<float> x_data;
+    static std::vector<float> y_data;
+
+    // constexpr uint32_t kDownsampleFactor = 1024;
+    const uint32_t y_size = edr.energy_decay_relief.extent(0);
+    const uint32_t x_size = edr.energy_decay_relief.extent(1);
+
+    const size_t grid_size = x_size * y_size;
+
+    if (x_data.size() != grid_size || y_data.size() != grid_size)
+    {
+        x_data.resize(grid_size);
+        y_data.resize(grid_size);
+
+        auto x_mdspan = std::mdspan(x_data.data(), y_size, x_size);
+        auto y_mdspan = std::mdspan(y_data.data(), y_size, x_size);
+        for (size_t i = 0; i < y_size; ++i)
+        {
+            for (size_t j = 0; j < x_size; ++j)
+            {
+                x_mdspan[i, j] = (j) / static_cast<float>(Settings::Instance().SampleRate()); // Time in seconds
+                y_mdspan[i, j] = static_cast<float>(i);                                       // Octave band index
+            }
+        }
+    }
+
+    static std::vector<float> z_data;
+    z_data.resize(grid_size);
+    auto z_mdspan = std::mdspan(z_data.data(), y_size, x_size);
+    for (size_t i = 0; i < y_size; ++i)
+    {
+        for (size_t j = 0; j < x_size; ++j)
+        {
+            z_mdspan[i, j] = edr.energy_decay_relief[i, j];
+        }
+    }
+
+    if (ImPlot3D::BeginPlot("Energy Decay Relief", ImVec2(-1, -1), ImPlot3DFlags_None))
+    {
+        ImPlot3D::PushColormap(ImPlotColormap_Viridis);
+        ImPlot3D::PushStyleVar(ImPlot3DStyleVar_FillAlpha, 0.8f);
+        ImPlot3D::SetupBoxScale(2.0, 1.0, 1.0);
+        ImPlot3D::SetNextLineStyle(ImPlot3D::GetColormapColor(1));
+
+        ImPlot3D::SetupAxes("Time (s)", "Octave Band", "Level (dB)", ImPlot3DAxisFlags_AutoFit,
+                            ImPlot3DAxisFlags_AutoFit, ImPlot3DAxisFlags_AutoFit);
+
+        ImPlot3D::PlotSurface("EDR Surface", x_data.data(), y_data.data(), z_data.data(), x_size, y_size,
+                              ImPlot3DSurfaceFlags_None);
+
+        ImPlot3D::PopStyleVar();
+        ImPlot3D::PopColormap();
+        ImPlot3D::EndPlot();
     }
 
     ImGui::End();
@@ -1976,6 +2367,9 @@ void FDNToolboxApp::DrawEchoDensity()
     ImGui::InputInt("Hop Size (ms)", &hop_size_ms, 1, 10);
     hop_size_ms = std::clamp(hop_size_ms, 1, window_size_ms); // Clamp to a reasonable range
 
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
     auto echo_density_data = fdn_analyzer_.GetEchoDensityData(window_size_ms, hop_size_ms);
 
     if (ImPlot::BeginPlot("Impulse Response", ImVec2(-1, -1), ImPlotFlags_NoLegend))
@@ -2001,6 +2395,21 @@ void FDNToolboxApp::DrawEchoDensity()
             ImPlot::PlotInfLines("Mixing Time", &echo_density_data.mixing_time, 1, ImPlotInfLinesFlags_None);
         }
 
+        if (show_rir)
+        {
+            auto rir_echo_density_data = rir_analyzer_.GetEchoDensityData(window_size_ms, hop_size_ms);
+            ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
+            ImPlot::PlotLine("RIR Echo Density", rir_echo_density_data.sparse_indices.data(),
+                             rir_echo_density_data.echo_density.data(), rir_echo_density_data.sparse_indices.size());
+
+            if (rir_echo_density_data.mixing_time < time_data.back())
+            {
+                ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
+                ImPlot::PlotInfLines("RIR Mixing Time", &rir_echo_density_data.mixing_time, 1,
+                                     ImPlotInfLinesFlags_None);
+            }
+        }
+
         ImPlot::EndPlot();
     }
 
@@ -2018,6 +2427,9 @@ void FDNToolboxApp::DrawT60s()
     const float db_start = -5;
     const float db_end = -50;
 
+    static bool show_rir = false;
+    ImGui::Checkbox("Show RIR", &show_rir);
+
     if (ImPlot::BeginPlot("RT60s", ImVec2(-1, -1), ImPlotFlags_NoLegend))
     {
         auto t60_data = fdn_analyzer_.GetT60Data(db_start, db_end);
@@ -2034,6 +2446,15 @@ void FDNToolboxApp::DrawT60s()
         ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
         ImPlot::PlotLine("RT60s", t60_data.octave_band_frequencies.data(), t60_data.t60_octaves.data(),
                          t60_data.t60_octaves.size());
+
+        if (show_rir)
+        {
+            auto rir_t60_data = rir_analyzer_.GetT60Data(db_start, db_end);
+
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Square, 7.0f);
+            ImPlot::PlotLine("RIR RT60s", rir_t60_data.octave_band_frequencies.data(), rir_t60_data.t60_octaves.data(),
+                             rir_t60_data.t60_octaves.size());
+        }
 
         ImPlot::EndPlot();
     }

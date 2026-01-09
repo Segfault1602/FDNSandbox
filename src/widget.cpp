@@ -107,7 +107,11 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         point_changed = true; // Force initial plot update
     }
 
-    if (ImPlot::BeginPlot("Filter Designer", ImVec2(-1, ImGui::GetWindowHeight() * 0.45f), ImPlotFlags_NoLegend))
+    static bool show_filter_response = false;
+    const float designer_height =
+        show_filter_response ? ImGui::GetWindowHeight() * 0.45f : ImGui::GetWindowHeight() * 0.95f;
+
+    if (ImPlot::BeginPlot("Filter Designer", ImVec2(-1, designer_height), ImPlotFlags_NoLegend))
     {
         ImPlot::SetupAxes("Frequency (Hz)", "RT60 (s)");
         ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, 20000.0f, ImPlotCond_Always);
@@ -165,9 +169,11 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         }
     }
 
-    if (ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.45f), ImPlotFlags_None))
-    {
+    ImGui::Checkbox("Show Filter Response", &show_filter_response);
 
+    if (show_filter_response &&
+        ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.45f), ImPlotFlags_None))
+    {
         ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)");
         ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, -10.0f, 1.0f, ImPlotCond_Once);

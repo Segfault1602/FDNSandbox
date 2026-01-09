@@ -62,6 +62,8 @@ class FDNAnalyzer
 
     EnergyDecayCurveData GetEnergyDecayCurveData();
 
+    EnergyDecayReliefData GetEnergyDecayReliefData();
+
     T60Data GetT60Data(float decay_db_start, float decay_db_end);
 
     EchoDensityData GetEchoDensityData(uint32_t window_size_ms, uint32_t hop_size_ms);

@@ -10,12 +10,12 @@ target_sources(
             app.cpp
             fdn_info.cpp
             presets.cpp
+            app_imconfig.h
 )
 target_link_libraries(
     fdn_sandbox_app
     PUBLIC audio_utils quill::quill sfFDN.sfFDN
     PRIVATE imgui
-            implot
             fdn_analysis
             fdn_optimization
             SndFile::sndfile
@@ -28,7 +28,10 @@ target_include_directories(fdn_sandbox_app PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DI
 target_compile_features(fdn_sandbox_app PRIVATE cxx_std_23)
 target_compile_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
 target_link_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
-target_compile_definitions(fdn_sandbox_app PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})
+target_compile_definitions(
+    fdn_sandbox_app PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION}
+                           -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h"
+)
 
 # ====== Metal implementation ======
 if(APPLE)
@@ -36,8 +39,7 @@ if(APPLE)
     target_sources(${PROJECT_NAME} PRIVATE main.mm)
     target_link_libraries(
         ${PROJECT_NAME}
-        PRIVATE imgui_metal
-                implot
+        PRIVATE imgui
                 fdn_sandbox_app
                 "-framework Metal"
                 "-framework MetalKit"
@@ -48,9 +50,9 @@ if(APPLE)
     )
 elseif(WIN32)
     add_executable(${PROJECT_NAME} main_win32_dx12.cpp)
-    target_link_libraries(${PROJECT_NAME} PRIVATE fdn_sandbox_app imgui_win32_dx12 implot)
+    target_link_libraries(${PROJECT_NAME} PRIVATE fdn_sandbox_app imgui)
     target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_definitions(${PROJECT_NAME} PUBLIC -DIMGUI_USER_CONFIG="app_imconfig.h")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 
 else()
     # ========= OpenGL implementation =========
@@ -66,7 +68,7 @@ else()
 
     target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 
-    target_compile_definitions(${PROJECT_NAME} PUBLIC GL_SILENCE_DEPRECATION -DIMGUI_USER_CONFIG="app_imconfig.h")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC GL_SILENCE_DEPRECATION)
 endif()
 target_compile_options(${PROJECT_NAME} PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
 target_link_options(${PROJECT_NAME} PUBLIC ${FDNSANDBOX_LINK_OPTIONS})

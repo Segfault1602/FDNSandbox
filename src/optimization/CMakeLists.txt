@@ -50,7 +50,31 @@ target_link_libraries(
             sfFDN.sfFDN
             quill::quill
             audio_utils::audio_utils
+            fdn_analysis
 )
+
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(optim_tool PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 target_compile_options(optim_tool PRIVATE ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
 target_link_options(optim_tool PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
 target_compile_definitions(optim_tool PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})
+
+add_executable(tuning tuning.cpp)
+target_link_libraries(
+    tuning
+    PRIVATE fdn_optimization
+            sfFDN.sfFDN
+            quill::quill
+            audio_utils::audio_utils
+            fdn_analysis
+)
+
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(tuning PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+target_compile_options(tuning PRIVATE ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
+target_link_options(tuning PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
+target_compile_definitions(tuning PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})

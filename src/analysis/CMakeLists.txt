@@ -11,6 +11,7 @@ target_sources(
            FILES
            analysis.h
            fdn_analyzer.h
+           ir_analyzer.h
 )
 
 target_link_libraries(

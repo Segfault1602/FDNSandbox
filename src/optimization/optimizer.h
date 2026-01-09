@@ -31,8 +31,12 @@ enum class OptimizationStatus : uint8_t
 
 struct AdamParameters
 {
-    double step_size = 0.6;
-    double learning_rate_decay = 0.99;
+    double step_size = 0.4253;
+    double learning_rate_decay = 0.613;
+    size_t decay_step_size = 50;
+    size_t epoch_restarts = 250;
+    size_t max_restarts = 1;
+    double tolerance = 1e-3;
 };
 
 struct SPSAParameters
@@ -42,6 +46,7 @@ struct SPSAParameters
     double step_size = 0.9;
     double evaluationStepSize = 0.9;
     size_t max_iterations = 1e6;
+    double tolerance = 1e-5;
 };
 
 struct SimulatedAnnealingParameters
@@ -112,6 +117,12 @@ struct OptimizationInfo
     fdn_optimization::GradientMethod gradient_method = fdn_optimization::GradientMethod::CentralDifferences;
     double gradient_delta = 1e-4;
 
+    double spectral_flatness_weight = 1.0;
+    double sparsity_weight = 1.0;
+    double power_envelope_weight = 1.0;
+
+    std::vector<float> target_rir;
+
     std::variant<AdamParameters, SPSAParameters, SimulatedAnnealingParameters, DifferentialEvolutionParameters,
                  PSOParameters, RandomSearchParameters, L_BFGSParameters, GradientDescentParameters, CMAESParameters>
         optimizer_params;
@@ -132,6 +143,7 @@ struct OptimizationResult
     uint32_t total_evaluations;
     std::vector<std::vector<double>> loss_history;
     std::vector<std::string> loss_names;
+    double best_loss;
 };
 
 class OptimCallback;

@@ -5,24 +5,15 @@
 
 #include "analysis.h"
 
+#include <armadillo>
+
 #include <cassert>
 #include <list>
 #include <mutex>
+#include <ranges>
 
 namespace
 {
-float RMS(std::span<const float> signal)
-{
-    float sum_squares = 0.0f;
-    for (const auto& sample : signal)
-    {
-        sum_squares += sample * sample;
-    }
-
-    float rms = std::sqrt(sum_squares / static_cast<float>(signal.size()));
-    return rms;
-}
-
 static std::list<std::unique_ptr<audio_utils::FFT>> gFFTPool;
 static std::mutex gFFTPoolMutex;
 std::unique_ptr<audio_utils::FFT> BorrowFFTForSize(uint32_t size)
@@ -52,6 +43,19 @@ void ReturnFFTToPool(std::unique_ptr<audio_utils::FFT> fft)
 
 namespace fdn_optimization
 {
+
+float RMS(std::span<const float> signal)
+{
+    float sum_squares = 0.0f;
+    for (const auto& sample : signal)
+    {
+        sum_squares += sample * sample;
+    }
+
+    float rms = std::sqrt(sum_squares / static_cast<float>(signal.size()));
+    return rms;
+}
+
 float SpectralFlatnessLoss(std::span<const float> signal)
 {
     auto fft_ptr = BorrowFFTForSize(signal.size());
@@ -131,6 +135,33 @@ float SparsityLoss(std::span<const float> signal)
 
     l2_norm = std::sqrt(l2_norm);
     return l2_norm / l1_norm;
+}
+
+float EDCLoss(std::span<const float> signal, const std::array<std::vector<float>, 10>& target_relief, bool normalize)
+{
+    std::array<std::vector<float>, 10> edc_result = fdn_analysis::EnergyDecayRelief(signal, true, normalize);
+
+    float loss = 0.0f;
+
+    constexpr float kDropLastPercent = 0.50f; // Drop last % of EDC to avoid tail artifacts
+
+    for (auto&& [decay_curve, target_curve] : std::views::zip(edc_result, target_relief))
+    {
+        const size_t min_size = std::min(decay_curve.size(), target_curve.size());
+        const size_t analysis_size = static_cast<size_t>(min_size * (1.0f - kDropLastPercent));
+
+        auto decay_curve_span = std::span<float>(decay_curve).subspan(0, analysis_size);
+        auto target_curve_span = std::span<const float>(target_curve).subspan(0, analysis_size);
+
+        const arma::fvec decay_vec(decay_curve_span.data(), decay_curve_span.size(), false, true);
+        const arma::fvec target_vec(const_cast<float*>(target_curve_span.data()), target_curve_span.size(), false,
+                                    true);
+
+        float curve_loss = arma::mean(arma::square(decay_vec - target_vec));
+        loss += curve_loss;
+    }
+
+    return std::sqrt(loss);
 }
 
 } // namespace fdn_optimization

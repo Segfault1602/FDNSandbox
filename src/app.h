@@ -43,6 +43,7 @@ class FDNToolboxApp
     void DrawAutocorrelation();
     void DrawFilterResponse();
     void DrawEnergyDecayCurve();
+    void DrawEnergyDecayRelief();
     void DrawCepstrum();
     void DrawEchoDensity();
     void DrawT60s();
@@ -76,6 +77,17 @@ class FDNToolboxApp
     std::atomic<float> audio_gain_ = 1.0f;
     std::atomic<float> dry_wet_mix_ = 0.5f;
     std::atomic<float> fdn_cpu_usage_ = 0.0f;
+    std::atomic<int> reverb_engine_ = 0;
+
+    std::atomic<float> fdn_dry_level_ = 0.5f;
+    std::atomic<float> fdn_wet_level_ = 0.5f;
+
+    // For convolution reverb
+    std::atomic<float> conv_dry_level_ = 0.0f;
+    std::atomic<float> conv_wet_level_ = 1.0f;
+
+    std::atomic<uint32_t> pre_delay_ms_ = 0;
+    sfFDN::Delay pre_delay_;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
     fdn_optimization::FDNOptimizer fdn_optimizer_;
@@ -83,6 +95,7 @@ class FDNToolboxApp
     ImGui::FileBrowser save_ir_browser;
     ImGui::FileBrowser load_config_browser;
     ImGui::FileBrowser save_config_browser;
+    ImGui::FileBrowser load_rir_browser;
 
     audio_utils::analysis::SpectrogramInfo spectrogram_info_;
     enum class SpectrogramType : uint8_t
@@ -92,4 +105,9 @@ class FDNToolboxApp
     } spectrogram_type_ = SpectrogramType::STFT;
 
     ring_buffer<float> audio_output_buffer_;
+
+    std::string loaded_rir_filename_{};
+    fdn_analysis::IRAnalyzer rir_analyzer_;
+
+    std::unique_ptr<sfFDN::PartitionedConvolver> convolution_reverb_;
 };

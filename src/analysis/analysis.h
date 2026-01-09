@@ -1,5 +1,7 @@
 #pragma once
 
+#include "audio_utils/fft_utils.h"
+
 #include <span>
 #include <vector>
 
@@ -12,7 +14,7 @@ namespace fdn_analysis
  * @param to_db If true, convert the energy values to decibels.
  * @return std::vector<float> The short-time energy of the signal.
  */
-std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db = false);
+std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db = false, bool normalize = false);
 
 /**
  * @brief Compute the energy decay relief of a signal using an octave band filter bank.
@@ -21,7 +23,27 @@ std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db = 
  * @param to_db If true, convert the energy values to decibels.
  * @return std::array<std::vector<float>, 10> The energy decay relief for each octave band.
  */
-std::array<std::vector<float>, 10> EnergyDecayRelief(std::span<const float> signal, bool to_db = false);
+std::array<std::vector<float>, 10> EnergyDecayRelief(std::span<const float> signal, bool to_db = false,
+                                                     bool normalize = false);
+
+struct EnergyDecayReliefResult
+{
+    std::vector<float> data;
+    int num_bins;
+    int num_frames;
+};
+
+struct EnergyDecayReliefOptions
+{
+    uint32_t fft_length = 1024;
+    uint32_t hop_size = 512;
+    uint32_t window_size = 1024;
+    audio_utils::FFTWindowType window_type = audio_utils::FFTWindowType::Hann;
+    uint32_t n_mels = 32;
+};
+
+EnergyDecayReliefResult EnergyDecayReliefSTFT(std::span<const float> signal,
+                                              const EnergyDecayReliefOptions& options = {});
 
 std::array<float, 10> GetOctaveBandFrequencies();
 

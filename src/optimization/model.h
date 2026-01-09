@@ -18,6 +18,9 @@ enum class OptimizationParamType : uint8_t
     Matrix_Householder,
     Matrix_Circulant,
     Delays,
+    AttenuationFilters,
+    TonecorrectionFilters,
+    OverallGain,
 };
 
 enum class GradientMethod : uint8_t
@@ -29,12 +32,8 @@ enum class GradientMethod : uint8_t
 class FDNModel
 {
   public:
-    FDNModel(uint32_t fdn_order, uint32_t ir_size, std::span<const uint32_t> delays,
-             std::span<const OptimizationParamType> param_types,
+    FDNModel(sfFDN::FDNConfig initial_config, uint32_t ir_size, std::span<const OptimizationParamType> param_types,
              GradientMethod gradient_method = GradientMethod::CentralDifferences);
-
-    FDNModel(const FDNModel&);
-    FDNModel& operator=(const FDNModel&);
 
     void SetLossFunctions(const std::vector<LossFunction>& loss_functions);
 
@@ -49,6 +48,8 @@ class FDNModel
     {
         gradient_delta_ = delta;
     }
+
+    void SetT60Estimates(std::span<const float> t60_estimates);
 
     arma::mat GetInitialParams() const;
 
@@ -79,7 +80,8 @@ class FDNModel
     std::vector<double> last_losses_;
 
   private:
-    std::unique_ptr<sfFDN::FDN> fdn_;
+    sfFDN::FDNConfig initial_config_;
+    sfFDN::FDNConfig current_config_;
     uint32_t ir_size_;
     std::vector<float> impulse_buffer_;
     std::vector<float> response_buffer_;
@@ -88,6 +90,7 @@ class FDNModel
     std::vector<float> matrix_coeffs_;
     std::vector<OptimizationParamType> param_types_;
     std::vector<uint32_t> delays_;
+    std::vector<float> t60_estimates_;
 
     double gradient_delta_ = 1e-3;
 

@@ -1,11 +1,5 @@
 #pragma once
 
-#include <bitset>
-#include <cstdint>
-#include <memory>
-#include <sys/types.h>
-#include <vector>
-
 #include <quill/LogMacros.h>
 #include <quill/Logger.h>
 
@@ -13,6 +7,13 @@
 #include <sffdn/sffdn.h>
 
 #include "analysis.h"
+
+#include <bitset>
+#include <cstdint>
+#include <mdspan>
+#include <memory>
+#include <span>
+#include <vector>
 
 namespace fdn_analysis
 {
@@ -49,6 +50,11 @@ struct EnergyDecayCurveData
     std::array<std::span<const float>, 10> edc_octaves;
 };
 
+struct EnergyDecayReliefData
+{
+    std::mdspan<const float, std::dextents<size_t, 2>, std::layout_left> energy_decay_relief;
+};
+
 struct T60Data
 {
     fdn_analysis::EstimateT60Results overall_t60;
@@ -70,9 +76,10 @@ enum class AnalysisType : uint8_t
     Spectrum = 2,
     Autocorrelation = 3,
     EnergyDecayCurve = 4,
-    Cepstrum = 5,
-    EchoDensity = 6,
-    T60s = 7,
+    EnergyDecayRelief = 5,
+    Cepstrum = 6,
+    EchoDensity = 7,
+    T60s = 8,
     AnalysisTypeCount
 };
 
@@ -98,6 +105,8 @@ class IRAnalyzer
     AutocorrelationData GetAutocorrelation(float early_rir_time);
 
     EnergyDecayCurveData GetEnergyDecayCurveData();
+
+    EnergyDecayReliefData GetEnergyDecayReliefData();
 
     T60Data GetT60Data(float decay_db_start, float decay_db_end);
 
@@ -136,6 +145,10 @@ class IRAnalyzer
     std::vector<float> energy_decay_curve_;
     std::array<std::vector<float>, 10> edc_octaves_;
     std::vector<float> octave_band_frequencies_;
+
+    std::vector<float> edr_data_;
+    uint32_t edr_bin_count_;
+    uint32_t edr_frame_count_;
 
     fdn_analysis::EstimateT60Results overall_t60_;
     std::vector<float> t60_octaves_;

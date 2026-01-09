@@ -4,43 +4,64 @@
 #include <boost/math/statistics/linear_regression.hpp>
 #include <sndfile.h>
 
-#include <algorithm>
-#include <limits>
-#include <numbers>
-
 #include "audio_utils/fft.h"
 #include "octave_band_coeff.h"
 #include "octave_band_filters_fir.h"
+#include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft_utils.h>
 
 #include <sffdn/sffdn.h>
 
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <limits>
+#include <numbers>
+
 namespace fdn_analysis
 {
-std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db)
+std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db, bool normalize)
 {
     if (signal.empty())
     {
         return {};
     }
 
-    // Calculate the energy decay curve
-    std::vector<float> decay_curve(signal.size());
-    float cumulative_energy = 0.0f;
+    // Discard silence at the beginning of impulse response
+    const float max_val = *std::ranges::max_element(signal, [](float a, float b) { return std::abs(a) < std::abs(b); });
+    constexpr float kDirectImpulseThreshold = 0.5f;
+    auto it_start = std::ranges::find_if(signal, [threshold = kDirectImpulseThreshold * std::abs(max_val)](
+                                                     float sample) { return std::abs(sample) >= threshold; });
 
-    for (int i = signal.size() - 1; i >= 0; --i)
+    std::span<const float> trimmed_signal;
+    if (it_start != signal.end())
     {
-        cumulative_energy += signal[i] * signal[i];
-        decay_curve[i] = cumulative_energy;
+        trimmed_signal = std::span(it_start, signal.end());
+    }
+    else
+    {
+        trimmed_signal = signal;
     }
 
+    std::ranges::reverse_view trimmed_signal_reversed{trimmed_signal};
+    auto s = trimmed_signal_reversed | std::views::transform([](float v) { return v * v; });
+
+    // Calculate the energy decay curve
+    std::vector<float> decay_curve(signal.size(), 0.0f);
+    std::ranges::reverse_view decay_curve_reversed{std::span(decay_curve).subspan(0, trimmed_signal.size())};
+
+    std::partial_sum(s.begin(), s.end(), decay_curve_reversed.begin());
+
     // Normalize energy
-    float max_energy = *std::ranges::max_element(decay_curve);
-    for (auto& energy : decay_curve)
+    if (normalize)
     {
+        float max_energy = *std::ranges::max_element(decay_curve);
         if (max_energy != 0.0f)
         {
-            energy /= max_energy;
+            for (auto& energy : decay_curve)
+            {
+                energy /= max_energy;
+            }
         }
     }
 
@@ -51,6 +72,7 @@ std::vector<float> EnergyDecayCurve(std::span<const float> signal, bool to_db)
             energy = 10.0f * std::log10(energy + 1e-10f); // Add small value to avoid log(0)
         }
     }
+
     return decay_curve;
 }
 
@@ -71,6 +93,10 @@ EstimateT60Results EstimateT60(std::span<const float> decay_curve, std::span<con
     {
         throw std::invalid_argument("decay_curve and time must have the same size");
     }
+
+    float start_db_value = decay_curve[0];
+    decay_start_db += start_db_value;
+    decay_end_db += start_db_value;
 
     auto it_start = std::ranges::lower_bound(decay_curve, decay_start_db, [](float value, float threshold) {
         return std::abs(value) < std::abs(threshold);
@@ -102,11 +128,14 @@ EstimateT60Results EstimateT60(std::span<const float> decay_curve, std::span<con
     return results;
 }
 
-std::array<std::vector<float>, 10> EnergyDecayRelief(std::span<const float> signal, bool to_db)
+std::array<std::vector<float>, 10> EnergyDecayRelief(std::span<const float> signal, bool to_db, bool normalize)
 {
     std::array<std::vector<float>, 10> edc_octaves;
 
-#pragma omp parallel for firstprivate(signal, to_db)
+    std::vector<float> nc_signal;
+    std::ranges::copy(signal, std::back_inserter(nc_signal));
+
+#pragma omp parallel for
     for (auto i = 0; i < kOctaveBandFirFilters.size(); ++i)
     {
         const auto& fir_coeffs = kOctaveBandFirFilters[i];
@@ -121,10 +150,57 @@ std::array<std::vector<float>, 10> EnergyDecayRelief(std::span<const float> sign
         // The filters introduce a delay of roughly half the filter length
         const size_t delay = (fir_coeffs.size() / 2) * 0.9;
         std::span<float> result_span = std::span(result).subspan(delay, signal.size());
-        edc_octaves[i] = EnergyDecayCurve(result_span, to_db);
+        edc_octaves[i] = EnergyDecayCurve(result_span, to_db, normalize);
     }
 
     return edc_octaves;
+}
+
+EnergyDecayReliefResult EnergyDecayReliefSTFT(std::span<const float> signal, const EnergyDecayReliefOptions& options)
+{
+    if (signal.empty())
+    {
+        return {};
+    }
+
+    if (options.fft_length < options.window_size)
+    {
+        throw std::invalid_argument("FFT length must be greater than or equal to window size");
+    }
+
+    if (options.hop_size > options.window_size)
+    {
+        throw std::invalid_argument("Hop size must be less than or equal to window size");
+    }
+
+    audio_utils::analysis::SpectrogramInfo spec_info{
+        .fft_size = options.fft_length,
+        .overlap = options.fft_length - options.hop_size,
+        .window_size = options.window_size,
+        .samplerate = 48000,
+        .window_type = options.window_type,
+    };
+
+    auto spectrogram = audio_utils::analysis::MelSpectrogram(signal, spec_info, options.n_mels);
+
+    Eigen::Map<const Eigen::MatrixXf> spec_map(spectrogram.data.data(), spectrogram.num_bins, spectrogram.num_frames);
+
+    std::vector<float> edr_data(spectrogram.num_frames * spectrogram.num_bins, 0);
+    Eigen::Map<Eigen::MatrixXf> edr_map(edr_data.data(), spectrogram.num_bins, spectrogram.num_frames);
+
+    Eigen::ArrayXf cumulative_energy = Eigen::ArrayXf::Zero(spectrogram.num_bins);
+    for (int i = spec_map.cols() - 1; i >= 0; --i)
+    {
+        cumulative_energy += spec_map.col(i).array().square();
+        edr_map.col(i) = cumulative_energy;
+    }
+
+    edr_map = 10.0f * Eigen::log10(edr_map.array() + 1e-10f);
+
+    EnergyDecayReliefResult edr_data_struct{
+        .data = std::move(edr_data), .num_bins = spectrogram.num_bins, .num_frames = spectrogram.num_frames};
+
+    return edr_data_struct;
 }
 
 EchoDensityResults EchoDensity(std::span<const float> signal, uint32_t window_size, uint32_t sample_rate,

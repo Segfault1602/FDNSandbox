@@ -12,6 +12,7 @@
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
 #include "implot.h"
+#include "implot3d.h"
 #include <d3d12.h>
 #include <dxgi1_5.h>
 #include <tchar.h>
@@ -122,8 +123,9 @@ int main(int, char**)
     WNDCLASSEXW wc = {sizeof(wc), CS_CLASSDC, WndProc,       0L,     0L, GetModuleHandle(nullptr), nullptr, nullptr,
                       nullptr,    nullptr,    L"FDNSandbox", nullptr};
     ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"FDN Sandbox", WS_OVERLAPPEDWINDOW, 400, 0, (int)(1880 * main_scale),
-                                (int)(1400 * main_scale), nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd =
+        ::CreateWindowW(wc.lpszClassName, L"FDN Sandbox", WS_OVERLAPPEDWINDOW, 1000, 0, (int)(1880 * main_scale),
+                        (int)(1400 * main_scale), nullptr, nullptr, wc.hInstance, nullptr);
 
     // Initialize Direct3D
     if (!CreateDeviceD3D(hwnd))
@@ -141,6 +143,7 @@ int main(int, char**)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
+    ImPlot3D::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
@@ -288,6 +291,7 @@ int main(int, char**)
     // Cleanup
     ImGui_ImplDX12_Shutdown();
     ImGui_ImplWin32_Shutdown();
+    ImPlot3D::DestroyContext();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
 

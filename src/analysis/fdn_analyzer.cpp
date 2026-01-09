@@ -250,6 +250,11 @@ EnergyDecayCurveData FDNAnalyzer::GetEnergyDecayCurveData()
     return ir_analyzer_.GetEnergyDecayCurveData();
 }
 
+EnergyDecayReliefData FDNAnalyzer::GetEnergyDecayReliefData()
+{
+    return ir_analyzer_.GetEnergyDecayReliefData();
+}
+
 T60Data FDNAnalyzer::GetT60Data(float decay_db_start, float decay_db_end)
 {
     return ir_analyzer_.GetT60Data(decay_db_start, decay_db_end);
