@@ -14,8 +14,22 @@
 template <typename T>
 concept HasStepSize = requires(T a) { a.StepSize(); };
 
+template <class T, class U>
+struct is_same_template : std::false_type
+{
+};
+
+template <template <class...> class C, class... R1s, class... R2s>
+struct is_same_template<C<R1s...>, C<R2s...>> : std::true_type
+{
+};
+
+template <class T, class U>
+inline constexpr bool is_same_template_v = is_same_template<T, U>::value;
+
 namespace fdn_optimization
 {
+
 class OptimCallback
 {
   public:
@@ -63,8 +77,8 @@ class OptimCallback
                     de_best_objective_ = objective;
                     de_best_params_ = iterate;
                 }
-                // For DE, there is no easy way to get the best objective per generation so we have to keep track of it
-                // manually.
+                // For DE, there is no easy way to get the best objective per generation so we have to keep track of
+                // it manually.
                 ++de_pop_evals_;
                 if (de_pop_evals_ == de_pop_size_ * 2) // Each generation evaluates 2 * population size
                 {
@@ -83,9 +97,7 @@ class OptimCallback
     {
         SaveLossHistory(function, objective);
 
-        if constexpr (std::is_same_v<OptimizerType, ens::SGD<ens::AdamUpdate, ens::NoDecay>> ||
-                      std::is_same_v<OptimizerType, ens::SGD<ens::VanillaUpdate, ens::NoDecay>> ||
-                      std::is_same_v<OptimizerType, ens::SGD<ens::YogiUpdate, ens::NoDecay>>)
+        if constexpr (is_same_template_v<OptimizerType, ens::SGD<>>)
         {
             if (decay_step_size_ > 0 && epoch % decay_step_size_ == 0)
             {
@@ -110,10 +122,8 @@ class OptimCallback
         if constexpr (std::is_same_v<OptimizerType, ens::SA<ens::ExponentialSchedule>> ||
                       std::is_same_v<OptimizerType, ens::LBestPSO> || std::is_same_v<OptimizerType, ens::L_BFGS> ||
                       std::is_same_v<OptimizerType, ens::GradientDescent> ||
-                      std::is_same_v<OptimizerType,
-                                     ens::CMAES<ens::FullSelection, ens::EmptyTransformation<arma::mat>>> ||
-                      std::is_same_v<OptimizerType,
-                                     ens::ActiveCMAES<ens::FullSelection, ens::EmptyTransformation<arma::mat>>>)
+                      is_same_template_v<OptimizerType, ens::CMAES<>> ||
+                      is_same_template_v<OptimizerType, ens::ActiveCMAES<>>)
         {
             SaveLossHistory(function, function.Evaluate(iterate));
         }
@@ -396,9 +406,6 @@ void FDNOptimizer::ThreadProc(std::stop_token stop_token, OptimizationInfo info)
     LOG_INFO(logger_, "Optimization thread started.");
     status_.store(OptimizationStatus::Running);
 
-    FDNModel model(info.initial_fdn_config, info.ir_size, info.parameters_to_optimize, info.gradient_method);
-    model.SetGradientDelta(info.gradient_delta);
-
     const bool optimizing_filters =
         std::ranges::find(info.parameters_to_optimize, fdn_optimization::OptimizationParamType::AttenuationFilters) !=
         info.parameters_to_optimize.end();
@@ -410,80 +417,112 @@ void FDNOptimizer::ThreadProc(std::stop_token stop_token, OptimizationInfo info)
         return;
     }
 
+    if (optimizing_filters && info.ir_size != info.target_rir.size())
+    {
+        LOG_WARNING(logger_,
+                    "IR size ({}) does not match target RIR size ({}). Adjusting IR size to match target RIR size.",
+                    info.ir_size, info.target_rir.size());
+        info.ir_size = static_cast<uint32_t>(info.target_rir.size());
+    }
+
+    FDNModel model(info.initial_fdn_config, info.ir_size, info.parameters_to_optimize, info.gradient_method);
+    model.SetGradientDelta(info.gradient_delta);
+
     std::vector<LossFunction> loss_functions;
 
     if (optimizing_filters)
     {
-        const bool normalize = false;
-        auto target_edc_octaves = fdn_analysis::EnergyDecayRelief(info.target_rir, true, normalize);
-        std::vector<float> time_data(target_edc_octaves[0].size());
-        for (size_t i = 0; i < time_data.size(); ++i)
+        // std::vector<float> time_data(target_edc_octaves[0].size());
+        // for (size_t i = 0; i < time_data.size(); ++i)
+        // {
+        //     time_data[i] = static_cast<float>(i) * (1.0f / 48000.0f); // assuming 48kHz sample rate
+        // }
+
+        // std::vector<float> estimated_t60s;
+        // for (const auto& edc_octave : target_edc_octaves)
+        // {
+        //     auto t60_results = fdn_analysis::EstimateT60(edc_octave, time_data, -5.0f, -15.0f);
+        //     estimated_t60s.push_back(t60_results.t60);
+        //     LOG_INFO(logger_, "Estimated T60: {:.2f} s", t60_results.t60);
+        // }
+
+        if (info.edc_weight > 0.0)
         {
-            time_data[i] = static_cast<float>(i) * (1.0f / 48000.0f); // assuming 48kHz sample rate
+            const bool normalize = false;
+            auto target_edc_octaves = fdn_analysis::EnergyDecayRelief(info.target_rir, true, normalize);
+            // use shared_ptr to capture in lambda
+            auto target_edc_octaves_ptr =
+                std::make_shared<std::array<std::vector<float>, 10>>(std::move(target_edc_octaves));
+
+            LossFunction edc_loss;
+            edc_loss.func = [target_edc_octaves_ptr](std::span<const float> signal) -> double {
+                return EDCLoss(signal, *target_edc_octaves_ptr, normalize);
+            };
+            edc_loss.weight = 1.0;
+            edc_loss.name = "EDC Relief Loss";
+            loss_functions.push_back(edc_loss);
         }
 
-        std::vector<float> estimated_t60s;
-        for (const auto& edc_octave : target_edc_octaves)
+        if (info.mel_edr_weight > 0.0)
         {
-            auto t60_results = fdn_analysis::EstimateT60(edc_octave, time_data, -5.0f, -15.0f);
-            estimated_t60s.push_back(t60_results.t60);
-            LOG_INFO(logger_, "Estimated T60: {:.2f} s", t60_results.t60);
+            fdn_analysis::EnergyDecayReliefOptions edr_options;
+            edr_options.fft_length = info.mel_edr_fft_length;
+            edr_options.hop_size = info.mel_edr_hop_size;
+            edr_options.window_size = info.mel_edr_window_size;
+            edr_options.window_type = audio_utils::FFTWindowType::Hann;
+            edr_options.n_mels = info.mel_edr_num_bands;
+
+            auto target_edr_result = fdn_analysis::EnergyDecayReliefSTFT(info.target_rir, edr_options);
+
+            auto target_edr_result_ptr =
+                std::make_shared<fdn_analysis::EnergyDecayReliefResult>(std::move(target_edr_result));
+
+            LossFunction edr_loss;
+            edr_loss.func = [target_edr_result_ptr, edr_options](std::span<const float> signal) -> double {
+                return EDRLoss(signal, *target_edr_result_ptr, edr_options);
+            };
+            edr_loss.weight = 1.0;
+            edr_loss.name = "EDR Loss";
+            loss_functions.push_back(edr_loss);
         }
-
-        // model.SetT60Estimates(estimated_t60s);
-
-        // use shared_ptr to capture in lambda
-        auto target_edc_octaves_ptr =
-            std::make_shared<std::array<std::vector<float>, 10>>(std::move(target_edc_octaves));
-
-        LossFunction edc_loss;
-        edc_loss.func = [target_edc_octaves_ptr](std::span<const float> signal) -> double {
-            return EDCLoss(signal, *target_edc_octaves_ptr, normalize);
-        };
-        edc_loss.weight = 1.0;
-        edc_loss.name = "EDC Relief Loss";
-        loss_functions.push_back(edc_loss);
     }
     else
     {
-        LossFunction spectral_flatness_loss;
-        spectral_flatness_loss.func = [&](std::span<const float> signal) -> double {
-            double spectral_flatness = SpectralFlatnessLoss(signal);
-            return std::abs(0.5575f - spectral_flatness);
-        };
-        spectral_flatness_loss.weight = info.spectral_flatness_weight;
-        spectral_flatness_loss.name = "Spectral Flatness Loss";
-        loss_functions.push_back(spectral_flatness_loss);
+        if (info.spectral_flatness_weight > 0.0)
+        {
+            LossFunction spectral_flatness_loss;
+            spectral_flatness_loss.func = [&](std::span<const float> signal) -> double {
+                double spectral_flatness = SpectralFlatnessLoss(signal);
+                return std::abs(0.5575f - spectral_flatness);
+            };
+            spectral_flatness_loss.weight = info.spectral_flatness_weight;
+            spectral_flatness_loss.name = "Spectral Flatness Loss";
+            loss_functions.push_back(spectral_flatness_loss);
+        }
 
-        LossFunction power_env_loss;
-        power_env_loss.func = [&](std::span<const float> signal) -> double {
-            constexpr uint32_t kSampleRate = 48000;
-            return PowerEnvelopeLoss(signal, 1024, 128, kSampleRate);
-        };
-        power_env_loss.weight = info.power_envelope_weight;
-        power_env_loss.name = "Power Envelope Loss";
-        loss_functions.push_back(power_env_loss);
+        if (info.power_envelope_weight > 0.0)
+        {
+            LossFunction power_env_loss;
+            power_env_loss.func = [&](std::span<const float> signal) -> double {
+                constexpr uint32_t kSampleRate = 48000;
+                return PowerEnvelopeLoss(signal, 1024, 128, kSampleRate);
+            };
+            power_env_loss.weight = info.power_envelope_weight;
+            power_env_loss.name = "Power Envelope Loss";
+            loss_functions.push_back(power_env_loss);
+        }
 
-        LossFunction sparsity_loss;
-        sparsity_loss.func = [&](std::span<const float> signal) -> double {
-            double sparsity = SparsityLoss(signal.subspan(0, 4096));
-            return sparsity;
-        };
-        sparsity_loss.weight = info.sparsity_weight;
-        sparsity_loss.name = "Sparsity Loss";
-        loss_functions.push_back(sparsity_loss);
-
-        // if (info.target_rir.size() > 0)
-        // {
-        //     float target_rms = RMS(std::span(info.target_rir).subspan(0, 8192));
-        //     LossFunction rms_loss;
-        //     rms_loss.func = [&](std::span<const float> signal) -> double {
-        //         return RMSLoss(signal.subspan(0, 8192), target_rms);
-        //     };
-        //     rms_loss.weight = 1.0;
-        //     rms_loss.name = "RMS Loss";
-        //     loss_functions.push_back(rms_loss);
-        // }
+        if (info.sparsity_weight > 0.0)
+        {
+            LossFunction sparsity_loss;
+            sparsity_loss.func = [&](std::span<const float> signal) -> double {
+                double sparsity = SparsityLoss(signal.subspan(0, 4096));
+                return sparsity;
+            };
+            sparsity_loss.weight = info.sparsity_weight;
+            sparsity_loss.name = "Sparsity Loss";
+            loss_functions.push_back(sparsity_loss);
+        }
     }
 
     model.SetLossFunctions(loss_functions);

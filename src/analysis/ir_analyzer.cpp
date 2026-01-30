@@ -142,7 +142,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         audio_utils::FFT fft(nfft);
 
         spectrum_data_.resize((nfft / 2) + 1, 0.f);
-        fft.ForwardAbs(early_rir, spectrum_data_, true, true);
+        fft.ForwardMag(early_rir, spectrum_data_, true, true);
 
         // Generate frequency bins
         const uint32_t kNumFrequencyBins = spectrum_data_.size();
@@ -173,7 +173,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         // Compute Spectral Flatness for fun
         std::vector<float> temp_spectrum;
         temp_spectrum.resize(spectrum_data_.size());
-        fft.ForwardAbs(early_rir, temp_spectrum, false, false);
+        fft.ForwardMag(early_rir, temp_spectrum, false, false);
         float flatness = audio_utils::analysis::SpectralFlatness(temp_spectrum);
         LOG_INFO(logger_, "Spectral Flatness: {:.4f}", flatness);
     }
@@ -235,7 +235,7 @@ AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
         audio_utils::FFT fft(nfft);
 
         std::vector<float> spectrum_data((nfft / 2) + 1, 0.f);
-        fft.ForwardAbs(early_rir, spectrum_data, true, true);
+        fft.ForwardMag(early_rir, spectrum_data, true, true);
 
         spectral_autocorrelation_data_ = audio_utils::analysis::Autocorrelation(spectrum_data);
 

@@ -249,6 +249,178 @@ arma::mat ParamsToOverallGain(sfFDN::FDNConfig& config, const arma::mat& params)
     return leftover_params;
 }
 
+#pragma clang diagnostic ignored "-Wunused-function"
+arma::mat GetRandomInitialParams(uint32_t fdn_order,
+                                 std::span<const fdn_optimization::OptimizationParamType> param_types)
+{
+    arma::mat params(0, 0);
+
+    for (const auto& type : param_types)
+    {
+        switch (type)
+        {
+        case fdn_optimization::OptimizationParamType::Gains:
+        {
+            arma::mat input_gains(1, fdn_order, arma::fill::randn);
+            arma::mat output_gains(1, fdn_order, arma::fill::randn);
+
+            params = arma::join_horiz(params, input_gains);
+            params = arma::join_horiz(params, output_gains);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::Matrix:
+        {
+            arma::mat M(1, fdn_order * fdn_order, arma::fill::randn);
+            params = arma::join_horiz(params, M);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::Delays:
+        {
+            arma::mat delay_params(1, fdn_order, arma::fill::zeros);
+            params = arma::join_horiz(params, delay_params);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::Matrix_Householder:
+            [[fallthrough]];
+        case fdn_optimization::OptimizationParamType::Matrix_Circulant:
+        {
+            arma::mat vec_u(1, fdn_order, arma::fill::randn);
+            params = arma::join_horiz(params, vec_u);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::AttenuationFilters:
+        {
+            arma::mat t60s(1, kNBands, arma::fill::ones);
+            params = arma::join_horiz(params, t60s);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::TonecorrectionFilters:
+        {
+            arma::mat tc_gains(1, kNBands, arma::fill::zeros);
+            params = arma::join_horiz(params, tc_gains);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::OverallGain:
+        {
+            arma::mat overall_gain(1, 1, arma::fill::ones);
+            params = arma::join_horiz(params, overall_gain);
+        }
+        break;
+        default:
+            throw std::runtime_error("Unknown ParamType in GetParamCount");
+        }
+    }
+    return params;
+}
+
+arma::mat GetInitialParamsFromConfig(const sfFDN::FDNConfig& config,
+                                     std::span<const fdn_optimization::OptimizationParamType> param_types)
+{
+    arma::mat params(0, 0);
+
+    const uint32_t fdn_order = config.N;
+
+    for (const auto& type : param_types)
+    {
+        switch (type)
+        {
+        case fdn_optimization::OptimizationParamType::Gains:
+        {
+            arma::mat input_gains(1, fdn_order);
+            arma::mat output_gains(1, fdn_order);
+
+            for (uint32_t i = 0; i < fdn_order; ++i)
+            {
+                input_gains(0, i) = static_cast<double>(config.input_gains[i]);
+                output_gains(0, i) = static_cast<double>(config.output_gains[i]);
+            }
+
+            params = arma::join_horiz(params, input_gains);
+            params = arma::join_horiz(params, output_gains);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::Matrix:
+        {
+            arma::mat M(1, fdn_order * fdn_order, arma::fill::randn);
+
+            if (std::holds_alternative<std::vector<float>>(config.matrix_info))
+            {
+
+                const auto& matrix_coeffs = std::get<std::vector<float>>(config.matrix_info);
+
+                for (uint32_t r = 0; r < fdn_order; ++r)
+                {
+                    for (uint32_t c = 0; c < fdn_order; ++c)
+                    {
+                        M(0, r * fdn_order + c) = static_cast<double>(matrix_coeffs[r * fdn_order + c]);
+                    }
+                }
+            }
+
+            params = arma::join_horiz(params, M);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::Delays:
+        {
+            arma::mat delay_params(1, fdn_order, arma::fill::zeros);
+            for (uint32_t i = 0; i < fdn_order; ++i)
+            {
+                delay_params(0, i) = static_cast<double>(config.delays[i]);
+            }
+            params = arma::join_horiz(params, delay_params);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::Matrix_Householder:
+            [[fallthrough]];
+        case fdn_optimization::OptimizationParamType::Matrix_Circulant:
+        {
+            // Using initial config is not supported for the moment
+            arma::mat vec_u(1, fdn_order, arma::fill::randn);
+            params = arma::join_horiz(params, vec_u);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::AttenuationFilters:
+        {
+            arma::mat t60s(1, kNBands, arma::fill::ones);
+
+            if (config.attenuation_t60s.size() == kNBands)
+            {
+                for (uint32_t i = 0; i < kNBands; ++i)
+                {
+                    t60s(0, i) = static_cast<double>(config.attenuation_t60s[i]);
+                }
+            }
+
+            params = arma::join_horiz(params, t60s);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::TonecorrectionFilters:
+        {
+            arma::mat tc_gains(1, kNBands, arma::fill::zeros);
+            if (config.tc_gains.size() == kNBands)
+            {
+                for (uint32_t i = 0; i < kNBands; ++i)
+                {
+                    tc_gains(0, i) = static_cast<double>(config.tc_gains[i]);
+                }
+            }
+
+            params = arma::join_horiz(params, tc_gains);
+        }
+        break;
+        case fdn_optimization::OptimizationParamType::OverallGain:
+        {
+            arma::mat overall_gain(1, 1, arma::fill::ones);
+            params = arma::join_horiz(params, overall_gain);
+        }
+        break;
+        default:
+            throw std::runtime_error("Unknown ParamType in GetParamCount");
+        }
+    }
+    return params;
+}
+
 } // namespace
 
 namespace fdn_optimization
@@ -288,8 +460,21 @@ FDNModel::FDNModel(sfFDN::FDNConfig initial_config, uint32_t ir_size,
         }
     }
 
-    initial_config_.attenuation_t60s = {1.f};
-    initial_config_.tc_gains.clear();
+    bool optimize_filters = false;
+    for (const auto& type : param_types_)
+    {
+        if (type == OptimizationParamType::AttenuationFilters || type == OptimizationParamType::TonecorrectionFilters)
+        {
+            optimize_filters = true;
+            break;
+        }
+    }
+
+    if (!optimize_filters)
+    {
+        initial_config_.attenuation_t60s = {1.f};
+        initial_config_.tc_gains.clear();
+    }
     current_config_ = initial_config_;
 
     // Check that we only have one type of matrix parameterization
@@ -359,74 +544,8 @@ void FDNModel::SetT60Estimates(std::span<const float> t60_estimates)
 arma::mat FDNModel::GetInitialParams() const
 {
     // arma::arma_rng::set_seed_random();
-    arma::mat params(0, 0);
-
-    const uint32_t fdn_order = initial_config_.N;
-    for (const auto& type : param_types_)
-    {
-        switch (type)
-        {
-        case OptimizationParamType::Gains:
-        {
-            arma::mat input_gains(1, fdn_order, arma::fill::randn);
-            arma::mat output_gains(1, fdn_order, arma::fill::randn);
-
-            params = arma::join_horiz(params, input_gains);
-            params = arma::join_horiz(params, output_gains);
-        }
-        break;
-        case OptimizationParamType::Matrix:
-        {
-            arma::mat M(1, fdn_order * fdn_order, arma::fill::randn);
-            params = arma::join_horiz(params, M);
-        }
-        break;
-        case OptimizationParamType::Delays:
-        {
-            arma::mat delay_params(1, fdn_order, arma::fill::zeros);
-            params = arma::join_horiz(params, delay_params);
-        }
-        break;
-        case OptimizationParamType::Matrix_Householder:
-            [[fallthrough]];
-        case OptimizationParamType::Matrix_Circulant:
-        {
-            arma::mat vec_u(1, fdn_order, arma::fill::randn);
-            params = arma::join_horiz(params, vec_u);
-        }
-        break;
-        case OptimizationParamType::AttenuationFilters:
-        {
-            arma::mat t60s(1, kNBands, arma::fill::ones);
-            // t60s = arma::abs(t60s);
-
-            if (t60_estimates_.size() == kNBands)
-            {
-                for (uint32_t i = 0; i < kNBands; ++i)
-                {
-                    t60s(0, i) = t60_estimates_[i];
-                }
-            }
-
-            params = arma::join_horiz(params, t60s);
-        }
-        break;
-        case OptimizationParamType::TonecorrectionFilters:
-        {
-            arma::mat tc_gains(1, kNBands, arma::fill::zeros);
-            params = arma::join_horiz(params, tc_gains);
-        }
-        break;
-        case OptimizationParamType::OverallGain:
-        {
-            arma::mat overall_gain(1, 1, arma::fill::ones);
-            params = arma::join_horiz(params, overall_gain);
-        }
-        break;
-        default:
-            throw std::runtime_error("Unknown ParamType in GetParamCount");
-        }
-    }
+    // arma::mat params = GetRandomInitialParams(initial_config_.N, param_types_);
+    arma::mat params = GetInitialParamsFromConfig(initial_config_, param_types_);
 
     assert(params.n_cols == GetParamCount());
 

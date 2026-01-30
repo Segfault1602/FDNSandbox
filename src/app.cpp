@@ -6,6 +6,7 @@
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft_utils.h>
 
+#include "optimization_gui.h"
 #include "presets.h"
 #include "settings.h"
 #include "utils.h"
@@ -38,7 +39,7 @@
 
 namespace
 {
-constexpr size_t kSystemBlockSize = 512; // System block size for audio processing
+constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
 
 struct MelFormatterContext
 {
@@ -105,167 +106,19 @@ bool FancyButtons(const std::string_view label1, const std::string_view label2, 
     return changed;
 }
 
-void DrawOptimizationParamGui(const std::string_view optimization_name, fdn_optimization::OptimizationInfo& opt_info)
+void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, std::span<float> output)
 {
-    ImGui::PushItemWidth(200);
-    if (optimization_name == "Adam")
+    assert(fade_in.size() == fade_out.size());
+    assert(fade_in.size() == output.size());
+
+    for (size_t i = 0; i < output.size(); ++i)
     {
-        static float step_size = 0.6f;
-        static float learning_rate_decay = 0.99f;
-        static float tolerance = 1e-5f;
-
-        ImGui::InputFloat("Step Size", &step_size, 0.01f, 2.0f, "%.3f");
-        ImGui::InputFloat("Learning Rate Decay", &learning_rate_decay, 0.8f, 1.0f, "%.4f");
-        ImGui::InputFloat("Tolerance", &tolerance, 1e-6f, 1e-3f, "%.1e", ImGuiSliderFlags_Logarithmic);
-
-        opt_info.optimizer_params = fdn_optimization::AdamParameters{
-            .step_size = step_size,
-            .learning_rate_decay = learning_rate_decay,
-            .tolerance = tolerance,
-        };
+        const float t = static_cast<float>(i) / static_cast<float>(output.size() - 1);
+        const float fadeout_gain =
+            t * t * (3 - 2 * t); // from https://signalsmith-audio.co.uk/writing/2021/cheap-energy-crossfade/
+        const float fadein_gain = 1.0f - fadeout_gain;
+        output[i] = fade_in[i] * fadein_gain + fade_out[i] * fadeout_gain;
     }
-    else if (optimization_name == "SPSA")
-    {
-        static float alpha = 0.01f;
-        static float gamma = 0.101f;
-        static float step_size = 0.9f;
-        static float evaluation_step_size = 0.9f;
-        static int max_iterations = 1000000;
-
-        ImGui::InputFloat("Alpha", &alpha, 0.001f, 0.1f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputFloat("Gamma", &gamma, 0.05f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputFloat("Step Size", &step_size, 0.1f, 2.0f, "%.3f");
-        ImGui::InputFloat("Evaluation Step Size", &evaluation_step_size, 0.1f, 2.0f, "%.3f");
-        ImGui::InputInt("Max Iterations", &max_iterations);
-
-        opt_info.optimizer_params = fdn_optimization::SPSAParameters{
-            .alpha = alpha,
-            .gamma = gamma,
-            .step_size = step_size,
-            .evaluationStepSize = evaluation_step_size,
-            .max_iterations = static_cast<size_t>(max_iterations),
-        };
-    }
-    else if (optimization_name == "Simulated Annealing")
-    {
-        static fdn_optimization::SimulatedAnnealingParameters sa_params;
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &sa_params.max_iterations);
-
-        constexpr std::array kInitialTempMinMax = {100.0, 20000.0};
-        ImGui::InputScalar("Initial Temperature", ImGuiDataType_Double, &sa_params.initial_temperature,
-                           &kInitialTempMinMax[0], &kInitialTempMinMax[1], "%.1f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputScalar("Initial Moves", ImGuiDataType_U64, &sa_params.init_moves);
-        ImGui::InputScalar("Move Control Sweep", ImGuiDataType_U64, &sa_params.move_ctrl_sweep);
-        ImGui::InputScalar("Max Tolerance Sweep", ImGuiDataType_U64, &sa_params.max_tolerance_sweep);
-
-        constexpr std::array kMaxMoveCoefMinMax = {1.0, 50.0};
-        ImGui::InputScalar("Max Move Coefficient", ImGuiDataType_Double, &sa_params.max_move_coef,
-                           &kMaxMoveCoefMinMax[0], &kMaxMoveCoefMinMax[1], "%.2f");
-
-        constexpr std::array kInitMoveCoefMinMax = {0.1, 10.0};
-        ImGui::InputScalar("Initial Move Coefficient", ImGuiDataType_Double, &sa_params.init_move_coef,
-                           &kInitMoveCoefMinMax[0], &kInitMoveCoefMinMax[1], "%.2f");
-        constexpr std::array kGainMinMax = {0.1, 1.0};
-        ImGui::InputScalar("Gain", ImGuiDataType_Double, &sa_params.gain, &kGainMinMax[0], &kGainMinMax[1], "%.2f");
-
-        opt_info.optimizer_params = sa_params;
-    }
-    else if (optimization_name == "Differential Evolution")
-    {
-        static fdn_optimization::DifferentialEvolutionParameters de_params;
-        ImGui::InputScalar("Population Size", ImGuiDataType_U64, &de_params.population_size);
-        ImGui::InputScalar("Max Generations", ImGuiDataType_U64, &de_params.max_generation);
-        constexpr std::array kCrossoverRateMinMax = {0.0, 1.0};
-        ImGui::InputScalar("Crossover Rate", ImGuiDataType_Double, &de_params.crossover_rate, &kCrossoverRateMinMax[0],
-                           &kCrossoverRateMinMax[1], "%.2f");
-        constexpr std::array kDifferentialWeightMinMax = {0.0, 2.0};
-        ImGui::InputScalar("Differential Weight", ImGuiDataType_Double, &de_params.differential_weight,
-                           &kDifferentialWeightMinMax[0], &kDifferentialWeightMinMax[1], "%.2f");
-
-        opt_info.optimizer_params = de_params;
-    }
-    else if (optimization_name == "Particle Swarm Optimization")
-    {
-        static fdn_optimization::PSOParameters pso_params;
-        ImGui::InputScalar("Number of Particles", ImGuiDataType_U64, &pso_params.num_particles);
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &pso_params.max_iterations);
-        ImGui::InputScalar("Horizon Size", ImGuiDataType_U64, &pso_params.horizon_size);
-
-        constexpr std::array kExploitationFactorMinMax = {0.1, 5.0};
-        ImGui::InputScalar("Exploitation Factor", ImGuiDataType_Double, &pso_params.exploitation_factor,
-                           &kExploitationFactorMinMax[0], &kExploitationFactorMinMax[1], "%.2f");
-        constexpr std::array kExplorationFactorMinMax = {0.1, 5.0};
-        ImGui::InputScalar("Exploration Factor", ImGuiDataType_Double, &pso_params.exploration_factor,
-                           &kExplorationFactorMinMax[0], &kExplorationFactorMinMax[1], "%.2f");
-
-        opt_info.optimizer_params = pso_params;
-    }
-    else if (optimization_name == "Random Search")
-    {
-        static fdn_optimization::RandomSearchParameters rs_params;
-        // No parameters for random search currently
-
-        opt_info.optimizer_params = rs_params;
-    }
-    else if (optimization_name == "L-BFGS")
-    {
-        static fdn_optimization::L_BFGSParameters lbfgs_params;
-        ImGui::InputScalar("Number of Basis", ImGuiDataType_U64, &lbfgs_params.num_basis);
-
-        constexpr std::array<size_t, 2> kMaxIterationsSteps = {100, 10000};
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &lbfgs_params.max_iterations, &kMaxIterationsSteps[0],
-                           &kMaxIterationsSteps[1]);
-
-        ImGui::InputScalar("Wolfe Parameter", ImGuiDataType_Double, &lbfgs_params.wolfe, nullptr, nullptr, "%.2f");
-        ImGui::InputScalar("Min Gradient Norm", ImGuiDataType_Double, &lbfgs_params.min_gradient_norm, nullptr, nullptr,
-                           "%.1e");
-        ImGui::InputScalar("Factor", ImGuiDataType_Double, &lbfgs_params.factor, nullptr, nullptr, "%.1e");
-        ImGui::InputScalar("Max Line Search Trials", ImGuiDataType_U64, &lbfgs_params.max_line_search_trials);
-        ImGui::InputScalar("Min Step", ImGuiDataType_Double, &lbfgs_params.min_step, nullptr, nullptr, "%.1e");
-        ImGui::InputScalar("Max Step", ImGuiDataType_Double, &lbfgs_params.max_step, nullptr, nullptr, "%.1e");
-
-        opt_info.optimizer_params = lbfgs_params;
-    }
-    else if (optimization_name == "Gradient Descent")
-    {
-        static float step_size = 0.01f;
-        static int max_iterations = 1000000;
-        static float tolerance = 1e-5f;
-
-        ImGui::InputFloat("Step Size", &step_size, 0.001f, 1.0f, "%.4f");
-        ImGui::InputInt("Max Iterations", &max_iterations, 0, 0);
-        ImGui::InputFloat("Tolerance", &tolerance, 0.f, 0.f, "%.1ef");
-
-        opt_info.optimizer_params = fdn_optimization::GradientDescentParameters{
-            .step_size = step_size,
-            .max_iterations = static_cast<size_t>(max_iterations),
-            .tolerance = tolerance,
-        };
-    }
-    else if (optimization_name == "CMA-ES")
-    {
-        static size_t population_size = 0;
-        static size_t max_iterations = 1000;
-        static double tolerance = 1e-5;
-        static double step_size = 0;
-
-        ImGui::InputScalar("Population Size", ImGuiDataType_U64, &population_size);
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &max_iterations);
-        ImGui::InputScalar("Tolerance", ImGuiDataType_Double, &tolerance);
-        ImGui::InputScalar("Step Size", ImGuiDataType_Double, &step_size);
-
-        opt_info.optimizer_params = fdn_optimization::CMAESParameters{
-            .population_size = population_size,
-            .max_iterations = max_iterations,
-            .tolerance = tolerance,
-            .step_size = step_size,
-        };
-    }
-    else
-    {
-        ImGui::Text("No parameters available for this optimizer.");
-    }
-    ImGui::PopItemWidth();
 }
 
 } // namespace
@@ -273,7 +126,7 @@ void DrawOptimizationParamGui(const std::string_view optimization_name, fdn_opti
 FDNToolboxApp::FDNToolboxApp()
     : pre_delay_(0, Settings::Instance().SampleRate())
     , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
-    , fdn_optimizer_(Settings::Instance().GetLogger())
+    , optimization_gui_(Settings::Instance().GetLogger())
     , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
     , load_config_browser(0)
     , save_config_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
@@ -398,12 +251,16 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
     pre_delay_.SetDelay(new_delay_samples);
 
     std::array<float, kSystemBlockSize> input_data = {0.0f};
-    std::array<float, kSystemBlockSize> output_data = {0.0f};
+    std::array<float, kSystemBlockSize> fdn_output_data = {0.0f};
+    std::array<float, kSystemBlockSize> conv_output_data = {0.0f};
+
+    std::ranges::fill(input_data, 0.f);
+    std::ranges::fill(fdn_output_data, 0.f);
+    std::ranges::fill(conv_output_data, 0.f);
 
     sfFDN::AudioBuffer input_audio_buffer(kSystemBlockSize, 1, input_data);
-    sfFDN::AudioBuffer output_audio_buffer(kSystemBlockSize, 1, output_data);
-    std::ranges::fill(input_data, 0.f);  // Reset input data for each block
-    std::ranges::fill(output_data, 0.f); // Reset output data for each block
+    sfFDN::AudioBuffer fdn_output_audio_buffer(kSystemBlockSize, 1, fdn_output_data);
+    sfFDN::AudioBuffer conv_output_audio_buffer(kSystemBlockSize, 1, conv_output_data);
 
     if (audio_state_ == AudioState::ImpulseRequested)
     {
@@ -412,27 +269,45 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
 
     audio_file_manager_->process_block(input_data, kSystemBlockSize, 1);
 
-    auto start_time = std::chrono::steady_clock::now();
-
-    float dry_mix = 0.5f;
-    float wet_mix = 0.5f;
-
-    if (rir_reverb != nullptr && reverb_engine_.load() == 1)
+    auto conv_start_time = std::chrono::steady_clock::now();
+    if (rir_reverb != nullptr)
     {
-        rir_reverb->Process(input_audio_buffer, output_audio_buffer);
-        dry_mix = conv_dry_level_.load();
-        wet_mix = conv_wet_level_.load();
+        rir_reverb->Process(input_audio_buffer, conv_output_audio_buffer);
+    }
+    auto conv_end_time = std::chrono::steady_clock::now();
+    auto conv_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(conv_end_time - conv_start_time).count();
+
+    auto start_time = std::chrono::steady_clock::now();
+    audio_fdn_->Process(input_audio_buffer, fdn_output_audio_buffer);
+    auto end_time = std::chrono::steady_clock::now();
+    auto fdn_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
+
+    static int last_reverb_type = kFDN_REVERB;
+    const int reverb_type = reverb_engine_.load();
+
+    if (last_reverb_type == kFDN_REVERB && reverb_type == kCONV_REVERB)
+    {
+        Crossfade(conv_output_data, fdn_output_data, conv_output_data);
+    }
+    else if (last_reverb_type == kCONV_REVERB && reverb_type == kFDN_REVERB)
+    {
+        Crossfade(fdn_output_data, conv_output_data, fdn_output_data);
+    }
+
+    last_reverb_type = reverb_type;
+
+    float dry_mix = fdn_dry_level_.load();
+    float wet_mix = 0.5f;
+    if (reverb_type == kFDN_REVERB)
+    {
+        // Apply pre-delay only if using FDN reverb
+        pre_delay_.Process(input_audio_buffer, input_audio_buffer);
+        wet_mix = fdn_wet_level_.load();
     }
     else
     {
-        // Process the FDN for this block
-        audio_fdn_->Process(input_audio_buffer, output_audio_buffer);
-        dry_mix = fdn_dry_level_.load();
-        wet_mix = fdn_wet_level_.load();
+        wet_mix = conv_wet_level_.load();
     }
-
-    auto end_time = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
 
     if (audio_state_ == AudioState::ImpulseRequested)
     {
@@ -440,10 +315,9 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         audio_state_ = AudioState::Idle;
     }
 
-    // Apply pre-delay
-    pre_delay_.Process(input_audio_buffer, input_audio_buffer);
-
     const float gain = audio_gain_.load();
+
+    std::span<float> output_data = reverb_type == kFDN_REVERB ? fdn_output_data : conv_output_data;
 
     for (size_t i = 0; i < kSystemBlockSize; ++i)
     {
@@ -457,11 +331,13 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         int idx_offset = i * num_channels;
         for (size_t j = 0; j < num_channels; ++j)
         {
-            output_buffer[idx_offset + j] = output_data[i];
+            output_buffer[idx_offset + j] += output_data[i];
         }
     }
 
     const float allowed_time = (1e9 / Settings::Instance().SampleRate()) * frame_size; // in nanoseconds
+    const float duration =
+        reverb_type == kFDN_REVERB ? static_cast<float>(fdn_duration) : static_cast<float>(conv_duration);
     float cpu_usage = static_cast<float>(duration) / allowed_time;
     fdn_cpu_usage_.store(cpu_usage);
 
@@ -1202,22 +1078,14 @@ void FDNToolboxApp::DrawAudioPlayer()
         ImGui::RadioButton("Convolution Reverb", &selected_reverb_engine, 1);
         reverb_engine_.store(selected_reverb_engine);
 
-        if (selected_reverb_engine == 1)
-        {
-            static float dry_level = 0.0f;
-            static float wet_level = 1.0f;
-            ImGui::PushItemWidth(200);
-            if (ImGui::SliderFloat("Conv. Dry Level", &dry_level, 0.0f, 1.0f, "%.2f"))
-            {
-                conv_dry_level_ = dry_level;
-            }
+        static float wet_level = 1.0f;
+        ImGui::PushItemWidth(200);
 
-            if (ImGui::SliderFloat("Conv. Wet Level", &wet_level, 0.0f, 1.0f, "%.2f"))
-            {
-                conv_wet_level_ = wet_level;
-            }
-            ImGui::PopItemWidth();
+        if (ImGui::SliderFloat("Convolution Level", &wet_level, 0.0f, 1.0f, "%.2f"))
+        {
+            conv_wet_level_ = wet_level;
         }
+        ImGui::PopItemWidth();
     }
 
     static sfFDN::OnePoleFilter rms_filter;
@@ -1416,317 +1284,10 @@ void FDNToolboxApp::DrawOptimizationWindow()
         return;
     }
 
-    float content_region_width = ImGui::GetContentRegionAvail().x;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
-    ImGui::BeginChild("Optimization Parameters", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
-                      ImGuiWindowFlags_None);
-    ImGui::SeparatorText("Setup");
-    static bool optimize_gains = false;
-    static bool optimize_matrix = false;
-    static int matrix_type = 0;
-    static bool optimize_filters = false;
-
-    ImGui::BeginDisabled(optimize_filters);
-
-    ImGui::Checkbox("Optimize Gains", &optimize_gains);
-    ImGui::Checkbox("Optimize Matrix", &optimize_matrix);
-    if (optimize_matrix)
+    if (optimization_gui_.Draw(fdn_config_, rir_analyzer_.GetImpulseResponse()))
     {
-        ImGui::RadioButton("Random", &matrix_type, 0);
-        ImGui::SameLine();
-        ImGui::RadioButton("Householder", &matrix_type, 1);
-        ImGui::SameLine();
-        ImGui::RadioButton("Circulant", &matrix_type, 2);
-    }
-
-    ImGui::EndDisabled();
-
-    const bool has_target_rir = !rir_analyzer_.GetImpulseResponse().empty();
-    ImGui::BeginDisabled(!has_target_rir);
-    ImGui::Checkbox("Optimize Filters", &optimize_filters);
-    ImGui::EndDisabled();
-
-    if (optimize_filters)
-    {
-        optimize_gains = false;
-        optimize_matrix = false;
-    }
-
-    bool is_optimizing = fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Running;
-    ImGui::BeginDisabled(is_optimizing);
-
-    static float spectral_flatness_weight = 1.0;
-    static float sparsity_weight = 0.5;
-    static float power_envelope_weight = 1.0;
-
-    if (optimize_gains || optimize_matrix)
-    {
-        ImGui::SeparatorText("Objective Weights");
-
-        ImGui::PushItemWidth(100);
-
-        ImGui::InputFloat("Spectral Flatness Weight", &spectral_flatness_weight, 0.0, 10.0, "%.2f");
-        ImGui::InputFloat("Sparsity Weight", &sparsity_weight, 0.0, 10.0, "%.2f");
-        ImGui::InputFloat("Power Envelope Weight", &power_envelope_weight, 0.0, 10.0, "%.2f");
-
-        ImGui::PopItemWidth();
-    }
-
-    ImGui::SeparatorText("Optimization Parameters");
-
-    constexpr std::array<std::string_view, 9> kOptimizationAlgorithms = {"SPSA",
-                                                                         "Simulated Annealing",
-                                                                         "Differential Evolution",
-                                                                         "Particle Swarm Optimization",
-                                                                         "Random Search",
-                                                                         "Adam",
-                                                                         "L-BFGS",
-                                                                         "Gradient Descent",
-                                                                         "CMA-ES"};
-    static int selected_algorithm = 0;
-    if (ImGui::BeginCombo("Algorithm", kOptimizationAlgorithms[selected_algorithm].data()))
-    {
-        for (int i = 0; i < static_cast<int>(kOptimizationAlgorithms.size()); ++i)
-        {
-            bool is_selected = (selected_algorithm == i);
-            if (ImGui::Selectable(kOptimizationAlgorithms[i].data(), is_selected))
-            {
-                selected_algorithm = i;
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    static fdn_optimization::OptimizationInfo opt_info;
-
-    DrawOptimizationParamGui(kOptimizationAlgorithms[selected_algorithm], opt_info);
-
-    static float gradient_step_size = 1e-4f;
-    static fdn_optimization::GradientMethod gradient_method = fdn_optimization::GradientMethod::CentralDifferences;
-
-    if (selected_algorithm == 5 || selected_algorithm == 6 || selected_algorithm == 7)
-    {
-        ImGui::PushItemWidth(200);
-        ImGui::SeparatorText("Gradient Settings");
-        constexpr std::array<std::string_view, 2> kGradientMethods = {"Central Difference", "Forward Difference"};
-        static int selected_gradient_method = 0;
-        if (ImGui::BeginCombo("Gradient Method", kGradientMethods[selected_gradient_method].data()))
-        {
-            for (int i = 0; i < static_cast<int>(kGradientMethods.size()); ++i)
-            {
-                bool is_selected = (selected_gradient_method == i);
-                if (ImGui::Selectable(kGradientMethods[i].data(), is_selected))
-                {
-                    selected_gradient_method = i;
-                    gradient_method = (i == 0) ? fdn_optimization::GradientMethod::CentralDifferences
-                                               : fdn_optimization::GradientMethod::ForwardDifferences;
-                }
-            }
-            ImGui::EndCombo();
-        }
-
-        ImGui::InputFloat("Gradient Step Size", &gradient_step_size, 0.0f, 1.0f, "%.1ef");
-        ImGui::PopItemWidth();
-    }
-
-    if (ImGui::Button("Run Optimization"))
-    {
-        if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
-        {
-            std::vector<fdn_optimization::OptimizationParamType> params_to_optimize;
-            if (optimize_gains)
-            {
-                params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Gains);
-            }
-
-            if (optimize_matrix)
-            {
-                if (matrix_type == 0)
-                {
-                    params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix);
-                }
-                else if (matrix_type == 1)
-                {
-                    params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Householder);
-                }
-                else if (matrix_type == 2)
-                {
-                    params_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Circulant);
-                }
-            }
-
-            if (optimize_filters)
-            {
-                params_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters);
-                params_to_optimize.push_back(fdn_optimization::OptimizationParamType::TonecorrectionFilters);
-
-                if (optimize_gains || optimize_matrix)
-                {
-                    LOG_WARNING(Settings::Instance().GetLogger(),
-                                "When optimizing filters, gains and matrix optimizations are ignored.");
-                }
-            }
-
-            if (!params_to_optimize.empty())
-            {
-                opt_info.parameters_to_optimize = params_to_optimize;
-                opt_info.initial_fdn_config = fdn_config_;
-                opt_info.ir_size = Settings::Instance().SampleRate();
-                opt_info.gradient_method = gradient_method;
-                opt_info.gradient_delta = gradient_step_size;
-                opt_info.spectral_flatness_weight = spectral_flatness_weight;
-                opt_info.sparsity_weight = sparsity_weight;
-                opt_info.power_envelope_weight = power_envelope_weight;
-                if (has_target_rir)
-                {
-                    opt_info.target_rir.clear();
-                    opt_info.target_rir.reserve(rir_analyzer_.GetImpulseResponse().size());
-                    std::ranges::copy(rir_analyzer_.GetImpulseResponse(), std::back_inserter(opt_info.target_rir));
-                }
-
-                fdn_optimizer_.StartOptimization(opt_info);
-                ImGui::OpenPopup("Optimization Progress");
-            }
-        }
-    }
-    ImGui::EndDisabled();
-
-    ImGui::SetNextWindowSize(ImVec2(600, -1), ImGuiCond_Always);
-    if (ImGui::BeginPopupModal("Optimization Progress", nullptr, ImGuiWindowFlags_None))
-    {
-        fdn_optimization::OptimizationProgressInfo progress = fdn_optimizer_.GetProgress();
-
-        std::chrono::duration<double, std::chrono::seconds::period> elapsed_seconds = progress.elapsed_time;
-        ImGui::Text("Elapsed Time: %.2f seconds", elapsed_seconds.count());
-
-        uint32_t eval_count = progress.evaluation_count;
-        ImGui::Text("Evaluations: %u", eval_count);
-
-        if (!progress.loss_history.empty() && ImPlot::BeginPlot("Loss Progress", ImVec2(-1, 250), ImPlotAxisFlags_None))
-        {
-            const std::vector<double>& loss_history_vec = progress.loss_history[0];
-            ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history_vec.size() * 1.25),
-                                    ImPlotCond_Always);
-
-            double max_loss =
-                loss_history_vec.empty() ? 1.0 : *std::max_element(loss_history_vec.begin(), loss_history_vec.end());
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Always);
-
-            ImPlot::PlotLine("Loss", loss_history_vec.data(), static_cast<int>(loss_history_vec.size()));
-
-            for (auto i = 1u; i < progress.loss_history.size(); ++i)
-            {
-                const std::vector<double>& other_loss_history = progress.loss_history[i];
-                ImPlot::PlotLine(("Loss " + std::to_string(i)).c_str(), other_loss_history.data(),
-                                 static_cast<int>(other_loss_history.size()));
-            }
-
-            ImPlot::EndPlot();
-        }
-
-        ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), "Optimizing...");
-        if (ImGui::Button("Cancel"))
-        {
-            fdn_optimizer_.CancelOptimization();
-        }
-
-        if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
-        {
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-    }
-
-    ImGui::EndChild();
-
-    ImGui::SameLine();
-
-    ImGui::BeginChild("Optimization Results", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
-                      ImGuiWindowFlags_None);
-    ImGui::SeparatorText("Results");
-
-    static double elapsed_time_sec = 0;
-    static uint32_t evaluation_count = 0;
-    static double initial_loss = 0.0;
-    static double final_loss = 0.0;
-    static std::vector<double> loss_history;
-    static std::vector<std::vector<double>> all_loss_histories;
-    static std::vector<std::string> loss_names;
-
-    if (fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Completed ||
-        fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Canceled)
-    {
-        fdn_optimization::OptimizationResult result = fdn_optimizer_.GetResult();
-        elapsed_time_sec = std::chrono::duration<double, std::chrono::seconds::period>(result.total_time).count();
-        evaluation_count = result.total_evaluations;
-        initial_loss = result.loss_history[0].front();
-        final_loss = result.loss_history[0].back();
-        loss_history = result.loss_history[0];
-        all_loss_histories = result.loss_history;
-        loss_names = result.loss_names;
-        if (optimize_gains)
-        {
-            fdn_config_.input_gains = result.optimized_fdn_config.input_gains;
-            fdn_config_.output_gains = result.optimized_fdn_config.output_gains;
-        }
-        if (optimize_matrix)
-        {
-            fdn_config_.matrix_info = result.optimized_fdn_config.matrix_info;
-        }
-        if (optimize_filters)
-        {
-            fdn_config_.attenuation_t60s = result.optimized_fdn_config.attenuation_t60s;
-            LOG_INFO(Settings::Instance().GetLogger(), "Optimized T60s: {}", fdn_config_.attenuation_t60s);
-            fdn_config_.tc_gains = result.optimized_fdn_config.tc_gains;
-            LOG_INFO(Settings::Instance().GetLogger(), "Optimized Tone Correction Gains: {}", fdn_config_.tc_gains);
-            fdn_config_.tc_frequencies = result.optimized_fdn_config.tc_frequencies;
-        }
-
         UpdateFDN();
     }
-    auto last_status = fdn_optimizer_.GetStatus();
-    if (last_status == fdn_optimization::OptimizationStatus::Canceled ||
-        last_status == fdn_optimization::OptimizationStatus::Completed)
-    {
-        fdn_optimizer_.ResetStatus();
-    }
-
-    ImGui::Text("Elapsed Time: %.2f seconds", elapsed_time_sec);
-    ImGui::Text("Evaluations: %u", evaluation_count);
-    ImGui::Text("Initial Loss: %.6f", initial_loss);
-    ImGui::Text("Final Loss: %.6f", final_loss);
-
-    ImGui::EndChild();
-
-    ImGui::SameLine();
-
-    ImGui::BeginChild("Loss Plot", ImVec2(-1, -1), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
-
-    if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
-    {
-        ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
-        ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-        ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
-
-        double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
-
-        ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
-
-        for (auto i = 1u; i < all_loss_histories.size(); ++i)
-        {
-            const std::vector<double>& other_loss_history = all_loss_histories[i];
-            ImPlot::PlotLine((loss_names[i - 1]).c_str(), other_loss_history.data(),
-                             static_cast<int>(other_loss_history.size()));
-        }
-        ImPlot::EndPlot();
-    }
-    ImGui::EndChild();
-
-    ImGui::PopStyleVar();
 
     ImGui::End();
 }

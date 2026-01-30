@@ -31,12 +31,12 @@ enum class OptimizationStatus : uint8_t
 
 struct AdamParameters
 {
-    double step_size = 0.4253;
-    double learning_rate_decay = 0.613;
-    size_t decay_step_size = 50;
-    size_t epoch_restarts = 250;
-    size_t max_restarts = 1;
-    double tolerance = 1e-3;
+    float step_size = 0.4253;
+    float learning_rate_decay = 0.613;
+    int decay_step_size = 50;
+    int epoch_restarts = 250;
+    int max_restarts = 1;
+    float tolerance = 1e-3;
 };
 
 struct SPSAParameters
@@ -109,6 +109,52 @@ struct CMAESParameters
     double step_size = 0;
 };
 
+enum class OptimizationAlgoType : uint8_t
+{
+    SPSA,
+    SimulatedAnnealing,
+    DifferentialEvolution,
+    PSO,
+    RandomSearch,
+    CMAES,
+    // Below here use gradient information
+    Adam,
+    L_BFGS,
+    GradientDescent,
+    Count,
+};
+
+constexpr const char* OptimizationAlgoTypeToString(OptimizationAlgoType type)
+{
+    switch (type)
+    {
+    case OptimizationAlgoType::Adam:
+        return "Adam";
+    case OptimizationAlgoType::SPSA:
+        return "SPSA";
+    case OptimizationAlgoType::SimulatedAnnealing:
+        return "Simulated Annealing";
+    case OptimizationAlgoType::DifferentialEvolution:
+        return "Differential Evolution";
+    case OptimizationAlgoType::PSO:
+        return "Particle Swarm Optimization";
+    case OptimizationAlgoType::RandomSearch:
+        return "Random Search";
+    case OptimizationAlgoType::L_BFGS:
+        return "L-BFGS";
+    case OptimizationAlgoType::GradientDescent:
+        return "Gradient Descent";
+    case OptimizationAlgoType::CMAES:
+        return "CMA-ES";
+    default:
+        return "Unknown";
+    }
+}
+
+using OptimizationAlgoParams =
+    std::variant<AdamParameters, SPSAParameters, SimulatedAnnealingParameters, DifferentialEvolutionParameters,
+                 PSOParameters, RandomSearchParameters, L_BFGSParameters, GradientDescentParameters, CMAESParameters>;
+
 struct OptimizationInfo
 {
     std::vector<OptimizationParamType> parameters_to_optimize;
@@ -117,15 +163,23 @@ struct OptimizationInfo
     fdn_optimization::GradientMethod gradient_method = fdn_optimization::GradientMethod::CentralDifferences;
     double gradient_delta = 1e-4;
 
+    // Colorless loss weights
     double spectral_flatness_weight = 1.0;
     double sparsity_weight = 1.0;
     double power_envelope_weight = 1.0;
 
+    // RIR match loss weights
+    double edc_weight = 0.0;
+    double mel_edr_weight = 1.0;
+
+    uint32_t mel_edr_fft_length = 4096;
+    uint32_t mel_edr_hop_size = 128;
+    uint32_t mel_edr_window_size = 1024;
+    uint32_t mel_edr_num_bands = 32;
+
     std::vector<float> target_rir;
 
-    std::variant<AdamParameters, SPSAParameters, SimulatedAnnealingParameters, DifferentialEvolutionParameters,
-                 PSOParameters, RandomSearchParameters, L_BFGSParameters, GradientDescentParameters, CMAESParameters>
-        optimizer_params;
+    OptimizationAlgoParams optimizer_params;
 };
 
 struct OptimizationProgressInfo

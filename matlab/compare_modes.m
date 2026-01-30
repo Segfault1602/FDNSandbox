@@ -1,5 +1,5 @@
 clearvars;
-clf;
+close all;
 addpath(genpath("../../FDNToolbox"));
 
 fs = 48000;
@@ -9,7 +9,7 @@ direct = zeros(1,1);
 [A_init, B_init, C_init, m_init] = ReadFDNConfig("../optim_output/initial_fdn_config.txt");
 init_ir_gen = dss2impz(irLen, m_init, A_init, B_init', C_init, zeros(1,1));
 
-[A_opt, B_opt, C_opt, m_opt] = ReadFDNConfig("../optim_output/optimized_fdn_config.txt");
+[A_opt, B_opt, C_opt, m_opt] = ReadFDNConfig("../optim_output/colorless_fdn_config.txt");
 
 N = length(B_init);
 

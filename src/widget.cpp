@@ -1258,20 +1258,36 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
 
     static bool show_delay_filter_designer = false;
     static sfFDN::DelayFilterType delay_filter_type = sfFDN::DelayFilterType::Proportional;
+
+    if (config.attenuation_t60s.size() == 1)
+    {
+        delay_filter_type = sfFDN::DelayFilterType::Proportional;
+        feedback_gain = config.attenuation_t60s[0];
+    }
+    else if (config.attenuation_t60s.size() == 2)
+    {
+        delay_filter_type = sfFDN::DelayFilterType::OnePole;
+        t60_dc = config.attenuation_t60s[0];
+        t60_ny = config.attenuation_t60s[1];
+    }
+    else if (config.attenuation_t60s.size() == kNBands)
+    {
+        delay_filter_type = sfFDN::DelayFilterType::TwoFilter;
+        t60s = config.attenuation_t60s;
+    }
+
     if (ImGui::TreeNode("Delay Filters"))
     {
         constexpr std::array<const char*, 3> kFilterTypeNames = {"Proportional", "One Pole", "Octave Band Filter"};
-        static int selected_filter_type = 0;
-        const char* combo_preview_value = kFilterTypeNames[selected_filter_type];
+        const char* combo_preview_value = kFilterTypeNames[static_cast<int>(delay_filter_type)];
         if (ImGui::BeginCombo("Filter Type", combo_preview_value))
         {
             for (int i = 0; i < kFilterTypeNames.size(); i++)
             {
-                bool is_selected = (selected_filter_type == i);
+                bool is_selected = (static_cast<int>(delay_filter_type) == i);
                 if (ImGui::Selectable(kFilterTypeNames[i], is_selected))
                 {
                     delay_filter_type = static_cast<sfFDN::DelayFilterType>(i);
-                    selected_filter_type = i;
                     config_changed = true;
                 }
             }
@@ -1354,6 +1370,13 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
     static std::vector<std::vector<float>> freq_response_per_filter;
     static bool enabled = false;
 
+    if (!config.tc_gains.empty())
+    {
+        assert(config.tc_gains.size() == kNBands);
+        tc_gains = config.tc_gains;
+        enabled = true;
+    }
+
     if (frequencies.size() == 0)
     {
         frequencies.resize(kNBands);
@@ -1395,8 +1418,7 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
 
     if (show_tc_filter_designer && ImGui::Begin("Filter Designer"))
     {
-
-        if (ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.92f), ImPlotFlags_None))
+        if (ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.90f), ImPlotFlags_None))
         {
             ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
             ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);

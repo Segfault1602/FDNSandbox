@@ -4,7 +4,9 @@ function [A, B, C, m] = ReadFDNConfig(filename)
     C = data(2,:);
     
     m = data(3,:);
+
     A = data(4:end,:);
+
 
    
     % gainPerSample = db2mag(RT602slope(10, 48000));

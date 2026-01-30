@@ -1,4 +1,4 @@
-clearvars;
+clearvars;close all;
 addpath(genpath("../../FDNToolbox"));
 
 [init_ir, init_fs] = audioread('../optim_output/colorless_initial_ir.wav');
@@ -25,7 +25,7 @@ ylabel('Amplitude');
 ylim([-1 1]);
 
 
-WIN_LEN = 2^14;
+WIN_LEN = 2^13;
 OVL_LEN = round(0.99*WIN_LEN);
 
 figure(2);

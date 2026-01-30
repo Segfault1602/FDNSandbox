@@ -11,18 +11,21 @@ target_sources(
             fdn_info.cpp
             presets.cpp
             app_imconfig.h
+            optimization_gui.cpp
 )
 target_link_libraries(
     fdn_sandbox_app
-    PUBLIC audio_utils quill::quill sfFDN.sfFDN
-    PRIVATE imgui
-            fdn_analysis
-            fdn_optimization
-            SndFile::sndfile
-            Boost::math
-            Boost::filesystem
-            Eigen3::Eigen
-            nlohmann_json::nlohmann_json
+    PUBLIC audio_utils
+           quill::quill
+           sfFDN.sfFDN
+           imgui
+           fdn_analysis
+           fdn_optimization
+           SndFile::sndfile
+           Boost::math
+           Boost::filesystem
+           Eigen3::Eigen
+           nlohmann_json::nlohmann_json
 )
 target_include_directories(fdn_sandbox_app PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR})
 target_compile_features(fdn_sandbox_app PRIVATE cxx_std_23)

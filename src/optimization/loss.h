@@ -2,6 +2,8 @@
 
 #include <audio_utils/fft.h>
 
+#include <analysis.h>
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -31,5 +33,8 @@ float MixingTimeLoss(std::span<const float> signal, uint32_t sample_rate, float 
 float SparsityLoss(std::span<const float> signal);
 
 float EDCLoss(std::span<const float> signal, const std::array<std::vector<float>, 10>& target_relief, bool normalize);
+
+float EDRLoss(std::span<const float> signal, const fdn_analysis::EnergyDecayReliefResult& target_edr,
+              const fdn_analysis::EnergyDecayReliefOptions& options);
 
 } // namespace fdn_optimization

@@ -1,10 +1,15 @@
 clearvars;close all;
 addpath(genpath("../../FDNToolbox"));
+addpath(genpath("../../DecayFitNet"));
 
 [target_ir, target_fs] = audioread("../../rirs/py_rirs/rir_dining_room.wav");
 [init_ir, init_fs] = audioread('../optim_output/initial_ir.wav');
 [opt_ir, opt_fs] = audioread('../optim_output/optimized_ir.wav');
 
+% opt_ir(500)= 0.5;
+
+% target_ir = RemoveBeginningSilence(target_ir);
+% opt_ir = RemoveBeginningSilence(opt_ir);
 
 figure(1);
 
@@ -12,6 +17,8 @@ plot(target_ir + 1, DisplayName="Target");
 hold on;
 plot(opt_ir, DisplayName="Opt");
 hold off;
+legend();
+
 
 
 
@@ -36,8 +43,8 @@ opt_filtered = oct_bank(opt_ir);
 
 filter_freqs = round(oct_bank.getCenterFrequencies);
 
-target_filtered = RemoveBeginningSilence(target_filtered);
-opt_filtered = RemoveBeginningSilence(opt_filtered);
+% target_filtered = RemoveBeginningSilence(target_filtered);
+% opt_filtered = RemoveBeginningSilence(opt_filtered);
 
 target_edr = EDC(target_filtered);
 opt_edr = EDC(opt_filtered);
@@ -70,15 +77,74 @@ legend;
 
 
 figure(5);
-subplot(211);
-pspectrum(target_ir, target_fs, "spectrogram");
-title("Target");
 
-subplot(212);
-pspectrum(opt_ir, opt_fs, "spectrogram");
+n_fft = 1024;
+hop_size = 512;
+win_size = 1024;
+ovl_len = win_size - hop_size;
+win = hann(win_size);
+n_mels = 16;
+
+subplot(311);
+% pspectrum(target_ir, target_fs, "spectrogram");
+[tS, tF, tT] = melSpectrogram(target_ir, target_fs, Window=win, OverlapLength=ovl_len, FFTLength=n_fft, NumBands=n_mels);
+S_db = 10 * log10(tS + eps);
+surf(tT, tF, S_db, EdgeColor='none');
+view([0,90]);
+axis([tT(1) tT(end) tF(1) tF(end)])
+title("Target");
+colorbar;
+
+subplot(312);
+% pspectrum(opt_ir, opt_fs, "spectrogram");
+[oS, oF, oT] = melSpectrogram(opt_ir, opt_fs, Window=win, OverlapLength=ovl_len, FFTLength=n_fft, NumBands=n_mels);
+oS_db = 10 * log10(oS + eps);
+surf(oT, oF, oS_db, EdgeColor='none');
+view([0,90]);
+axis([oT(1) oT(end) oF(1) oF(end)])
 title("Optimized Impulse Response Spectrogram");
+colorbar;
+
+subplot(313);
+S_err = (S_db - oS_db);
+surf(oT, oF, S_err, EdgeColor='none');
+view([0,90]);
+axis([oT(1) oT(end) oF(1) oF(end)])
+title("Error");
+colorbar;
 
 figure(6);
+
+subplot(311);
+
+target_edr_mel = EDC(tS);
+surf(tT, tF, target_edr_mel, EdgeColor='none');
+view([0,90]);
+axis([oT(1) oT(end) oF(1) oF(end)])
+title("Target");
+colorbar;
+
+
+subplot(312);
+opt_edr_mel = EDC(oS);
+surf(oT, oF, opt_edr_mel, EdgeColor='none');
+view([0,90]);
+axis([oT(1) oT(end) oF(1) oF(end)])
+title("Optimized");
+colorbar;
+
+subplot(313);
+edr_err = abs(target_edr_mel - opt_edr_mel);
+surf(oT, oF, edr_err, EdgeColor='none');
+view([0,90]);
+axis([oT(1) oT(end) oF(1) oF(end)])
+title("Error");
+colorbar;
+
+
+
+
+figure(7);
 losses = readtable("../optim_output/loss_history.txt", "VariableNamingRule","preserve");
 total_loss = losses{:,1};
 plot(total_loss, DisplayName=losses.Properties.VariableNames{1});
@@ -89,6 +155,34 @@ end
 hold off;
 grid on;
 legend();
+
+figure(8);
+
+
+filter_mat = readmatrix("../optim_output/optimized_filter_config.txt");
+fdn_t60s = filter_mat(1,:);
+fdn_freqs = filter_mat(2, :);
+fdn_tc_gains = filter_mat(3,:);
+
+net = DecayFitNetToolbox(1, target_fs, fdn_freqs);
+[tVals_decayfitnet, aVals_decayfitnet, nVals_decayFitNet, normVals_decayFitNet] = net.estimateParameters(target_ir);
+disp('==== DecayFitNet: Estimated T values (in seconds, T=0 indicates an inactive slope): ====') 
+disp(tVals_decayfitnet)
+
+[L, A, N] = decayFitNet2InitialLevel(tVals_decayfitnet, aVals_decayfitnet, nVals_decayFitNet, normVals_decayFitNet, target_fs, size(target_ir,1), 10);
+
+[tVals_optimized, ~, ~, ~] = net.estimateParameters(opt_ir);
+
+decayFitNet_Freqs = net.getFilterFrequencies();
+semilogx(decayFitNet_Freqs, tVals_decayfitnet, DisplayName="DecayFitNet");
+
+hold on;
+plot(fdn_freqs, fdn_t60s, DisplayName="Optimized");
+plot(decayFitNet_Freqs, tVals_optimized, DisplayName="Optimized - DecayFitNet");
+hold off;
+legend();
+grid();
+
 
 
 function [processed_irs] = RemoveBeginningSilence(signals)

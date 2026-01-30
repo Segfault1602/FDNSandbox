@@ -12,7 +12,7 @@
 #include <audio_utils/ring_buffer.h>
 
 #include "analysis/fdn_analyzer.h"
-#include "optimization/optimizer.h"
+#include "optimization_gui.h"
 
 #include <sffdn/sffdn.h>
 
@@ -77,20 +77,22 @@ class FDNToolboxApp
     std::atomic<float> audio_gain_ = 1.0f;
     std::atomic<float> dry_wet_mix_ = 0.5f;
     std::atomic<float> fdn_cpu_usage_ = 0.0f;
-    std::atomic<int> reverb_engine_ = 0;
+
+    constexpr static int kFDN_REVERB = 0;
+    constexpr static int kCONV_REVERB = 1;
+    std::atomic<int> reverb_engine_ = kFDN_REVERB;
 
     std::atomic<float> fdn_dry_level_ = 0.5f;
     std::atomic<float> fdn_wet_level_ = 0.5f;
 
     // For convolution reverb
-    std::atomic<float> conv_dry_level_ = 0.0f;
     std::atomic<float> conv_wet_level_ = 1.0f;
 
     std::atomic<uint32_t> pre_delay_ms_ = 0;
     sfFDN::Delay pre_delay_;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
-    fdn_optimization::FDNOptimizer fdn_optimizer_;
+    OptimizationGUI optimization_gui_;
 
     ImGui::FileBrowser save_ir_browser;
     ImGui::FileBrowser load_config_browser;

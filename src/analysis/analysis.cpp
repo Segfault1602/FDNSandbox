@@ -175,7 +175,7 @@ EnergyDecayReliefResult EnergyDecayReliefSTFT(std::span<const float> signal, con
 
     audio_utils::analysis::SpectrogramInfo spec_info{
         .fft_size = options.fft_length,
-        .overlap = options.fft_length - options.hop_size,
+        .overlap = options.window_size - options.hop_size,
         .window_size = options.window_size,
         .samplerate = 48000,
         .window_type = options.window_type,
@@ -195,7 +195,10 @@ EnergyDecayReliefResult EnergyDecayReliefSTFT(std::span<const float> signal, con
         edr_map.col(i) = cumulative_energy;
     }
 
-    edr_map = 10.0f * Eigen::log10(edr_map.array() + 1e-10f);
+    if (options.to_db)
+    {
+        edr_map = 10.0f * edr_map.array().log10().matrix();
+    }
 
     EnergyDecayReliefResult edr_data_struct{
         .data = std::move(edr_data), .num_bins = spectrogram.num_bins, .num_frames = spectrogram.num_frames};

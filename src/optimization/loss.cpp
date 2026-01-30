@@ -19,6 +19,7 @@ static std::mutex gFFTPoolMutex;
 std::unique_ptr<audio_utils::FFT> BorrowFFTForSize(uint32_t size)
 {
     const uint32_t fft_size = audio_utils::FFT::NextSupportedFFTSize(size);
+
     std::scoped_lock lock(gFFTPoolMutex);
     for (auto it = gFFTPool.begin(); it != gFFTPool.end(); ++it)
     {
@@ -61,7 +62,7 @@ float SpectralFlatnessLoss(std::span<const float> signal)
     auto fft_ptr = BorrowFFTForSize(signal.size());
 
     std::vector<float> spectrum((fft_ptr->GetFFTSize() / 2) + 1, 0.0f);
-    fft_ptr->ForwardAbs(signal, std::span(spectrum), false, false);
+    fft_ptr->ForwardMag(signal, std::span(spectrum), false, false);
     ReturnFFTToPool(std::move(fft_ptr));
 
     float flatness = audio_utils::analysis::SpectralFlatness(spectrum);
@@ -164,4 +165,19 @@ float EDCLoss(std::span<const float> signal, const std::array<std::vector<float>
     return std::sqrt(loss);
 }
 
+float EDRLoss(std::span<const float> signal, const fdn_analysis::EnergyDecayReliefResult& target_edr,
+              const fdn_analysis::EnergyDecayReliefOptions& options)
+{
+    fdn_analysis::EnergyDecayReliefResult edr_result = fdn_analysis::EnergyDecayReliefSTFT(signal, options);
+
+    if (edr_result.num_bins != target_edr.num_bins || edr_result.num_frames != target_edr.num_frames)
+    {
+        throw std::runtime_error("EDRLoss: EDR result size does not match target size.");
+    }
+
+    const arma::fvec edr_vec(edr_result.data.data(), edr_result.data.size(), false, true);
+    const arma::fvec target_vec(const_cast<float*>(target_edr.data.data()), target_edr.data.size(), false, true);
+    float loss = arma::mean(arma::square(edr_vec - target_vec));
+    return std::sqrt(loss);
+}
 } // namespace fdn_optimization

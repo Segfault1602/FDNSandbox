@@ -26,12 +26,12 @@ target_sources(
 
 target_link_libraries(
     fdn_optimization
+    PUBLIC fdn_analysis
     PRIVATE audio_utils::audio_utils
             sfFDN.sfFDN
             quill::quill
             Armadillo::Armadillo
             ensmallen
-            fdn_analysis
 )
 if(OpenMP_CXX_FOUND)
     target_link_libraries(fdn_optimization PRIVATE OpenMP::OpenMP_CXX)
