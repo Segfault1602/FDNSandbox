@@ -1,9 +1,8 @@
 #include "optimizer.h"
 
-#include "analysis.h"
 #include "model.h"
 #include "random_searcher.h"
-#include <analysis.h>
+#include <audio_utils/audio_analysis.h>
 
 #include <armadillo>
 #include <ensmallen.hpp>
@@ -448,15 +447,15 @@ void FDNOptimizer::ThreadProc(std::stop_token stop_token, OptimizationInfo info)
 
         if (info.edc_weight > 0.0)
         {
-            const bool normalize = false;
-            auto target_edc_octaves = fdn_analysis::EnergyDecayRelief(info.target_rir, true, normalize);
+            auto target_edc_octaves = audio_utils::analysis::EnergyDecayCurve_FilterBank(info.target_rir, true);
             // use shared_ptr to capture in lambda
             auto target_edc_octaves_ptr =
-                std::make_shared<std::array<std::vector<float>, 10>>(std::move(target_edc_octaves));
+                std::make_shared<std::array<std::vector<float>, audio_utils::analysis::kNumOctaveBands>>(
+                    std::move(target_edc_octaves));
 
             LossFunction edc_loss;
             edc_loss.func = [target_edc_octaves_ptr](std::span<const float> signal) -> double {
-                return EDCLoss(signal, *target_edc_octaves_ptr, normalize);
+                return EDCLoss(signal, *target_edc_octaves_ptr);
             };
             edc_loss.weight = 1.0;
             edc_loss.name = "EDC Relief Loss";
@@ -465,17 +464,17 @@ void FDNOptimizer::ThreadProc(std::stop_token stop_token, OptimizationInfo info)
 
         if (info.mel_edr_weight > 0.0)
         {
-            fdn_analysis::EnergyDecayReliefOptions edr_options;
+            audio_utils::analysis::EnergyDecayReliefOptions edr_options;
             edr_options.fft_length = info.mel_edr_fft_length;
             edr_options.hop_size = info.mel_edr_hop_size;
             edr_options.window_size = info.mel_edr_window_size;
             edr_options.window_type = audio_utils::FFTWindowType::Hann;
             edr_options.n_mels = info.mel_edr_num_bands;
 
-            auto target_edr_result = fdn_analysis::EnergyDecayReliefSTFT(info.target_rir, edr_options);
+            auto target_edr_result = audio_utils::analysis::EnergyDecayRelief(info.target_rir, edr_options);
 
             auto target_edr_result_ptr =
-                std::make_shared<fdn_analysis::EnergyDecayReliefResult>(std::move(target_edr_result));
+                std::make_shared<audio_utils::analysis::EnergyDecayReliefResult>(std::move(target_edr_result));
 
             LossFunction edr_loss;
             edr_loss.func = [target_edr_result_ptr, edr_options](std::span<const float> signal) -> double {

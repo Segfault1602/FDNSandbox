@@ -2,7 +2,6 @@
 
 #include "fdn_analyzer.h"
 
-#include "analysis/analysis.h"
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft_utils.h>
 
@@ -178,7 +177,7 @@ FDNToolboxApp::FDNToolboxApp()
     fdn_config_A_ = presets::kDefaultFDNConfig;
     fdn_config_B_ = presets::kDefaultFDNConfig;
 
-    spectrogram_info_ = {
+    stft_options_ = {
 #ifndef NDEBUG
         .fft_size = 1024,
         .overlap = 300,
@@ -188,8 +187,8 @@ FDNToolboxApp::FDNToolboxApp()
         .overlap = 400,
         .window_size = 512,
 #endif
-        .samplerate = Settings::Instance().SampleRate(),
-        .window_type = audio_utils::FFTWindowType::Hann};
+        .window_type = audio_utils::FFTWindowType::Hann,
+        .samplerate = Settings::Instance().SampleRate()};
 
     gui_fdn_ = presets::CreateDefaultFDN();
     UpdateFDN();
@@ -1204,11 +1203,11 @@ void FDNToolboxApp::DrawSettingsWindow()
     if (ImGui::Combo("##FFTSize", &selected_fft_size_index, kFFTSizeOptions.data(),
                      static_cast<int>(kFFTSizeOptions.size())))
     {
-        spectrogram_info_.fft_size = 512 * (1 << selected_fft_size_index);
-        if (spectrogram_info_.fft_size < spectrogram_info_.window_size)
+        stft_options_.fft_size = 512 * (1 << selected_fft_size_index);
+        if (stft_options_.fft_size < stft_options_.window_size)
         {
-            spectrogram_info_.window_size = spectrogram_info_.fft_size;
-            spectrogram_info_.overlap = static_cast<uint32_t>(overlap * spectrogram_info_.window_size);
+            stft_options_.window_size = stft_options_.fft_size;
+            stft_options_.overlap = static_cast<uint32_t>(overlap * stft_options_.window_size);
             selected_window_size_index = selected_fft_size_index + 1;
         }
 
@@ -1221,11 +1220,11 @@ void FDNToolboxApp::DrawSettingsWindow()
     if (ImGui::Combo("##WindowSize", &selected_window_size_index, kWindowSizeOptions.data(),
                      static_cast<int>(kWindowSizeOptions.size())))
     {
-        spectrogram_info_.window_size = 256 * (1 << selected_window_size_index);
-        spectrogram_info_.overlap = static_cast<uint32_t>(overlap * spectrogram_info_.window_size);
-        if (spectrogram_info_.window_size > spectrogram_info_.fft_size)
+        stft_options_.window_size = 256 * (1 << selected_window_size_index);
+        stft_options_.overlap = static_cast<uint32_t>(overlap * stft_options_.window_size);
+        if (stft_options_.window_size > stft_options_.fft_size)
         {
-            spectrogram_info_.fft_size = spectrogram_info_.window_size;
+            stft_options_.fft_size = stft_options_.window_size;
             selected_fft_size_index = selected_window_size_index - 1;
         }
         fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
@@ -1236,7 +1235,7 @@ void FDNToolboxApp::DrawSettingsWindow()
     ImGui::SetNextItemWidth(100);
     if (ImGui::SliderFloat("##Overlap", &overlap, 0.01f, 0.95f, "%.2f"))
     {
-        spectrogram_info_.overlap = static_cast<uint32_t>(overlap * spectrogram_info_.window_size);
+        stft_options_.overlap = static_cast<uint32_t>(overlap * stft_options_.window_size);
         fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
     }
 
@@ -1246,7 +1245,7 @@ void FDNToolboxApp::DrawSettingsWindow()
     ImGui::SetNextItemWidth(100);
     if (ImGui::Combo("##WindowType", &selected_window_type, "Rectangular\0Hamming\0Hann\0Blackman\0"))
     {
-        spectrogram_info_.window_type = static_cast<audio_utils::FFTWindowType>(selected_window_type);
+        stft_options_.window_type = static_cast<audio_utils::FFTWindowType>(selected_window_type);
         fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
     }
 
@@ -1332,14 +1331,12 @@ void FDNToolboxApp::DrawSpectrogram()
         fdn_analysis::SpectrogramData spectrogram_data{};
         if (show_rir)
         {
-            spectrogram_data =
-                rir_analyzer_.GetSpectrogram(spectrogram_info_, spectrogram_type_ == SpectrogramType::Mel);
+            spectrogram_data = rir_analyzer_.GetSpectrogram(stft_options_, spectrogram_type_ == SpectrogramType::Mel);
             tmax = rir_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
         }
         else
         {
-            spectrogram_data =
-                fdn_analyzer_.GetSpectrogram(spectrogram_info_, spectrogram_type_ == SpectrogramType::Mel);
+            spectrogram_data = fdn_analyzer_.GetSpectrogram(stft_options_, spectrogram_type_ == SpectrogramType::Mel);
             tmax = fdn_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
         }
 

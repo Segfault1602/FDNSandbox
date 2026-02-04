@@ -3,8 +3,6 @@
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft.h>
 
-#include "analysis.h"
-
 #include <armadillo>
 
 #include <cassert>
@@ -62,7 +60,8 @@ float SpectralFlatnessLoss(std::span<const float> signal)
     auto fft_ptr = BorrowFFTForSize(signal.size());
 
     std::vector<float> spectrum((fft_ptr->GetFFTSize() / 2) + 1, 0.0f);
-    fft_ptr->ForwardMag(signal, std::span(spectrum), false, false);
+    fft_ptr->ForwardMag(signal, std::span(spectrum),
+                        {.output_type = audio_utils::FFTOutputType::Power, .to_db = false});
     ReturnFFTToPool(std::move(fft_ptr));
 
     float flatness = audio_utils::analysis::SpectralFlatness(spectrum);
@@ -115,7 +114,13 @@ float MixingTimeLoss(std::span<const float> signal, uint32_t sample_rate, float 
     constexpr float kHopSizeMs = 10.0f;
     const uint32_t window_size = static_cast<uint32_t>((kWindowSizeMs / 1000.0f) * static_cast<float>(sample_rate));
     const uint32_t hop_size = static_cast<uint32_t>((kHopSizeMs / 1000.0f) * static_cast<float>(sample_rate));
-    auto results = fdn_analysis::EchoDensity(signal, window_size, sample_rate, hop_size);
+
+    audio_utils::analysis::EchoDensityOptions options;
+    options.window_size = window_size;
+    options.hop_size = hop_size;
+    options.sample_rate = sample_rate;
+
+    auto results = audio_utils::analysis::EchoDensity(signal, options);
 
     return std::abs(results.mixing_time - target_mixing_time);
 }
@@ -138,9 +143,11 @@ float SparsityLoss(std::span<const float> signal)
     return l2_norm / l1_norm;
 }
 
-float EDCLoss(std::span<const float> signal, const std::array<std::vector<float>, 10>& target_relief, bool normalize)
+float EDCLoss(std::span<const float> signal,
+              const std::array<std::vector<float>, audio_utils::analysis::kNumOctaveBands>& target_relief)
 {
-    std::array<std::vector<float>, 10> edc_result = fdn_analysis::EnergyDecayRelief(signal, true, normalize);
+    std::array<std::vector<float>, audio_utils::analysis::kNumOctaveBands> edc_result =
+        audio_utils::analysis::EnergyDecayCurve_FilterBank(signal, false);
 
     float loss = 0.0f;
 
@@ -165,10 +172,11 @@ float EDCLoss(std::span<const float> signal, const std::array<std::vector<float>
     return std::sqrt(loss);
 }
 
-float EDRLoss(std::span<const float> signal, const fdn_analysis::EnergyDecayReliefResult& target_edr,
-              const fdn_analysis::EnergyDecayReliefOptions& options)
+float EDRLoss(std::span<const float> signal, const audio_utils::analysis::EnergyDecayReliefResult& target_edr,
+              const audio_utils::analysis::EnergyDecayReliefOptions& options)
 {
-    fdn_analysis::EnergyDecayReliefResult edr_result = fdn_analysis::EnergyDecayReliefSTFT(signal, options);
+    audio_utils::analysis::EnergyDecayReliefResult edr_result =
+        audio_utils::analysis::EnergyDecayRelief(signal, options);
 
     if (edr_result.num_bins != target_edr.num_bins || edr_result.num_frames != target_edr.num_frames)
     {

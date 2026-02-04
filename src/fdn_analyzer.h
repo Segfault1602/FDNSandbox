@@ -12,7 +12,6 @@
 #include <audio_utils/audio_analysis.h>
 #include <sffdn/sffdn.h>
 
-#include "analysis.h"
 #include "ir_analyzer.h"
 
 namespace fdn_analysis
@@ -50,7 +49,7 @@ class FDNAnalyzer
     bool IsClipping();
     std::span<const float> GetTimeData();
 
-    SpectrogramData GetSpectrogram(audio_utils::analysis::SpectrogramInfo spec_info, bool mel_scale = false);
+    SpectrogramData GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale = false);
 
     SpectrumData GetSpectrum(float early_rir_time);
 

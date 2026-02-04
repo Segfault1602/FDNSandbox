@@ -1,8 +1,7 @@
 #pragma once
 
+#include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft.h>
-
-#include <analysis.h>
 
 #include <array>
 #include <cstdint>
@@ -32,9 +31,10 @@ float MixingTimeLoss(std::span<const float> signal, uint32_t sample_rate, float 
 
 float SparsityLoss(std::span<const float> signal);
 
-float EDCLoss(std::span<const float> signal, const std::array<std::vector<float>, 10>& target_relief, bool normalize);
+float EDCLoss(std::span<const float> signal,
+              const std::array<std::vector<float>, audio_utils::analysis::kNumOctaveBands>& target_relief);
 
-float EDRLoss(std::span<const float> signal, const fdn_analysis::EnergyDecayReliefResult& target_edr,
-              const fdn_analysis::EnergyDecayReliefOptions& options);
+float EDRLoss(std::span<const float> signal, const audio_utils::analysis::EnergyDecayReliefResult& target_edr,
+              const audio_utils::analysis::EnergyDecayReliefOptions& options);
 
 } // namespace fdn_optimization

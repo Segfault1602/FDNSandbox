@@ -11,7 +11,7 @@
 #include <audio_utils/audio_manager.h>
 #include <audio_utils/ring_buffer.h>
 
-#include "analysis/fdn_analyzer.h"
+#include "fdn_analyzer.h"
 #include "optimization_gui.h"
 
 #include <sffdn/sffdn.h>
@@ -99,7 +99,7 @@ class FDNToolboxApp
     ImGui::FileBrowser save_config_browser;
     ImGui::FileBrowser load_rir_browser;
 
-    audio_utils::analysis::SpectrogramInfo spectrogram_info_;
+    audio_utils::analysis::STFTOptions stft_options_;
     enum class SpectrogramType : uint8_t
     {
         STFT,

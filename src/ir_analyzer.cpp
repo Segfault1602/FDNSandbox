@@ -1,6 +1,5 @@
 #include "ir_analyzer.h"
 
-#include "analysis.h"
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft.h>
 
@@ -85,20 +84,20 @@ bool IRAnalyzer::IsClipping()
     return is_clipping_;
 }
 
-SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::SpectrogramInfo spec_info, bool mel_scale)
+SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale)
 {
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrogram)) && GetImpulseResponse().size() > 0)
     {
         Stopwatch stopwatch;
         constexpr size_t kNMels = 128;
-        audio_utils::analysis::SpectrogramResult result;
+        audio_utils::analysis::STFTResult result;
         if (mel_scale)
         {
-            result = audio_utils::analysis::MelSpectrogram(GetImpulseResponse(), spec_info, kNMels, true);
+            result = audio_utils::analysis::MelSpectrogram(GetImpulseResponse(), stft_options, kNMels, true);
         }
         else
         {
-            result = audio_utils::analysis::STFT(GetImpulseResponse(), spec_info, true);
+            result = audio_utils::analysis::STFT(GetImpulseResponse(), stft_options, true);
         }
         spectrogram_data_ = std::move(result.data);
 
@@ -142,7 +141,11 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         audio_utils::FFT fft(nfft);
 
         spectrum_data_.resize((nfft / 2) + 1, 0.f);
-        fft.ForwardMag(early_rir, spectrum_data_, true, true);
+        constexpr audio_utils::ForwardFFTOptions options{
+            .output_type = audio_utils::FFTOutputType::Power,
+            .to_db = true,
+        };
+        fft.ForwardMag(early_rir, spectrum_data_, options);
 
         // Generate frequency bins
         const uint32_t kNumFrequencyBins = spectrum_data_.size();
@@ -173,7 +176,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         // Compute Spectral Flatness for fun
         std::vector<float> temp_spectrum;
         temp_spectrum.resize(spectrum_data_.size());
-        fft.ForwardMag(early_rir, temp_spectrum, false, false);
+        fft.ForwardMag(early_rir, temp_spectrum, {.output_type = audio_utils::FFTOutputType::Power, .to_db = false});
         float flatness = audio_utils::analysis::SpectralFlatness(temp_spectrum);
         LOG_INFO(logger_, "Spectral Flatness: {:.4f}", flatness);
     }
@@ -235,7 +238,7 @@ AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
         audio_utils::FFT fft(nfft);
 
         std::vector<float> spectrum_data((nfft / 2) + 1, 0.f);
-        fft.ForwardMag(early_rir, spectrum_data, true, true);
+        fft.ForwardMag(early_rir, spectrum_data, {.output_type = audio_utils::FFTOutputType::Power, .to_db = true});
 
         spectral_autocorrelation_data_ = audio_utils::analysis::Autocorrelation(spectrum_data);
 
@@ -254,9 +257,9 @@ EnergyDecayCurveData IRAnalyzer::GetEnergyDecayCurveData()
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EnergyDecayCurve)))
     {
         Stopwatch stopwatch;
-        energy_decay_curve_ = fdn_analysis::EnergyDecayCurve(GetImpulseResponse(), true);
-        edc_octaves_ = fdn_analysis::EnergyDecayRelief(GetImpulseResponse(), true);
-        auto octave_band_frequencies = fdn_analysis::GetOctaveBandFrequencies();
+        energy_decay_curve_ = audio_utils::analysis::EnergyDecayCurve(GetImpulseResponse(), true);
+        edc_octaves_ = audio_utils::analysis::EnergyDecayCurve_FilterBank(GetImpulseResponse(), true, samplerate_);
+        auto octave_band_frequencies = audio_utils::analysis::GetOctaveBandFrequencies();
         octave_band_frequencies_.resize(octave_band_frequencies.size());
         for (size_t i = 0; i < octave_band_frequencies.size(); ++i)
         {
@@ -267,7 +270,7 @@ EnergyDecayCurveData IRAnalyzer::GetEnergyDecayCurveData()
         LOG_INFO(logger_, "Analyzing energy decay curve took {} ms", stopwatch.ElapsedMs());
     }
 
-    std::array<std::span<const float>, 10> edc_octaves;
+    std::array<std::span<const float>, audio_utils::analysis::kNumOctaveBands> edc_octaves;
     for (size_t i = 0; i < edc_octaves.size(); ++i)
     {
         edc_octaves[i] = edc_octaves_[i];
@@ -285,7 +288,7 @@ EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
     {
         Stopwatch stopwatch;
 
-        auto edr_data = EnergyDecayReliefSTFT(GetImpulseResponse());
+        auto edr_data = audio_utils::analysis::EnergyDecayRelief(GetImpulseResponse());
         edr_data_ = std::move(edr_data.data);
         edr_bin_count_ = edr_data.num_bins;
         edr_frame_count_ = edr_data.num_frames;
@@ -313,13 +316,18 @@ T60Data IRAnalyzer::GetT60Data(float decay_db_start, float decay_db_end)
         auto edc_data = GetEnergyDecayCurveData();
         auto time_data = GetTimeData();
 
-        overall_t60_ = fdn_analysis::EstimateT60(edc_data.energy_decay_curve, time_data, decay_db_start, decay_db_end);
+        audio_utils::analysis::EstimateT60Options options;
+        options.decay_start_db = decay_db_start;
+        options.decay_end_db = decay_db_end;
+        options.use_linear_regression = false;
+
+        overall_t60_ = audio_utils::analysis::EstimateT60(edc_data.energy_decay_curve, time_data, options);
 
         t60_octaves_.clear();
         t60_octaves_.reserve(edc_data.edc_octaves.size());
         for (const auto& octave : edc_data.edc_octaves)
         {
-            auto t60_result = fdn_analysis::EstimateT60(octave, time_data, decay_db_start, decay_db_end);
+            auto t60_result = audio_utils::analysis::EstimateT60(octave, time_data, options);
             t60_octaves_.push_back(t60_result.t60);
         }
 
@@ -340,9 +348,12 @@ EchoDensityData IRAnalyzer::GetEchoDensityData(uint32_t window_size_ms, uint32_t
         echo_density_window_size_ms_ = window_size_ms;
         echo_density_hop_size_ms_ = hop_size_ms;
 
-        uint32_t window_size = (window_size_ms * samplerate_) / 1000;
-        uint32_t hop_size = (hop_size_ms * samplerate_) / 1000;
-        auto echo_density_result = fdn_analysis::EchoDensity(GetImpulseResponse(), window_size, samplerate_, hop_size);
+        audio_utils::analysis::EchoDensityOptions options;
+        options.window_size = (window_size_ms * samplerate_) / 1000;
+        options.hop_size = (hop_size_ms * samplerate_) / 1000;
+        options.sample_rate = samplerate_;
+
+        auto echo_density_result = audio_utils::analysis::EchoDensity(GetImpulseResponse(), options);
 
         echo_density_ = std::move(echo_density_result.echo_densities);
         echo_density_indices_.assign(echo_density_result.sparse_indices.begin(),

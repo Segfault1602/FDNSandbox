@@ -1,22 +1,123 @@
+# Dependency that should already be installed on the system:
+find_package(BLAS REQUIRED)
+find_package(LAPACK REQUIRED)
+find_package(OpenMP)
 find_package(OpenGL REQUIRED)
-find_package(glfw3 REQUIRED)
-find_package(Boost REQUIRED COMPONENTS math dll)
-find_package(
-    Eigen3
-    3.4
-    REQUIRED
-    NO_MODULE
-)
-find_package(SndFile REQUIRED)
-find_package(nlohmann_json 3.12.0 REQUIRED)
-find_package(quill CONFIG REQUIRED)
 
 include(FetchContent)
 
-FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG docking)
-FetchContent_Declare(implot GIT_REPOSITORY https://github.com/epezent/implot.git GIT_TAG master)
-FetchContent_Declare(implot3d GIT_REPOSITORY https://github.com/brenocq/implot3d.git GIT_TAG main)
-FetchContent_MakeAvailable(imgui implot implot3d)
+# Below is the list of third-party dependencies fetched via CPM.cmake
+
+FetchContent_Declare(CPM GIT_REPOSITORY https://github.com/cpm-cmake/CPM.cmake GIT_TAG v0.42.1)
+FetchContent_MakeAvailable(CPM)
+include(${cpm_SOURCE_DIR}/cmake/CPM.cmake)
+
+cpmaddpackage(
+    NAME
+    Boost
+    URL
+    https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.xz
+    OPTIONS
+    "BOOST_ENABLE_CMAKE ON"
+    "BOOST_SKIP_INSTALL_RULES ON"
+    "BUILD_SHARED_LIBS OFF"
+    "BOOST_INCLUDE_LIBRARIES dll\\\;math"
+)
+
+cpmaddpackage(
+    NAME
+    GLFW
+    GITHUB_REPOSITORY
+    glfw/glfw
+    GIT_TAG
+    3.4
+    OPTIONS
+    "GLFW_BUILD_TESTS OFF"
+    "GLFW_BUILD_EXAMPLES OFF"
+    "GLFW_BUILD_DOCS OFF"
+)
+
+# find_package(Boost REQUIRED COMPONENTS math dll)
+cpmaddpackage(
+    NAME
+    Eigen
+    GIT_TAG
+    5.0.1
+    GIT_REPOSITORY
+    https://gitlab.com/libeigen/eigen
+)
+
+if(Eigen_ADDED)
+    get_target_property(_eigen_inc eigen INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(eigen SYSTEM INTERFACE ${_eigen_inc})
+endif()
+
+cpmaddpackage(
+    NAME
+    libsndfile
+    GIT_TAG
+    master
+    GIT_REPOSITORY
+    "https://github.com/libsndfile/libsndfile"
+    OPTIONS
+    "BUILD_PROGRAMS OFF"
+    "BUILD_EXAMPLES OFF"
+    "BUILD_REGTEST OFF"
+    "ENABLE_EXTERNAL_LIBS OFF"
+    "BUILD_TESTING OFF"
+    "ENABLE_MPEG OFF"
+    "ENABLE_CPACK OFF"
+    "ENABLE_PACKAGE_CONFIG OFF"
+    "INSTALL_PKGCONFIG_MODULE OFF"
+)
+
+cpmaddpackage("gh:nlohmann/json@3.12.0")
+
+cpmaddpackage("gh:odygrd/quill@11.0.2")
+
+cpmaddpackage(
+    NAME
+    imgui
+    GIT_TAG
+    docking
+    GITHUB_REPOSITORY
+    ocornut/imgui
+    DOWNLOAD_ONLY
+    TRUE
+)
+
+cpmaddpackage(
+    NAME
+    implot
+    GIT_TAG
+    master
+    GITHUB_REPOSITORY
+    epezent/implot
+    DOWNLOAD_ONLY
+    TRUE
+)
+
+cpmaddpackage(
+    NAME
+    implot3d
+    GIT_TAG
+    main
+    GITHUB_REPOSITORY
+    brenocq/implot3d
+    DOWNLOAD_ONLY
+    TRUE
+)
+
+cpmaddpackage(
+    NAME
+    imgui-filebrowser
+    GIT_TAG
+    master
+    GITHUB_REPOSITORY
+    AirGuanZ/imgui-filebrowser
+    DOWNLOAD_ONLY
+    TRUE
+)
 
 set(IMGUI_INCLUDE_DIR ${imgui_SOURCE_DIR}/ ${imgui_SOURCE_DIR}/backends/)
 file(GLOB IMGUI_SOURCES ${imgui_SOURCE_DIR}/*.cpp)
@@ -32,7 +133,13 @@ target_sources(
             ${implot3d_SOURCE_DIR}/implot3d_items.cpp
             ${implot3d_SOURCE_DIR}/implot3d_meshes.cpp
 )
-target_include_directories(imgui PUBLIC ${IMGUI_INCLUDE_DIR} ${implot3d_SOURCE_DIR} ${implot_SOURCE_DIR})
+target_include_directories(
+    imgui
+    PUBLIC ${IMGUI_INCLUDE_DIR}
+           ${implot3d_SOURCE_DIR}
+           ${implot_SOURCE_DIR}
+           ${imgui-filebrowser_SOURCE_DIR}
+)
 target_compile_definitions(imgui PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 
 if(APPLE)
@@ -65,21 +172,74 @@ else()
     target_link_libraries(imgui ${OPENGL_LIBRARIES} glfw)
 endif()
 
-# set(IMPLOT_INCLUDE_DIR ${implot_SOURCE_DIR}) set(IMPLOT_SOURCES ${implot_SOURCE_DIR}/implot.cpp
-# ${implot_SOURCE_DIR}/implot_items.cpp)
+cpmaddpackage(
+    NAME
+    armadillo
+    GIT_TAG
+    15.2.2
+    GIT_REPOSITORY
+    https://gitlab.com/conradsnicta/armadillo-code.git
+    DOWNLOAD_ONLY
+    TRUE
+)
 
-# target_source( imgui PRIVATE ${implot_SOURCE_DIR}/implot.cpp ${implot_SOURCE_DIR}/implot_items.cpp )
+if(armadillo_ADDED)
+    set(ARMADILLO_INCLUDE_DIR ${armadillo_SOURCE_DIR}/include CACHE PATH "Armadillo include directory")
+    add_library(armadillo INTERFACE)
+    target_include_directories(armadillo INTERFACE ${armadillo_SOURCE_DIR}/include)
+    target_link_libraries(armadillo INTERFACE BLAS::BLAS LAPACK::LAPACK)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(armadillo INTERFACE OpenMP::OpenMP_CXX)
+        target_compile_definitions(armadillo INTERFACE ARMA_USE_OPENMP)
+    endif()
+else()
+    message(FATAL_ERROR "Armadillo package not added correctly")
+endif()
+add_library(Armadillo::Armadillo ALIAS armadillo)
 
-# add_library(implot STATIC ${IMPLOT_SOURCES}) target_include_directories(implot PUBLIC ${IMPLOT_INCLUDE_DIR}
-# ${IMGUI_INCLUDE_DIR}) target_compile_definitions(implot PUBLIC
-# -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
+# if(armadillo_ADDED) set(HEADER_ONLY ON CACHE BOOL "Use Armadillo as header-only library" FORCE) add_library(armadillo
+# INTERFACE IMPORTED) add_library(Armadillo::Armadillo ALIAS armadillo) target_include_directories(armadillo INTERFACE
+# ${armadillo_SOURCE_DIR}/include) set(ARMADILLO_INCLUDE_DIR ${armadillo_SOURCE_DIR}/include CACHE PATH "Armadillo
+# include directory") endif()
 
-# set(IMPLOT3D_INCLUDE_DIR ${implot3d_SOURCE_DIR}) file(GLOB IMPLOT3D_SOURCES ${implot3d_SOURCE_DIR}/*.cpp)
-# add_library(implot3d STATIC ${IMPLOT3D_SOURCES}) target_include_directories(implot3d PUBLIC ${IMPLOT3D_INCLUDE_DIR}
-# ${IMGUI_INCLUDE_DIR}) target_compile_definitions(implot3d PUBLIC
-# -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
+# if(armadillo_ADDED) add_library(armadillo INTERFACE IMPORTED) target_include_directories(armadillo INTERFACE
+# ${armadillo_SOURCE_DIR}/include) if(MKL_FOUND) target_compile_definitions(armadillo INTERFACE ARMA_USE_MKL)
+# target_link_libraries(armadillo INTERFACE MKL::MKL) endif() endif() add_library(Armadillo::Armadillo alias armadillo)
 
-FetchContent_Declare(imgui-filebrowser GIT_REPOSITORY https://github.com/AirGuanZ/imgui-filebrowser.git GIT_TAG master)
+cpmaddpackage(
+    NAME
+    ensmallen
+    GIT_REPOSITORY
+    https://github.com/mlpack/ensmallen.git
+    GIT_TAG
+    master
+    DOWNLOAD_ONLY
+    TRUE
+)
 
-FetchContent_MakeAvailable(imgui-filebrowser)
-set(IMGUI_FILEBROWSER_INCLUDE_DIR ${imgui-filebrowser_SOURCE_DIR})
+if(ensmallen_ADDED)
+    add_library(ensmallen INTERFACE IMPORTED)
+    target_include_directories(ensmallen INTERFACE ${ensmallen_SOURCE_DIR}/include)
+    set(ENSMALLEN_INCLUDE_DIR ${ensmallen_SOURCE_DIR}/include CACHE PATH "Ensmallen include directory")
+else()
+    message(FATAL_ERROR "Ensmallen package not added correctly")
+endif()
+
+cpmaddpackage(
+    URI
+    "gh:Segfault1602/audio_utils#main"
+    OPTIONS
+    "AUDIO_UTILS_USE_RTAUDIO ON"
+    "AUDIO_UTILS_USE_SNDFILE ON"
+    "AUDIO_UTILS_ENABLE_HARDENING ON"
+    "AUDIO_UTILS_USE_SANITIZER OFF"
+)
+
+cpmaddpackage(
+    NAME
+    sfFDN
+    GIT_REPOSITORY
+    https://github.com/Segfault1602/sfFDN.git
+    GIT_TAG
+    main
+)

@@ -9,11 +9,12 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 26.0)
 endif()
 
+option(FDN_SANDBOX_ENABLE_HARDENING "Enable hardening" ON)
+option(FDN_SANDBOX_USE_SANITIZER "Use AddressSanitizer" OFF)
+
+include(cmake/project-warnings.cmake)
+include(cmake/project-options.cmake)
+
 include(./fetch_deps.cmake)
-
-add_subdirectory(externals/audio_utils)
-
-set(SFFDN_BUILD_TESTS OFF)
-add_subdirectory(externals/sffdn)
 
 add_subdirectory(src)

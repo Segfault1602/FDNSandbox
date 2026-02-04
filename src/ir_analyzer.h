@@ -6,8 +6,6 @@
 #include <audio_utils/audio_analysis.h>
 #include <sffdn/sffdn.h>
 
-#include "analysis.h"
-
 #include <bitset>
 #include <cstdint>
 #include <mdspan>
@@ -47,7 +45,7 @@ struct AutocorrelationData
 struct EnergyDecayCurveData
 {
     std::span<const float> energy_decay_curve;
-    std::array<std::span<const float>, 10> edc_octaves;
+    std::array<std::span<const float>, 9> edc_octaves;
 };
 
 struct EnergyDecayReliefData
@@ -57,7 +55,7 @@ struct EnergyDecayReliefData
 
 struct T60Data
 {
-    fdn_analysis::EstimateT60Results overall_t60;
+    audio_utils::analysis::EstimateT60Results overall_t60;
     std::span<const float> t60_octaves;
     std::span<const float> octave_band_frequencies;
 };
@@ -96,7 +94,7 @@ class IRAnalyzer
     bool IsClipping();
     std::span<const float> GetTimeData();
 
-    SpectrogramData GetSpectrogram(audio_utils::analysis::SpectrogramInfo spec_info, bool mel_scale = false);
+    SpectrogramData GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale = false);
 
     SpectrumData GetSpectrum(float early_rir_time);
 
@@ -143,14 +141,14 @@ class IRAnalyzer
     float autocorrelation_early_rir_time_;
 
     std::vector<float> energy_decay_curve_;
-    std::array<std::vector<float>, 10> edc_octaves_;
+    std::array<std::vector<float>, 9> edc_octaves_;
     std::vector<float> octave_band_frequencies_;
 
     std::vector<float> edr_data_;
     uint32_t edr_bin_count_;
     uint32_t edr_frame_count_;
 
-    fdn_analysis::EstimateT60Results overall_t60_;
+    audio_utils::analysis::EstimateT60Results overall_t60_;
     std::vector<float> t60_octaves_;
 
     std::vector<float> echo_density_;

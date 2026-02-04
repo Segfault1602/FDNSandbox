@@ -1,7 +1,6 @@
 #include "fdn_analyzer.h"
 #include "sffdn/audio_buffer.h"
 
-#include "analysis.h"
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft.h>
 
@@ -135,9 +134,9 @@ bool FDNAnalyzer::IsClipping()
     return is_clipping_;
 }
 
-SpectrogramData FDNAnalyzer::GetSpectrogram(audio_utils::analysis::SpectrogramInfo spec_info, bool mel_scale)
+SpectrogramData FDNAnalyzer::GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale)
 {
-    return ir_analyzer_.GetSpectrogram(spec_info, mel_scale);
+    return ir_analyzer_.GetSpectrogram(stft_options, mel_scale);
 }
 
 SpectrumData FDNAnalyzer::GetSpectrum(float early_rir_time)

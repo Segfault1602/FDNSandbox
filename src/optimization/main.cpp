@@ -2,9 +2,8 @@
 
 #include <sffdn/sffdn.h>
 
+#include <audio_utils/audio_analysis.h>
 #include <audio_utils/audio_file_manager.h>
-
-#include "analysis.h"
 
 #include "quill/Logger.h"
 #include "quill/sinks/ConsoleSink.h"

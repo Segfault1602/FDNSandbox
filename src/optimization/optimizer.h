@@ -5,7 +5,7 @@
 #include <quill/LogMacros.h>
 #include <quill/Logger.h>
 
-#include "model.h"
+#include "optim_types.h"
 
 #include <atomic>
 #include <chrono>

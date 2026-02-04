@@ -1,12 +1,3 @@
-find_package(OpenMP)
-find_package(Armadillo CONFIG REQUIRED)
-add_library(Armadillo::Armadillo ALIAS armadillo)
-
-include(FetchContent)
-FetchContent_Declare(ensmallen GIT_REPOSITORY https://github.com/mlpack/ensmallen.git GIT_TAG master)
-set(USE_BANDICOOT OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(ensmallen)
-
 add_library(fdn_optimization STATIC)
 target_sources(
     fdn_optimization
@@ -26,22 +17,19 @@ target_sources(
 
 target_link_libraries(
     fdn_optimization
-    PUBLIC fdn_analysis
     PRIVATE audio_utils::audio_utils
             sfFDN.sfFDN
             quill::quill
             Armadillo::Armadillo
             ensmallen
+            fdn_sandbox::fdn_sandbox_options
+            fdn_sandbox::fdn_sandbox_warnings
 )
 if(OpenMP_CXX_FOUND)
     target_link_libraries(fdn_optimization PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 target_include_directories(fdn_optimization SYSTEM PRIVATE ${ensmallen_SOURCE_DIR}/include)
-
-target_compile_options(fdn_optimization PRIVATE ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
-target_link_options(fdn_optimization PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
-target_compile_definitions(fdn_optimization PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})
 
 add_executable(optim_tool main.cpp)
 target_link_libraries(
@@ -50,16 +38,14 @@ target_link_libraries(
             sfFDN.sfFDN
             quill::quill
             audio_utils::audio_utils
-            fdn_analysis
+            Armadillo::Armadillo
+            fdn_sandbox::fdn_sandbox_options
+            fdn_sandbox::fdn_sandbox_warnings
 )
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(optim_tool PRIVATE OpenMP::OpenMP_CXX)
 endif()
-
-target_compile_options(optim_tool PRIVATE ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
-target_link_options(optim_tool PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
-target_compile_definitions(optim_tool PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})
 
 add_executable(tuning tuning.cpp)
 target_link_libraries(
@@ -68,13 +54,11 @@ target_link_libraries(
             sfFDN.sfFDN
             quill::quill
             audio_utils::audio_utils
-            fdn_analysis
+            Armadillo::Armadillo
+            fdn_sandbox::fdn_sandbox_options
+            fdn_sandbox::fdn_sandbox_warnings
 )
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(tuning PRIVATE OpenMP::OpenMP_CXX)
 endif()
-
-target_compile_options(tuning PRIVATE ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
-target_link_options(tuning PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
-target_compile_definitions(tuning PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION})

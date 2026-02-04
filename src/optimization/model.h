@@ -5,29 +5,12 @@
 #include <sffdn/sffdn.h>
 
 #include "loss.h"
+#include "optim_types.h"
 
 #include <cstdint>
 
 namespace fdn_optimization
 {
-
-enum class OptimizationParamType : uint8_t
-{
-    Gains,
-    Matrix,
-    Matrix_Householder,
-    Matrix_Circulant,
-    Delays,
-    AttenuationFilters,
-    TonecorrectionFilters,
-    OverallGain,
-};
-
-enum class GradientMethod : uint8_t
-{
-    CentralDifferences,
-    ForwardDifferences,
-};
 
 class FDNModel
 {

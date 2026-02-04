@@ -1,4 +1,3 @@
-add_subdirectory(analysis)
 add_subdirectory(optimization)
 
 # ====== FDN Sandbox App logic =======
@@ -8,6 +7,8 @@ target_sources(
     PRIVATE utils.cpp
             widget.cpp
             app.cpp
+            fdn_analyzer.cpp
+            ir_analyzer.cpp
             fdn_info.cpp
             presets.cpp
             app_imconfig.h
@@ -19,22 +20,19 @@ target_link_libraries(
            quill::quill
            sfFDN.sfFDN
            imgui
-           fdn_analysis
            fdn_optimization
            SndFile::sndfile
            Boost::math
            Boost::filesystem
+           Boost::dll
            Eigen3::Eigen
            nlohmann_json::nlohmann_json
+           fdn_sandbox::fdn_sandbox_options
+           fdn_sandbox::fdn_sandbox_warnings
 )
-target_include_directories(fdn_sandbox_app PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR})
+
 target_compile_features(fdn_sandbox_app PRIVATE cxx_std_23)
-target_compile_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_CXX_COMPILE_OPTIONS})
-target_link_options(fdn_sandbox_app PUBLIC ${FDNSANDBOX_LINK_OPTIONS})
-target_compile_definitions(
-    fdn_sandbox_app PUBLIC ${FDNSANDBOX_COMPILE_DEFINITION}
-                           -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h"
-)
+target_compile_definitions(fdn_sandbox_app PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 
 # ====== Metal implementation ======
 if(APPLE)
@@ -54,7 +52,7 @@ if(APPLE)
 elseif(WIN32)
     add_executable(${PROJECT_NAME} main_win32_dx12.cpp)
     target_link_libraries(${PROJECT_NAME} PRIVATE fdn_sandbox_app imgui)
-    target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${PROJECT_NAME} PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 
 else()
@@ -69,7 +67,7 @@ else()
                 ${OPENGL_LIBRARIES}
     )
 
-    target_include_directories(${PROJECT_NAME} PUBLIC ${IMGUI_FILEBROWSER_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
     target_compile_definitions(${PROJECT_NAME} PUBLIC GL_SILENCE_DEPRECATION)
 endif()
