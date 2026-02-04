@@ -143,9 +143,9 @@ target_include_directories(
 target_compile_definitions(imgui PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 
 if(APPLE)
-    add_library(
-        imgui STATIC ${IMGUI_SOURCES} ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
-                     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    target_sources(
+        imgui PRIVATE ${IMGUI_SOURCES} ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+                      ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     )
     target_include_directories(imgui PUBLIC ${IMGUI_INCLUDE_DIR} ${GLFW_INCLUDE_DIR} ${GLAD_INCLUDE_DIR})
     target_link_libraries(imgui PUBLIC glfw)
@@ -157,9 +157,9 @@ elseif(WIN32)
     )
     target_link_libraries(imgui PUBLIC dxgi d3d12)
 else()
-    add_library(
-        imgui STATIC ${IMGUI_SOURCES} ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-                     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    target_sources(
+        imgui PRIVATE ${IMGUI_SOURCES} ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+                      ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
     )
 
     target_include_directories(
