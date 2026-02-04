@@ -15,7 +15,8 @@
             "cacheVariables": {
                 "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
                 "CPM_audio_utils_SOURCE:": "${sourceDir}/../audio_utils",
-                "CPM_sfFDN_SOURCE:": "${sourceDir}/../sfFDN"
+                "CPM_sfFDN_SOURCE:": "${sourceDir}/../sfFDN",
+                "CPM_FdnOpt_SOURCE:": "${sourceDir}/../fdn_opt"
             }
         },
         {
@@ -35,7 +36,8 @@
             "cacheVariables": {
                 "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
                 "CPM_audio_utils_SOURCE:": "${sourceDir}/../audio_utils",
-                "CPM_sfFDN_SOURCE:": "${sourceDir}/../sfFDN"
+                "CPM_sfFDN_SOURCE:": "${sourceDir}/../sfFDN",
+                "CPM_FdnOpt_SOURCE:": "${sourceDir}/../fdn_opt"
             }
         }
     ],

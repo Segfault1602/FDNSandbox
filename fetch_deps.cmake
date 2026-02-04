@@ -173,59 +173,6 @@ else()
 endif()
 
 cpmaddpackage(
-    NAME
-    armadillo
-    GIT_TAG
-    15.2.2
-    GIT_REPOSITORY
-    https://gitlab.com/conradsnicta/armadillo-code.git
-    DOWNLOAD_ONLY
-    TRUE
-)
-
-if(armadillo_ADDED)
-    set(ARMADILLO_INCLUDE_DIR ${armadillo_SOURCE_DIR}/include CACHE PATH "Armadillo include directory")
-    add_library(armadillo INTERFACE)
-    target_include_directories(armadillo INTERFACE ${armadillo_SOURCE_DIR}/include)
-    target_link_libraries(armadillo INTERFACE BLAS::BLAS LAPACK::LAPACK)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(armadillo INTERFACE OpenMP::OpenMP_CXX)
-        target_compile_definitions(armadillo INTERFACE ARMA_USE_OPENMP)
-    endif()
-else()
-    message(FATAL_ERROR "Armadillo package not added correctly")
-endif()
-add_library(Armadillo::Armadillo ALIAS armadillo)
-
-# if(armadillo_ADDED) set(HEADER_ONLY ON CACHE BOOL "Use Armadillo as header-only library" FORCE) add_library(armadillo
-# INTERFACE IMPORTED) add_library(Armadillo::Armadillo ALIAS armadillo) target_include_directories(armadillo INTERFACE
-# ${armadillo_SOURCE_DIR}/include) set(ARMADILLO_INCLUDE_DIR ${armadillo_SOURCE_DIR}/include CACHE PATH "Armadillo
-# include directory") endif()
-
-# if(armadillo_ADDED) add_library(armadillo INTERFACE IMPORTED) target_include_directories(armadillo INTERFACE
-# ${armadillo_SOURCE_DIR}/include) if(MKL_FOUND) target_compile_definitions(armadillo INTERFACE ARMA_USE_MKL)
-# target_link_libraries(armadillo INTERFACE MKL::MKL) endif() endif() add_library(Armadillo::Armadillo alias armadillo)
-
-cpmaddpackage(
-    NAME
-    ensmallen
-    GIT_REPOSITORY
-    https://github.com/mlpack/ensmallen.git
-    GIT_TAG
-    master
-    DOWNLOAD_ONLY
-    TRUE
-)
-
-if(ensmallen_ADDED)
-    add_library(ensmallen INTERFACE IMPORTED)
-    target_include_directories(ensmallen INTERFACE ${ensmallen_SOURCE_DIR}/include)
-    set(ENSMALLEN_INCLUDE_DIR ${ensmallen_SOURCE_DIR}/include CACHE PATH "Ensmallen include directory")
-else()
-    message(FATAL_ERROR "Ensmallen package not added correctly")
-endif()
-
-cpmaddpackage(
     URI
     "gh:Segfault1602/audio_utils#main"
     OPTIONS
@@ -242,4 +189,11 @@ cpmaddpackage(
     https://github.com/Segfault1602/sfFDN.git
     GIT_TAG
     main
+)
+
+cpmaddpackage(
+    NAME
+    FdnOpt
+    URI
+    "gh:Segfault1602/fdn_opt#main"
 )

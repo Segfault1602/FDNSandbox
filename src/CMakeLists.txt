@@ -1,5 +1,3 @@
-add_subdirectory(optimization)
-
 # ====== FDN Sandbox App logic =======
 add_library(fdn_sandbox_app STATIC)
 target_sources(
