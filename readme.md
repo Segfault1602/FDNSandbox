@@ -4,7 +4,7 @@ This project is a sandbox for experimenting with Feedback Delay Networks (FDNs) 
 
 ## Build
 
-The library is built using CMake and uses [vcpkg](https://vcpkg.io/en/) to manage dependencies. CMake presets are provided for building with Ninja+LLVM and MSVC+Visual Studio.
+The library is built using CMake and uses [cpm](https://github.com/cpm-cmake/CPM.cmake) to manage dependencies. CMake presets are provided for building with Ninja+LLVM and MSVC+Visual Studio.
 
 ```bash
 # configure with Ninja and LLVM
@@ -22,20 +22,7 @@ cmake --build --preset windows --config Debug
 ```
 
 ## Dependencies
-
-### Submodules
-
-Make sure to initialize and update the git submodules:
-
-```bash
-git submodule update --init --recursive
-```
-
-- [audio_utils](https://github.com/Segfault1602/audio_utils) - Audio I/O and DSP utilities
-- [sfFDN](https://github.com/Segfault1602/sfFDN) - Feedback Delay Network library
-
-### vcpkg Packages
-The following vcpkg packages are required:
+The following dependencies are required. CPM should take care of all of that for you.
 - boost-dll
 - boost-math
 - Eigen3
@@ -48,9 +35,16 @@ The following vcpkg packages are required:
 - quill
 - RTAudio
 - glfw3
-
-### CMake FetchContent
-The following dependencies are managed using CMake's FetchContent:
 - ImGui
 - ImPlot
+- ImPlot3D
 - imgui-filebrowser
+- ensmallen
+- Armadillo
+
+These 3 dependencies are also required:
+- https://github.com/Segfault1602/fdn_opt
+- https://github.com/Segfault1602/sfFDN
+- https://github.com/Segfault1602/audio_utils
+
+If you use CMakePreset.json, CMake will expect these repository to be already checked in on your machine at the path defined by the `CPM_##_SOURCE` variable. You can simply delete those variables if you want CPM to download those for you instead.
