@@ -123,7 +123,7 @@ void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, 
 } // namespace
 
 FDNToolboxApp::FDNToolboxApp()
-    : pre_delay_(0, Settings::Instance().SampleRate())
+    : direct_delay_(0, Settings::Instance().SampleRate())
     , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
     , optimization_gui_(Settings::Instance().GetLogger())
     , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
@@ -241,13 +241,13 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         return;
     }
 
-    const uint32_t new_delay_samples = pre_delay_ms_.load() * Settings::Instance().SampleRate() / 1000;
-    if (pre_delay_.GetMaximumDelay() < new_delay_samples)
+    const uint32_t new_delay_samples = direct_delay_ms_.load() * Settings::Instance().SampleRate() / 1000;
+    if (direct_delay_.GetMaximumDelay() < new_delay_samples)
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Pre-delay samples {} exceed maximum delay {}", new_delay_samples,
-                  pre_delay_.GetMaximumDelay());
+                  direct_delay_.GetMaximumDelay());
     }
-    pre_delay_.SetDelay(new_delay_samples);
+    direct_delay_.SetDelay(new_delay_samples);
 
     std::array<float, kSystemBlockSize> input_data = {0.0f};
     std::array<float, kSystemBlockSize> fdn_output_data = {0.0f};
@@ -295,13 +295,14 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
 
     last_reverb_type = reverb_type;
 
-    float dry_mix = fdn_dry_level_.load();
+    float dry_mix = 0.f;
     float wet_mix = 0.5f;
     if (reverb_type == kFDN_REVERB)
     {
         // Apply pre-delay only if using FDN reverb
-        pre_delay_.Process(input_audio_buffer, input_audio_buffer);
+        direct_delay_.Process(input_audio_buffer, input_audio_buffer);
         wet_mix = fdn_wet_level_.load();
+        dry_mix = fdn_dry_level_.load();
     }
     else
     {
@@ -399,7 +400,7 @@ void FDNToolboxApp::loop()
         ImGuiID dock_main_id = dockspace_id;
 
         ImGuiID dock_id_fdn = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.25f, nullptr, &dock_main_id);
-        ImGuiID dock_id_ir = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.25f, nullptr, &dock_main_id);
+        ImGuiID dock_id_ir = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.33f, nullptr, &dock_main_id);
 
         ImGui::DockBuilderDockWindow("Impulse Response", dock_id_ir);
         ImGui::DockBuilderDockWindow("Audio Player", dock_id_ir);
@@ -1058,13 +1059,14 @@ void FDNToolboxApp::DrawAudioPlayer()
         fdn_wet_level_ = fdn_wet_level;
     }
 
-    uint32_t pre_delay_ms = pre_delay_ms_.load();
-    constexpr uint32_t kMinPreDelay = 0;
-    constexpr uint32_t kMaxPreDelay = 100;
-    if (ImGui::SliderScalar("Pre-Delay (ms)", ImGuiDataType_U32, &pre_delay_ms, &kMinPreDelay, &kMaxPreDelay))
+    uint32_t direct_delay_ms = direct_delay_ms_.load();
+    constexpr uint32_t kMinDirectDelay = 0;
+    constexpr uint32_t kMaxDirectDelay = 100;
+    if (ImGui::SliderScalar("Direct Delay (ms)", ImGuiDataType_U32, &direct_delay_ms, &kMinDirectDelay,
+                            &kMaxDirectDelay))
     {
-        pre_delay_ms = std::clamp(pre_delay_ms, kMinPreDelay, kMaxPreDelay);
-        pre_delay_ms_ = pre_delay_ms;
+        direct_delay_ms = std::clamp(direct_delay_ms, kMinDirectDelay, kMaxDirectDelay);
+        direct_delay_ms_ = direct_delay_ms;
     }
 
     ImGui::PopItemWidth();
@@ -1322,7 +1324,9 @@ void FDNToolboxApp::DrawSpectrogram()
 
     ImPlot::PushColormap(ImPlotColormap_Plasma);
 
-    if (ImPlot::BeginPlot("##Spectrogram", ImVec2(ImGui::GetCurrentWindow()->Size[0] * 0.92f, -1),
+    constexpr float kColorBarWidth = 100.0f;
+
+    if (ImPlot::BeginPlot("##Spectrogram", ImVec2(ImGui::GetCurrentWindow()->Size[0] - kColorBarWidth, -1),
                           ImPlotFlags_NoMouseText))
     {
         const double tmin = 0.0;
@@ -1351,6 +1355,7 @@ void FDNToolboxApp::DrawSpectrogram()
             bin_count = spectrogram_data.bin_count;
         }
 
+        // ImPlot::SetupAxes("Time (s)", "Frequency (Hz)", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisLimits(ImAxis_X1, tmin, tmax, ImGuiCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.f, bin_count, ImGuiCond_Always);
 
@@ -1404,18 +1409,25 @@ void FDNToolboxApp::DrawSpectrum()
 
     (void)plot_type_changed; // Suppress unused variable warning
 
-    static float frequency_range_min = 0.f;
-    static float frequency_range_max = Settings::Instance().SampleRate() / 2.f;
-    ImGui::DragFloatRange2("Frequency Range", &frequency_range_min, &frequency_range_max);
+    // static float frequency_range_min = 0.f;
+    // static float frequency_range_max = Settings::Instance().SampleRate() / 2.f;
+    // ImGui::DragFloatRange2("Frequency Range", &frequency_range_min, &frequency_range_max);
 
-    static bool lock_freq_range = false;
-    ImGui::SameLine();
-    ImGui::Checkbox("Lock Range", &lock_freq_range);
+    // static bool lock_freq_range = false;
+    // ImGui::SameLine();
+    // ImGui::Checkbox("Lock Range", &lock_freq_range);
 
     static bool show_rir = false;
-    ImGui::Checkbox("Show RIR", &show_rir);
+    if (!rir_analyzer_.GetImpulseResponse().empty())
+    {
+        ImGui::Checkbox("Show RIR", &show_rir);
+    }
+    else
+    {
+        show_rir = false;
+    }
 
-    static float kRowRatios[] = {0.15f, 0.85f};
+    static float kRowRatios[] = {0.20f, 0.80f};
     if (ImPlot::BeginSubplots("Spectrum Subplot", 2, 1, ImVec2(-1, -1), ImPlotFlags_NoLegend, kRowRatios))
     {
         if (ImPlot::BeginPlot("Impulse Response", ImVec2(), ImPlotFlags_NoLegend))
@@ -1444,8 +1456,8 @@ void FDNToolboxApp::DrawSpectrum()
         std::string plot_title = std::format("Spectrum ({} peaks)", spectrum_data.peaks.size());
         if (ImPlot::BeginPlot(plot_title.c_str(), ImVec2(), ImPlotFlags_NoLegend))
         {
-            ImPlotAxisFlags x_axis_flags = ImPlotAxisFlags_None;
-            ImPlotAxisFlags y_axis_flags = ImPlotAxisFlags_None;
+            ImPlotAxisFlags x_axis_flags = ImPlotAxisFlags_AutoFit;
+            ImPlotAxisFlags y_axis_flags = ImPlotAxisFlags_AutoFit;
 
             // if (plot_type_changed && !lock_freq_range)
             // {
@@ -1459,8 +1471,8 @@ void FDNToolboxApp::DrawSpectrum()
                 // ImPlot::SetupAxesLimits(frequency_range_min, frequency_range_max, -60.0, 0.0,
                 //                         (lock_freq_range) ? ImPlotCond_Always : ImPlotCond_Once);
 
-                ImPlot::SetupAxisLimits(ImAxis_Y1, -60.0f, 10.f, ImPlotCond_Always);
-                ImPlot::SetupAxisLimits(ImAxis_X1, 0.f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Once);
+                // ImPlot::SetupAxisLimits(ImAxis_Y1, -60.0f, 10.f, ImPlotCond_Always);
+                // ImPlot::SetupAxisLimits(ImAxis_X1, 0.f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Once);
                 ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, spectrum_data.frequency_bins.back());
             }
 
@@ -1478,11 +1490,11 @@ void FDNToolboxApp::DrawSpectrum()
 
             if (peak_radio == 3)
             {
-                ImPlot::SetupAxes("Magnitude (dB)", "Count");
-                ImPlot::SetupAxesLimits(-60.0, 0.0, 0.0, 600.0, ImPlotCond_Always);
+                ImPlot::SetupAxes("Magnitude (dB)", "Count", x_axis_flags, y_axis_flags);
+                ImPlot::SetupAxesLimits(-60.0, 20.0, 0.0, 1000.0, ImPlotCond_Always);
 
                 ImPlot::PlotHistogram("Histogram", spectrum_data.peaks.data(), spectrum_data.peaks.size(),
-                                      ImPlotBin_Sqrt, 0.95f, ImPlotRange(-60, 0), ImPlotHistogramFlags_None);
+                                      ImPlotBin_Sqrt, 0.95f, ImPlotRange(-60, 20), ImPlotHistogramFlags_None);
             }
 
             // if (!lock_freq_range)
@@ -1522,9 +1534,17 @@ void FDNToolboxApp::DrawAutocorrelation()
     }
 
     static bool show_rir = false;
-    ImGui::Checkbox("Show RIR", &show_rir);
 
-    static float kRowRatios[] = {0.15f, 0.85f};
+    if (!rir_analyzer_.GetImpulseResponse().empty())
+    {
+        ImGui::Checkbox("Show RIR", &show_rir);
+    }
+    else
+    {
+        show_rir = false;
+    }
+
+    static float kRowRatios[] = {0.2f, 0.8f};
     if (ImPlot::BeginSubplots("Autocorrelation Subplot", 2, 1, ImVec2(-1, -1), ImPlotFlags_NoLegend, kRowRatios))
     {
         if (ImPlot::BeginPlot("Impulse Response", ImVec2(), ImPlotFlags_NoLegend))
@@ -1712,15 +1732,19 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
         return;
     }
 
-    static bool show_octaves_bands = false;
-    ImGui::Checkbox("Show Octave Bands", &show_octaves_bands);
-
     ImGui::DragFloatRange2("T60 decay range", &decay_db_start, &decay_db_end, 1.0, 0, 60);
     decay_db_start = std::clamp(decay_db_start, 0.0f, decay_db_end - 1.0f);
     decay_db_end = std::clamp(decay_db_end, decay_db_start + 1.0f, 60.0f);
 
     static bool show_rir = false;
-    ImGui::Checkbox("Show RIR", &show_rir);
+    if (!rir_analyzer_.GetImpulseResponse().empty())
+    {
+        ImGui::Checkbox("Show RIR", &show_rir);
+    }
+    else
+    {
+        show_rir = false;
+    }
 
     auto edc_data = fdn_analyzer_.GetEnergyDecayCurveData();
 
@@ -1732,9 +1756,9 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
 
     auto t60_data = fdn_analyzer_.GetT60Data(-decay_db_start, -decay_db_end);
 
-    constexpr std::array<const char*, 10> octave_band_names = {"32 Hz", "63 Hz", "125 Hz", "250 Hz", "500 Hz",
-                                                               "1 kHz", "2 kHz", "4 kHz",  "8 kHz",  "16 kHz"};
-    static std::array<bool, 10> octave_band_visibility{};
+    constexpr std::array<const char*, 9> octave_band_names = {"63 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz",
+                                                              "2 kHz", "4 kHz",  "8 kHz",  "16 kHz"};
+    static std::array<bool, 9> octave_band_visibility{};
     for (auto i = 0; i < octave_band_visibility.size(); ++i)
     {
         ImGui::Checkbox(octave_band_names[i], &octave_band_visibility[i]);
@@ -1743,6 +1767,7 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
             ImGui::SameLine();
         }
     }
+    bool show_octaves_bands = std::ranges::any_of(octave_band_visibility, [](bool visible) { return visible; });
 
     std::string edc_title = std::format("Energy Decay Curve (T60: {:.2f} s)", t60_data.overall_t60.t60);
     if (ImPlot::BeginPlot(edc_title.c_str(), ImVec2(-1, -1), ImPlotFlags_None))
@@ -1850,6 +1875,10 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
         for (size_t j = 0; j < x_size; ++j)
         {
             z_mdspan[i, j] = edr.energy_decay_relief[i, j];
+            if (z_mdspan[i, j] < -80.0f)
+            {
+                z_mdspan[i, j] = -80.0f; // Clamp to -80 dB for better visualization
+            }
         }
     }
 
@@ -1857,7 +1886,7 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
     {
         ImPlot3D::PushColormap(ImPlotColormap_Viridis);
         ImPlot3D::PushStyleVar(ImPlot3DStyleVar_FillAlpha, 0.8f);
-        ImPlot3D::SetupBoxScale(2.0, 1.0, 1.0);
+        ImPlot3D::SetupBoxScale(2.0, 1.0, 0.8);
         ImPlot3D::SetNextLineStyle(ImPlot3D::GetColormapColor(1));
 
         ImPlot3D::SetupAxes("Time (s)", "Octave Band", "Level (dB)", ImPlot3DAxisFlags_AutoFit,
@@ -1883,7 +1912,7 @@ void FDNToolboxApp::DrawCepstrum()
     }
     static double early_rir_duration = 0.5; // 500 ms
 
-    static float kRowRatios[] = {0.15f, 0.85f};
+    static float kRowRatios[] = {0.2f, 0.8f};
     if (ImPlot::BeginSubplots("Cepstrum Subplot", 2, 1, ImVec2(-1, -1), ImPlotFlags_NoLegend, kRowRatios))
     {
         if (ImPlot::BeginPlot("Impulse Response Cepstrum#", ImVec2(), ImPlotFlags_NoLegend))

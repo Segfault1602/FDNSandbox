@@ -142,7 +142,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
 
         spectrum_data_.resize((nfft / 2) + 1, 0.f);
         constexpr audio_utils::ForwardFFTOptions options{
-            .output_type = audio_utils::FFTOutputType::Power,
+            .output_type = audio_utils::FFTOutputType::Magnitude,
             .to_db = true,
         };
         fft.ForwardMag(early_rir, spectrum_data_, options);

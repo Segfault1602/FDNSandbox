@@ -60,6 +60,125 @@ std::vector<float> GetMatrixFromClipboard(uint32_t N)
     return feedback_matrix;
 }
 
+bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool& show_3band_designer)
+{
+    if (!ImGui::Begin("3-Band Designer", &show_3band_designer))
+    {
+        ImGui::End();
+        return false;
+    }
+
+    bool config_changed = false;
+    constexpr uint32_t kTestDelay = 1000.f; // arbitrary, needed to design the filter for the GUI
+
+    assert(t60s.size() == 3);
+    assert(frequencies.size() == 2);
+    static std::array<double, 2> frequencies_draggable = {300.0, 8000.0};
+    static std::array<double, 3> t60s_draggable = {1.5, 1.0, 0.5};
+
+    // Oversampled vectors for plotting
+    static std::vector<float> gains_plot;
+    static std::vector<float> t60s_plot;
+    static std::vector<float> filter_freqs_plot;
+    static std::vector<float> H;
+    bool point_changed = false;
+
+    if (filter_freqs_plot.size() == 0) // Only runs on first call
+    {
+        filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 512);
+        point_changed = true; // Force initial plot update
+    }
+
+    static std::array<float, 2> t60_range = {0.01f, 5.f};
+
+    if (ImPlot::BeginPlot("Filter Designer",
+                          ImVec2(-1, ImGui::GetWindowHeight() - 4 * ImGui::GetFrameHeightWithSpacing()),
+                          ImPlotFlags_NoLegend))
+    {
+        ImPlot::SetupAxes("Frequency (Hz)", "RT60 (s)");
+        ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, 20000.0f, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, t60_range[0], t60_range[1], ImPlotCond_Once);
+        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, Settings::Instance().SampleRate() / 2);
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0.f, 15.f);
+
+        const ImPlotDragToolFlags flags = ImPlotDragToolFlags_None;
+        // 2 vertical drag line to set the cutoff frequencies
+        point_changed |= ImPlot::DragLineX(0, &frequencies_draggable[0], ImVec4(1, 1, 1, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineX(1, &frequencies_draggable[1], ImVec4(1, 1, 1, 1), 1.0f, flags);
+
+        // Clamp frequencies to prevent them from crossing each other or going out of bounds
+        frequencies_draggable[0] = std::clamp(frequencies_draggable[0], 32.0, frequencies_draggable[1] - 100.0);
+        frequencies_draggable[1] = std::clamp(frequencies_draggable[1], frequencies_draggable[0] + 100.0, 20000.0);
+
+        // 3 points to set the T60 values of the low, mid and high bands
+        point_changed |= ImPlot::DragLineY(2, &t60s_draggable[0], ImVec4(1, 0, 0, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineY(3, &t60s_draggable[1], ImVec4(0, 1, 0, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineY(4, &t60s_draggable[2], ImVec4(0, 0, 1, 1), 1.0f, flags);
+
+        // Clamp T60 values to a reasonable range
+        for (auto& t60 : t60s_draggable)
+        {
+            t60 = std::clamp(t60, 0.01, 15.0);
+        }
+
+        if (point_changed)
+        {
+            sfFDN::ThreeBandAbsorptionParams three_band_params;
+            three_band_params.t60_dc = static_cast<float>(t60s_draggable[0]);
+            three_band_params.t60_mid = static_cast<float>(t60s_draggable[1]);
+            three_band_params.t60_ny = static_cast<float>(t60s_draggable[2]);
+            three_band_params.low_shelf_cutoff = static_cast<float>(frequencies_draggable[0]);
+            three_band_params.high_shelf_cutoff = static_cast<float>(frequencies_draggable[1]);
+            three_band_params.q = 1.f / std::numbers::sqrt2_v<float>;
+            three_band_params.sample_rate = static_cast<float>(Settings::Instance().SampleRate());
+            auto sos = sfFDN::DesignThreeBandAbsorption(three_band_params, kTestDelay);
+
+            H = utils::AbsFreqz(sos, filter_freqs_plot, Settings::Instance().SampleRate());
+            // Convert to T60 values for plotting on the primary y-axis
+            for (float& i : H)
+            {
+                i = 20.f * std::log10(i);
+                i = (-60.f / (i)) / Settings::Instance().SampleRate();
+                i *= static_cast<float>(kTestDelay);
+            }
+
+            for (size_t i = 0; i < t60s_draggable.size(); ++i)
+            {
+                t60s[i] = static_cast<float>(t60s_draggable[i]);
+            }
+            for (size_t i = 0; i < frequencies_draggable.size(); ++i)
+            {
+                frequencies[i] = static_cast<float>(frequencies_draggable[i]);
+            }
+        }
+
+        if (H.size() > 0)
+        {
+            ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), H.size());
+        }
+
+        auto plot_limits = ImPlot::GetPlotLimits(ImAxis_X1, ImAxis_Y1);
+        t60_range = {static_cast<float>(plot_limits.Y.Min), static_cast<float>(plot_limits.Y.Max)};
+
+        ImPlot::EndPlot();
+    }
+
+    if (ImGui::Button("Apply"))
+    {
+        config_changed = true;
+        show_3band_designer = false;
+    }
+
+    if (point_changed)
+    {
+        config_changed = true;
+    }
+
+    ImGui::End();
+    return config_changed;
+}
+
 bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 {
     if (!ImGui::Begin("Filter Designer", &show_delay_filter_designer))
@@ -70,7 +189,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
     bool config_changed = false;
 
-    constexpr uint32_t kTestDelay = 593.f; // arbitrary, needed to design the filter for the GUI
+    constexpr uint32_t kTestDelay = 1500.f; // arbitrary, needed to design the filter for the GUI
 
     // Number of bands in the filter designer
     assert(t60s.size() == kNBands);
@@ -108,8 +227,8 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
     }
 
     static bool show_filter_response = false;
-    const float designer_height =
-        show_filter_response ? ImGui::GetWindowHeight() * 0.45f : ImGui::GetWindowHeight() * 0.95f;
+    float designer_height = (show_filter_response ? ImGui::GetWindowHeight() * 0.65f : ImGui::GetWindowHeight()) -
+                            ImGui::GetFrameHeightWithSpacing() * 4;
 
     if (ImPlot::BeginPlot("Filter Designer", ImVec2(-1, designer_height), ImPlotFlags_NoLegend))
     {
@@ -148,9 +267,15 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         ImPlot::EndPlot();
     }
 
+    if (ImGui::Button("Apply"))
+    {
+        config_changed = true;
+        show_delay_filter_designer = false;
+    }
+
     static std::vector<float> H;
-    static float shelf_cutoff = 8000.f;
-    point_changed |= ImGui::SliderFloat("Shelf Cutoff (Hz)", &shelf_cutoff, 1000.0f, 10000.0f, "%.0f Hz");
+    constexpr float shelf_cutoff = 8000.f;
+    // point_changed |= ImGui::SliderFloat("Shelf Cutoff (Hz)", &shelf_cutoff, 1000.0f, 10000.0f, "%.0f Hz");
 
     if (point_changed)
     {
@@ -171,8 +296,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
     ImGui::Checkbox("Show Filter Response", &show_filter_response);
 
-    if (show_filter_response &&
-        ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.45f), ImPlotFlags_None))
+    if (show_filter_response && ImPlot::BeginPlot("Filter preview", ImVec2(-1, -1), ImPlotFlags_None))
     {
         ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)");
         ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);
@@ -201,12 +325,6 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
     if (point_changed)
     {
         config_changed = true;
-    }
-
-    if (ImGui::Button("Apply"))
-    {
-        config_changed = true;
-        show_delay_filter_designer = false;
     }
 
     ImGui::End();
@@ -362,7 +480,7 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 
 void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 {
-    if (ImPlot::BeginSubplots("##Input/Output_Gains", 2, 1, ImVec2(300, 200),
+    if (ImPlot::BeginSubplots("##Input/Output_Gains", 2, 1, ImVec2(-1, 200),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
         std::vector<float> input_gains(config.N, 0.0f);
@@ -400,7 +518,7 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 
 void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
 {
-    if (ImPlot::BeginPlot("Delays", ImVec2(300, 100), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
+    if (ImPlot::BeginPlot("Delays", ImVec2(-1, 100), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
         constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
         ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
@@ -414,7 +532,7 @@ void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
 
 void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config)
 {
-    constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_Plasma;
+    constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_RdBu;
 
     static std::vector<float> feedback_matrix;
     const uint32_t N = config.N;
@@ -434,7 +552,12 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config)
         config.matrix_info);
 
     ImPlot::PushColormap(feedback_matrix_colormap);
-    if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(300, 300), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
+
+    constexpr float kColorBarWidth = 75.0f;
+    float win_width = ImGui::GetContentRegionAvail().x;
+
+    if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(win_width - kColorBarWidth, 300),
+                          ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
 
         constexpr ImPlotAxisFlags axes_flags =
@@ -446,6 +569,10 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config)
 
         ImPlot::EndPlot();
     }
+
+    ImGui::SameLine();
+    ImPlot::ColormapScale("##FBColorbar", -1, 1, ImVec2(kColorBarWidth, 300));
+
     ImPlot::PopColormap();
 }
 
@@ -1252,33 +1379,39 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
 {
     bool config_changed = false;
     static float feedback_gain = 0.9999f;
-    static float t60_dc = 2.f;
-    static float t60_ny = 1.f;
     static std::vector<float> t60s(kNBands, 2.f);
+    static std::vector<float> frequencies = {300.f, 8000.f};
 
-    static bool show_delay_filter_designer = false;
+    static bool show_geq_designer = false;
+    static bool show_3band_designer = false;
     static sfFDN::DelayFilterType delay_filter_type = sfFDN::DelayFilterType::Proportional;
 
-    if (config.attenuation_t60s.size() == 1)
-    {
-        delay_filter_type = sfFDN::DelayFilterType::Proportional;
-        feedback_gain = config.attenuation_t60s[0];
-    }
-    else if (config.attenuation_t60s.size() == 2)
-    {
-        delay_filter_type = sfFDN::DelayFilterType::OnePole;
-        t60_dc = config.attenuation_t60s[0];
-        t60_ny = config.attenuation_t60s[1];
-    }
-    else if (config.attenuation_t60s.size() == kNBands)
-    {
-        delay_filter_type = sfFDN::DelayFilterType::TwoFilter;
-        t60s = config.attenuation_t60s;
-    }
+    // if (config.attenuation_t60s.size() == 1)
+    // {
+    //     delay_filter_type = sfFDN::DelayFilterType::Proportional;
+    //     feedback_gain = config.attenuation_t60s[0];
+    // }
+    // else if (config.attenuation_t60s.size() == 2)
+    // {
+    //     delay_filter_type = sfFDN::DelayFilterType::OnePole;
+    //     t60_dc = config.attenuation_t60s[0];
+    //     t60_ny = config.attenuation_t60s[1];
+    // }
+    // else if (config.attenuation_t60s.size() == 3)
+    // {
+    //     delay_filter_type = sfFDN::DelayFilterType::ThreeBand;
+    //     t60s = config.attenuation_t60s;
+    // }
+    // else if (config.attenuation_t60s.size() == kNBands)
+    // {
+    //     delay_filter_type = sfFDN::DelayFilterType::TwoFilter;
+    //     t60s = config.attenuation_t60s;
+    // }
 
     if (ImGui::TreeNode("Delay Filters"))
     {
-        constexpr std::array<const char*, 3> kFilterTypeNames = {"Proportional", "One Pole", "Octave Band Filter"};
+        constexpr std::array<const char*, 4> kFilterTypeNames = {"Proportional", "One Pole", "Three Band",
+                                                                 "Two Filter"};
         const char* combo_preview_value = kFilterTypeNames[static_cast<int>(delay_filter_type)];
         if (ImGui::BeginCombo("Filter Type", combo_preview_value))
         {
@@ -1294,67 +1427,95 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
             ImGui::EndCombo();
         }
 
-        // Proportinal feedback Gain
-        if (delay_filter_type == sfFDN::DelayFilterType::Proportional)
+        std::visit(
+            [&](auto&& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, sfFDN::ProportionalAttenuationConfig>)
+                {
+                    const float kFbGainStep = 0.01f;
+                    const float kFbGainStepFast = 0.25f;
+                    config_changed |= ImGui::InputScalar("RT60", ImGuiDataType_Float, &feedback_gain, &kFbGainStep,
+                                                         &kFbGainStepFast, "%.5f", 0);
+                    feedback_gain = std::clamp(feedback_gain, 0.1f, 10.0f);
+
+                    if (config_changed)
+                    {
+                        arg.t60 = feedback_gain;
+                    }
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::TwoBandFilterConfig>)
+                {
+                    constexpr float kOffsetFromStart = 125.f;
+                    ImGui::Text("RT60 DC: ");
+                    ImGui::SameLine(kOffsetFromStart);
+                    ImGui::SetNextItemWidth(200);
+
+                    config_changed |= (ImGui::InputFloat("RT60 DC", &arg.t60s[0], 0.01f, 0.1f, "%.2f"));
+                    arg.t60s[0] = std::clamp(arg.t60s[0], 0.01f, 10.0f);
+
+                    ImGui::Text("RT60 Nyquist: ");
+                    ImGui::SameLine(kOffsetFromStart);
+                    ImGui::SetNextItemWidth(200);
+
+                    config_changed |= (ImGui::InputFloat("RT60 Nyquist", &arg.t60s[1], 0.01f, 0.1f, "%.2f"));
+                    arg.t60s[1] = std::clamp(arg.t60s[1], 0.01f, 10.0f);
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::ThreeBandFilterConfig>)
+                {
+                    t60s.resize(3, 1.f);
+                    frequencies = {300.f, 8000.f};
+                    if (ImGui::Button("Edit"))
+                    {
+                        show_3band_designer = true;
+                        config_changed = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::TenBandFilterConfig>)
+                {
+                    if (t60s.size() != kNBands)
+                    {
+                        t60s.resize(kNBands, 1.f);
+                    }
+                    if (ImGui::Button("Edit"))
+                    {
+                        show_geq_designer = true;
+                        config_changed = true;
+                    }
+                }
+            },
+            config.attenuation_filter_config);
+
+        if (show_geq_designer)
         {
-            const float kFbGainStep = 0.01f;
-            const float kFbGainStepFast = 0.25f;
-            config_changed |= ImGui::InputScalar("RT60", ImGuiDataType_Float, &feedback_gain, &kFbGainStep,
-                                                 &kFbGainStepFast, "%.5f", 0);
-            feedback_gain = std::clamp(feedback_gain, 0.1f, 10.0f);
+            config_changed |= DrawFilterDesigner(t60s, show_geq_designer);
         }
-        else if (delay_filter_type == sfFDN::DelayFilterType::OnePole) // One Pole
+        if (show_3band_designer)
         {
-            constexpr float kOffsetFromStart = 125.f;
-            ImGui::Text("RT60 DC: ");
-            ImGui::SameLine(kOffsetFromStart);
-            ImGui::SetNextItemWidth(200);
-
-            config_changed |= (ImGui::InputFloat("RT60 DC", &t60_dc, 0.01f, 0.1f, "%.2f"));
-            t60_dc = std::clamp(t60_dc, 0.01f, 10.0f);
-
-            ImGui::Text("RT60 Nyquist: ");
-            ImGui::SameLine(kOffsetFromStart);
-            ImGui::SetNextItemWidth(200);
-
-            config_changed |= (ImGui::InputFloat("RT60 Nyquist", &t60_ny, 0.01f, 0.1f, "%.2f"));
-            t60_ny = std::clamp(t60_ny, 0.01f, 10.0f);
-        }
-        else if (delay_filter_type == sfFDN::DelayFilterType::TwoFilter)
-        {
-            if (t60s.size() != kNBands)
-            {
-                t60s.resize(kNBands, 1.f);
-            }
-            if (ImGui::Button("Edit"))
-            {
-                show_delay_filter_designer = true;
-                config_changed = true;
-            }
-        }
-
-        if (show_delay_filter_designer)
-        {
-            config_changed |= DrawFilterDesigner(t60s, show_delay_filter_designer);
+            config_changed |= Draw3BandDesigner(t60s, frequencies, show_3band_designer);
         }
         ImGui::TreePop();
     }
 
     if (config_changed)
     {
-        if (delay_filter_type == sfFDN::DelayFilterType::Proportional)
-        {
-            config.attenuation_t60s.resize(1);
-            config.attenuation_t60s[0] = feedback_gain;
-        }
-        else if (delay_filter_type == sfFDN::DelayFilterType::OnePole)
-        {
-            config.attenuation_t60s = {{t60_dc, t60_ny}};
-        }
-        else if (delay_filter_type == sfFDN::DelayFilterType::TwoFilter)
-        {
-            config.attenuation_t60s = t60s;
-        }
+        std::visit(
+            [&](auto&& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, sfFDN::ThreeBandFilterConfig>)
+                {
+                    assert(t60s.size() == arg.t60s.size());
+                    assert(frequencies.size() == arg.freqs.size());
+
+                    std::ranges::copy(t60s.begin(), t60s.end(), arg.t60s.begin());
+                    std::ranges::copy(frequencies.begin(), frequencies.end(), arg.freqs.begin());
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::TenBandFilterConfig>)
+                {
+                    assert(t60s.size() == arg.t60s.size());
+                    std::ranges::copy(t60s.begin(), t60s.end(), arg.t60s.begin());
+                }
+            },
+            config.attenuation_filter_config);
     }
 
     return config_changed;

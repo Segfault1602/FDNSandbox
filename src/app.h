@@ -88,8 +88,8 @@ class FDNToolboxApp
     // For convolution reverb
     std::atomic<float> conv_wet_level_ = 1.0f;
 
-    std::atomic<uint32_t> pre_delay_ms_ = 0;
-    sfFDN::Delay pre_delay_;
+    std::atomic<uint32_t> direct_delay_ms_ = 0;
+    sfFDN::Delay direct_delay_;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
     OptimizationGUI optimization_gui_;

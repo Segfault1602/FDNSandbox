@@ -316,9 +316,11 @@ std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, siz
     std::vector<float> gains(t60s.size(), 0.0f);
     for (size_t i = 0; i < t60s.size(); ++i)
     {
-        gains[i] = std::pow(10.0, -3.0 / t60s[i]);
-        gains[i] = std::pow(gains[i], static_cast<float>(delay) / sample_rate);
-        gains[i] = 20.f * std::log10(gains[i]);
+        // gains[i] = std::pow(10.0, -3.0 / t60s[i]);
+        // gains[i] = std::pow(gains[i], static_cast<float>(delay) / sample_rate);
+        // gains[i] = 20.f * std::log10(gains[i]);
+        gains[i] = -60.f / (t60s[i] * sample_rate);
+        gains[i] *= static_cast<float>(delay);
     }
 
     return gains;

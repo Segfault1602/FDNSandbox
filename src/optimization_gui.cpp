@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <implot.h>
 #include <quill/LogMacros.h>
+#include <quill/std/Array.h>
 #include <quill/std/Vector.h>
 
 #include <sffdn/sffdn.h>
@@ -22,10 +23,10 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
         static fdn_optimization::AdamParameters params;
 
         ImGui::InputFloat("Step Size", &params.step_size, 0.01f, 2.0f, "%.3f");
-        ImGui::InputFloat("Learning Rate Decay", &params.learning_rate_decay, 0.8f, 1.0f, "%.4f");
-        ImGui::InputInt("Decay Step Size", reinterpret_cast<int*>(&params.decay_step_size));
-        ImGui::InputInt("Epoch Restarts", reinterpret_cast<int*>(&params.epoch_restarts));
-        ImGui::InputInt("Max Restarts", reinterpret_cast<int*>(&params.max_restarts));
+        ImGui::InputFloat("Beta 1", &params.beta1, 0.001f, 0.999f, "%.3f");
+        ImGui::InputFloat("Beta 2", &params.beta2, 0.001f, 0.999f, "%.3f");
+        ImGui::InputDouble("Gradient Delta", &params.gradient_delta, 1e-6f, 1e-1f, "%.1e",
+                           ImGuiSliderFlags_Logarithmic);
         ImGui::InputFloat("Tolerance", &params.tolerance, 1e-6f, 1e-3f, "%.1e", ImGuiSliderFlags_Logarithmic);
 
         params.decay_step_size = std::max(1, static_cast<int>(params.decay_step_size));
@@ -133,24 +134,26 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
         ImGui::InputScalar("Max Line Search Trials", ImGuiDataType_U64, &lbfgs_params.max_line_search_trials);
         ImGui::InputScalar("Min Step", ImGuiDataType_Double, &lbfgs_params.min_step, nullptr, nullptr, "%.1e");
         ImGui::InputScalar("Max Step", ImGuiDataType_Double, &lbfgs_params.max_step, nullptr, nullptr, "%.1e");
+        ImGui::InputDouble("Gradient Delta", &lbfgs_params.gradient_delta, 1e-6f, 1e-1f, "%.1e",
+                           ImGuiSliderFlags_Logarithmic);
 
         return lbfgs_params;
     }
     else if (algo_type == fdn_optimization::OptimizationAlgoType::GradientDescent)
     {
-        static float step_size = 0.01f;
-        static int max_iterations = 1000000;
-        static float tolerance = 1e-5f;
+        static fdn_optimization::GradientDescentParameters gd_params;
 
-        ImGui::InputFloat("Step Size", &step_size, 0.001f, 1.0f, "%.4f");
-        ImGui::InputInt("Max Iterations", &max_iterations, 0, 0);
-        ImGui::InputFloat("Tolerance", &tolerance, 0.f, 0.f, "%.1ef");
+        ImGui::InputDouble("Step Size", &gd_params.step_size, 0.001f, 1.0f, "%.4f");
+        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &gd_params.max_iterations, nullptr, nullptr, "%llu");
+        ImGui::InputDouble("Tolerance", &gd_params.tolerance, 0.f, 0.f, "%.1ef");
+        ImGui::InputDouble("Kappa", &gd_params.kappa, 0.f, 0.f, "%.2f");
+        ImGui::InputDouble("Phi", &gd_params.phi, 0.f, 0.f, "%.2f");
+        ImGui::InputDouble("Momentum", &gd_params.momentum, 0.f, 0.f, "%.3f");
+        ImGui::InputDouble("Min Gain", &gd_params.min_gain, 1e-4f, 1.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::InputDouble("Gradient Delta", &gd_params.gradient_delta, 1e-6f, 1e-1f, "%.1e",
+                           ImGuiSliderFlags_Logarithmic);
 
-        return fdn_optimization::GradientDescentParameters{
-            .step_size = step_size,
-            .max_iterations = static_cast<size_t>(max_iterations),
-            .tolerance = tolerance,
-        };
+        return gd_params;
     }
     else if (algo_type == fdn_optimization::OptimizationAlgoType::CMAES)
     {
@@ -349,8 +352,6 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
             ImGui::EndCombo();
         }
 
-        ImGui::InputScalar("Gradient Step Size", ImGuiDataType_Double, &opt_info_.gradient_delta, nullptr, nullptr,
-                           "%.1e");
         ImGui::PopItemWidth();
     }
 
@@ -453,7 +454,12 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
         if (optimize_filters_checkbox_)
         {
             // fdn_config.attenuation_t60s = result.optimized_fdn_config.attenuation_t60s;
-            LOG_INFO(logger_, "Optimized T60s: {}", fdn_config.attenuation_t60s);
+            if (std::holds_alternative<sfFDN::TenBandFilterConfig>(fdn_config.attenuation_filter_config))
+            {
+                const sfFDN::TenBandFilterConfig& attenuation_config =
+                    std::get<sfFDN::TenBandFilterConfig>(fdn_config.attenuation_filter_config);
+                LOG_INFO(logger_, "Optimized T60s: {}", attenuation_config.t60s);
+            }
 
             // fdn_config.tc_gains = result.optimized_fdn_config.tc_gains;
             // fdn_config.tc_frequencies = result.optimized_fdn_config.tc_frequencies;

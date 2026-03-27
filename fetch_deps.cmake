@@ -119,6 +119,8 @@ cpmaddpackage(
     TRUE
 )
 
+cpmaddpackage("gl:freetype/freetype#VER-2-14-2")
+
 set(IMGUI_INCLUDE_DIR ${imgui_SOURCE_DIR}/ ${imgui_SOURCE_DIR}/backends/)
 file(GLOB IMGUI_SOURCES ${imgui_SOURCE_DIR}/*.cpp)
 file(GLOB IMGUI_HEADERS ${imgui_SOURCE_DIR}/*.h)
@@ -127,6 +129,8 @@ add_library(imgui STATIC)
 target_sources(
     imgui
     PRIVATE ${IMGUI_SOURCES}
+            ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp
+            ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.h
             ${implot_SOURCE_DIR}/implot.cpp
             ${implot_SOURCE_DIR}/implot_items.cpp
             ${implot3d_SOURCE_DIR}/implot3d.cpp
@@ -141,6 +145,8 @@ target_include_directories(
            ${imgui-filebrowser_SOURCE_DIR}
 )
 target_compile_definitions(imgui PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
+
+target_link_libraries(imgui PRIVATE freetype)
 
 if(APPLE)
     target_sources(

@@ -49,7 +49,7 @@ if(APPLE)
     )
 elseif(WIN32)
     add_executable(${PROJECT_NAME} main_win32_dx12.cpp)
-    target_link_libraries(${PROJECT_NAME} PRIVATE fdn_sandbox_app imgui)
+    target_link_libraries(${PROJECT_NAME} PRIVATE fdn_sandbox_app imgui freetype)
     target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${PROJECT_NAME} PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 

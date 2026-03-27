@@ -200,9 +200,15 @@ int main(int, char**)
     // better, consider using the 'ProggyVector' from the same author!
     // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double
     // backslash \\ !
-    // style.FontSizeBase = 20.0f;
+    style.FontSizeBase = 18.0f;
     io.Fonts->AddFontDefault();
     io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
+    io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Regular.ttf");
+    io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Light.ttf");
+    auto medium_font = io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Medium.ttf");
+
+    io.FontDefault = medium_font;
+
     // io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
     // io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
     // io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
