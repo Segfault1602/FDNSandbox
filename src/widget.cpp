@@ -1,5 +1,15 @@
 #include "widget.h"
 
+#include <imgui.h>
+#include <implot.h>
+
+#include <audio_utils/array_math.h>
+#include <sffdn/sffdn.h>
+
+#include "fdn_info.h"
+#include "settings.h"
+#include "utils.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
@@ -8,15 +18,6 @@
 #include <random>
 #include <sstream>
 #include <string>
-
-#include <imgui.h>
-#include <implot.h>
-
-#include <sffdn/sffdn.h>
-
-#include "fdn_info.h"
-#include "settings.h"
-#include "utils.h"
 
 namespace
 {
@@ -291,10 +292,11 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         H = utils::AbsFreqz(sos, filter_freqs_plot, Settings::Instance().SampleRate());
 
         // To db gain
-        for (float& i : H)
-        {
-            i = 20.f * std::log10(i);
-        }
+        audio_utils::array_math::ToDb(H, 20.f);
+        // for (float& i : H)
+        // {
+        //     i = 20.f * std::log10(i);
+        // }
     }
 
     ImGui::Checkbox("Show Filter Response", &show_filter_response);
@@ -1397,27 +1399,10 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
     static bool show_3band_designer = false;
     static sfFDN::DelayFilterType delay_filter_type = sfFDN::DelayFilterType::Proportional;
 
-    // if (config.attenuation_t60s.size() == 1)
-    // {
-    //     delay_filter_type = sfFDN::DelayFilterType::Proportional;
-    //     feedback_gain = config.attenuation_t60s[0];
-    // }
-    // else if (config.attenuation_t60s.size() == 2)
-    // {
-    //     delay_filter_type = sfFDN::DelayFilterType::OnePole;
-    //     t60_dc = config.attenuation_t60s[0];
-    //     t60_ny = config.attenuation_t60s[1];
-    // }
-    // else if (config.attenuation_t60s.size() == 3)
-    // {
-    //     delay_filter_type = sfFDN::DelayFilterType::ThreeBand;
-    //     t60s = config.attenuation_t60s;
-    // }
-    // else if (config.attenuation_t60s.size() == kNBands)
-    // {
-    //     delay_filter_type = sfFDN::DelayFilterType::TwoFilter;
-    //     t60s = config.attenuation_t60s;
-    // }
+    static sfFDN::ProportionalAttenuationConfig proportional_config;
+    static sfFDN::TwoBandFilterConfig two_band_config;
+    static sfFDN::ThreeBandFilterConfig three_band_config;
+    static sfFDN::TenBandFilterConfig ten_band_config;
 
     if (ImGui::TreeNode("Delay Filters"))
     {
@@ -1437,17 +1422,16 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
                     switch (delay_filter_type)
                     {
                     case sfFDN::DelayFilterType::Proportional:
-                        config.attenuation_filter_config = sfFDN::ProportionalAttenuationConfig{.t60 = feedback_gain};
+                        config.attenuation_filter_config = proportional_config;
                         break;
                     case sfFDN::DelayFilterType::OnePole:
-                        config.attenuation_filter_config = sfFDN::TwoBandFilterConfig{.t60s = {t60s[0], t60s[1]}};
+                        config.attenuation_filter_config = two_band_config;
                         break;
                     case sfFDN::DelayFilterType::ThreeBand:
-                        config.attenuation_filter_config = sfFDN::ThreeBandFilterConfig{
-                            .t60s = {t60s[0], t60s[1], t60s[2]}, .freqs = {frequencies[0], frequencies[1]}};
+                        config.attenuation_filter_config = three_band_config;
                         break;
                     case sfFDN::DelayFilterType::TwoFilter:
-                        config.attenuation_filter_config = sfFDN::TenBandFilterConfig{};
+                        config.attenuation_filter_config = ten_band_config;
                         break;
                     }
                 }
@@ -1529,18 +1513,21 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
         std::visit(
             [&](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, sfFDN::ThreeBandFilterConfig>)
+                if constexpr (std::is_same_v<T, sfFDN::ProportionalAttenuationConfig>)
                 {
-                    assert(t60s.size() == arg.t60s.size());
-                    assert(frequencies.size() == arg.freqs.size());
-
-                    std::ranges::copy(t60s.begin(), t60s.end(), arg.t60s.begin());
-                    std::ranges::copy(frequencies.begin(), frequencies.end(), arg.freqs.begin());
+                    proportional_config = arg;
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::TwoBandFilterConfig>)
+                {
+                    two_band_config = arg;
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::ThreeBandFilterConfig>)
+                {
+                    three_band_config = arg;
                 }
                 else if constexpr (std::is_same_v<T, sfFDN::TenBandFilterConfig>)
                 {
-                    assert(t60s.size() == arg.t60s.size());
-                    std::ranges::copy(t60s.begin(), t60s.end(), arg.t60s.begin());
+                    ten_band_config = arg;
                 }
             },
             config.attenuation_filter_config);

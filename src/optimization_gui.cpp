@@ -453,7 +453,6 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
 
         if (optimize_filters_checkbox_)
         {
-            // fdn_config.attenuation_t60s = result.optimized_fdn_config.attenuation_t60s;
             if (std::holds_alternative<sfFDN::TenBandFilterConfig>(fdn_config.attenuation_filter_config))
             {
                 const sfFDN::TenBandFilterConfig& attenuation_config =
@@ -461,8 +460,6 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
                 LOG_INFO(logger_, "Optimized T60s: {}", attenuation_config.t60s);
             }
 
-            // fdn_config.tc_gains = result.optimized_fdn_config.tc_gains;
-            // fdn_config.tc_frequencies = result.optimized_fdn_config.tc_frequencies;
             LOG_INFO(logger_, "Optimized Tone Correction Gains: {}", fdn_config.tc_gains);
         }
 

@@ -16,6 +16,7 @@ target_link_libraries(
     fdn_sandbox_app
     PUBLIC audio_utils
            quill::quill
+           readerwriterqueue
            sfFDN.sfFDN
            imgui
            fdn_optimization

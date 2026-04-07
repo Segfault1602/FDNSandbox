@@ -75,6 +75,8 @@ cpmaddpackage("gh:nlohmann/json@3.12.0")
 
 cpmaddpackage("gh:odygrd/quill@11.0.2")
 
+cpmaddpackage("gh:cameron314/readerwriterqueue@1.0.7")
+
 cpmaddpackage(
     NAME
     imgui

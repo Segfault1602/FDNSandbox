@@ -1,20 +1,20 @@
 #pragma once
 
-#include <atomic>
-#include <span>
-
 #include <imgui.h>
 
 #include <imfilebrowser.h>
 
+#include "fdn_analyzer.h"
+#include "optimization_gui.h"
 #include <audio_utils/audio_file_manager.h>
 #include <audio_utils/audio_manager.h>
 #include <audio_utils/ring_buffer.h>
-
-#include "fdn_analyzer.h"
-#include "optimization_gui.h"
+#include <readerwriterqueue.h>
 
 #include <sffdn/sffdn.h>
+
+#include <atomic>
+#include <span>
 
 class FDNToolboxApp
 {
@@ -56,11 +56,12 @@ class FDNToolboxApp
     std::unique_ptr<audio_manager> audio_manager_;
     std::unique_ptr<audio_file_manager> audio_file_manager_;
 
-    bool show_tc_filter_designer_;
-
     std::unique_ptr<sfFDN::FDN> gui_fdn_;
     std::unique_ptr<sfFDN::FDN> audio_fdn_;
     std::unique_ptr<sfFDN::FDN> other_fdn_;
+
+    moodycamel::ReaderWriterQueue<std::unique_ptr<sfFDN::FDN>> fdn_update_queue_;
+    moodycamel::ReaderWriterQueue<std::unique_ptr<sfFDN::FDN>> fdn_cleanup_queue_;
 
     sfFDN::FDNConfig fdn_config_;
 

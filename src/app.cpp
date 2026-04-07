@@ -122,7 +122,9 @@ void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, 
 } // namespace
 
 FDNToolboxApp::FDNToolboxApp()
-    : direct_delay_(0, Settings::Instance().SampleRate())
+    : fdn_update_queue_(16)
+    , fdn_cleanup_queue_(16)
+    , direct_delay_(0, Settings::Instance().SampleRate())
     , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
     , optimization_gui_(Settings::Instance().GetLogger())
     , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
@@ -147,18 +149,6 @@ FDNToolboxApp::FDNToolboxApp()
 
     audio_output_buffer_.resize(Settings::Instance().SampleRate() * 0.5f);
 
-    // Initialize audio manager and start the audio stream
-    if (!audio_manager_->start_audio_stream(
-            audio_stream_option::kOutput,
-            [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
-                AudioCallback(output_buffer, frame_size, num_channels);
-            },
-            kSystemBlockSize))
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
-    }
-    LOG_INFO(Settings::Instance().GetLogger(), "Audio stream started");
-
     save_ir_browser.SetTitle("Save Impulse Response");
     save_ir_browser.SetTypeFilters({".wav"});
 
@@ -171,7 +161,6 @@ FDNToolboxApp::FDNToolboxApp()
     load_rir_browser.SetTitle("Load RIR File");
     load_rir_browser.SetTypeFilters({".wav"});
 
-    show_tc_filter_designer_ = false;
     fdn_config_ = presets::GetDefaultFDNConfig();
     fdn_config_A_ = presets::GetDefaultFDNConfig();
     fdn_config_B_ = presets::GetDefaultFDNConfig();
@@ -191,6 +180,18 @@ FDNToolboxApp::FDNToolboxApp()
 
     gui_fdn_ = presets::CreateDefaultFDN();
     UpdateFDN();
+
+    // Initialize audio manager and start the audio stream
+    if (!audio_manager_->start_audio_stream(
+            audio_stream_option::kOutput,
+            [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
+                AudioCallback(output_buffer, frame_size, num_channels);
+            },
+            kSystemBlockSize))
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
+    }
+    LOG_INFO(Settings::Instance().GetLogger(), "Audio stream started");
 }
 
 FDNToolboxApp::~FDNToolboxApp()
@@ -211,12 +212,26 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
         return;
     }
 
-    if (other_fdn_ != nullptr)
+    const size_t approx_size_fdn = fdn_update_queue_.size_approx();
+    if (approx_size_fdn > 0)
     {
-        audio_fdn_ = std::move(other_fdn_);
-        other_fdn_ = nullptr;
-        audio_fdn_->SetDirectGain(0.f); // Direct gain is controlled by the dry/wet mix instead
+        // The audio thread is faster than the UI thread so there should not be more than one FDN instance waiting in
+        // the queue. This is just to be safe
+        for (size_t i = 0; i < approx_size_fdn; ++i)
+        {
+            std::unique_ptr<sfFDN::FDN> next_fdn;
+            if (fdn_update_queue_.try_dequeue(next_fdn))
+            {
+                fdn_cleanup_queue_.emplace(
+                    std::move(audio_fdn_)); // Move the old FDN to the cleanup queue for deletion by the UI thread
+                audio_fdn_ = std::move(next_fdn);
+            }
+        }
     }
+
+    assert(audio_fdn_ != nullptr);
+
+    audio_fdn_->SetDirectGain(0.f); // Direct gain is controlled by the dry/wet mix instead
 
     static std::unique_ptr<sfFDN::PartitionedConvolver> rir_reverb = nullptr;
 
@@ -448,6 +463,10 @@ void FDNToolboxApp::loop()
         ImGui::SetWindowFocus("Spectrogram");
     }
     first_time = false;
+
+    // Clean up old FDN instances that are no longer in use by the audio thread
+    while (fdn_cleanup_queue_.pop())
+        ;
 }
 
 void FDNToolboxApp::UpdateFDN()
@@ -460,7 +479,8 @@ void FDNToolboxApp::UpdateFDN()
 
     fdn_analyzer_.SetFDN(sfFDN::CreateFDNFromConfig(fdn_config_, Settings::Instance().SampleRate()));
 
-    other_fdn_ = sfFDN::CreateFDNFromConfig(fdn_config_, Settings::Instance().SampleRate());
+    auto next_fdn = sfFDN::CreateFDNFromConfig(fdn_config_, Settings::Instance().SampleRate());
+    fdn_update_queue_.emplace(std::move(next_fdn));
 
     auto end = std::chrono::high_resolution_clock::now();
     const std::chrono::duration<double, std::milli> duration = end - start;
