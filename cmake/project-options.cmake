@@ -1,6 +1,7 @@
 add_library(fdn_sandbox_options INTERFACE)
 add_library(fdn_sandbox::fdn_sandbox_options ALIAS fdn_sandbox_options)
 target_compile_features(fdn_sandbox_options INTERFACE cxx_std_23)
+target_compile_options(fdn_sandbox_options INTERFACE -march=native)
 
 if(FDN_SANDBOX_USE_SANITIZER)
     if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")

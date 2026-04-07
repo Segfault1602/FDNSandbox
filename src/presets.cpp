@@ -10,9 +10,29 @@
 namespace presets
 {
 
+sfFDN::FDNConfig GetDefaultFDNConfig()
+{
+    return {
+        .N = 8, // Default number of channels
+        .transposed = false,
+        .direct_gain = 0.0f,
+        .input_gains = std::vector<float>(8, 0.5f),                                 // Default input gains
+        .output_gains = std::vector<float>(8, 0.5f),                                // Default output gains
+        .delays = {809, 877, 937, 1049, 1151, 1249, 1373, 1499},                    // Default delays in milliseconds
+        .matrix_info = sfFDN::GenerateMatrix(8, sfFDN::ScalarMatrixType::Hadamard), // Default feedback matrix
+        .attenuation_filter_config = sfFDN::ProportionalAttenuationConfig{1.f},
+        .tc_gains = {},       // Default tone correction gains
+        .tc_frequencies = {}, // Default tone correction frequencies
+        .use_extra_delays = false,
+        .input_stage_delays = {},
+        .input_schroeder_allpass_config = std::nullopt,
+        .input_diffuser = std::nullopt,
+    };
+}
+
 std::unique_ptr<sfFDN::FDN> CreateDefaultFDN()
 {
-    return CreateFDNFromConfig(kDefaultFDNConfig, Settings::Instance().SampleRate());
+    return CreateFDNFromConfig(GetDefaultFDNConfig(), Settings::Instance().SampleRate());
 }
 
 } // namespace presets

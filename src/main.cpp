@@ -66,6 +66,12 @@ int main()
 
     constexpr ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
+    style.FontSizeBase = 18.0f;
+    io.Fonts->AddFontDefault();
+    auto medium_font = io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Medium.ttf");
+
+    io.FontDefault = medium_font;
+
     FDNToolboxApp app;
 
     while (!glfwWindowShouldClose(window))

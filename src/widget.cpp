@@ -257,12 +257,16 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         }
 
         // Plot the RT60 values
-        // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
-        ImPlot::PlotScatter("RT60", frequencies.data(), t60s.data(), t60s.size());
+        ImPlotSpec spec{};
+        spec.Marker = ImPlotMarker_Circle;
+        spec.MarkerSize = 7.0f;
+        ImPlot::PlotScatter("RT60", frequencies.data(), t60s.data(), t60s.size(), spec);
 
         ImPlot::PlotLine("RT60 Line", frequencies_plot.data(), t60s_plot.data(), t60s_plot.size());
-        // TODO: ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.250f);
-        ImPlot::PlotShaded("RT60 Area", frequencies_plot.data(), t60s_plot.data(), t60s_plot.size(), 0.f);
+
+        ImPlotSpec shaded_spec{};
+        shaded_spec.FillAlpha = 0.25f;
+        ImPlot::PlotShaded("RT60 Area", frequencies_plot.data(), t60s_plot.data(), t60s_plot.size(), 0.f, shaded_spec);
 
         ImPlot::EndPlot();
     }
@@ -308,14 +312,20 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
         ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), frequencies_d.size(), nullptr, false);
 
-        // TODO: ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.70f, 0.20f, 1.0f), 4.0f);
-        // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
-        ImPlot::PlotLine("Target Gain", frequencies_plot.data(), gains_plot.data(), frequencies_plot.size());
+        ImPlotSpec spec{};
+        spec.LineColor = ImVec4(0.70f, 0.70f, 0.20f, 1.0f);
+        spec.LineWeight = 4.0f;
+        spec.Marker = ImPlotMarker_Circle;
+        spec.MarkerSize = 7.0f;
+        ImPlot::PlotLine("Target Gain", frequencies_plot.data(), gains_plot.data(), frequencies_plot.size(), spec);
 
         if (H.size() > 0)
         {
-            // TODO:ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
-            ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), filter_freqs_plot.size());
+            ImPlotSpec line_spec{};
+            line_spec.LineColor = ImVec4(0.70f, 0.20f, 0.20f, 1.0f);
+            line_spec.LineWeight = 3.0f;
+            ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), filter_freqs_plot.size(),
+                             line_spec);
         }
 
         ImPlot::EndPlot();
@@ -1646,22 +1656,28 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
                 }
             }
 
-            // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
-            ImPlot::PlotScatter("RT60", frequencies.data(), tc_gains.data(), tc_gains.size());
+            ImPlotSpec spec{};
+            spec.Marker = ImPlotMarker_Circle;
+            spec.MarkerSize = 7.0f;
+            ImPlot::PlotScatter("RT60", frequencies.data(), tc_gains.data(), tc_gains.size(), spec);
 
             if (frequency_response.size() > 0)
             {
-                // TODO: ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
+                ImPlotSpec line_spec{};
+                line_spec.LineColor = ImVec4(0.70f, 0.20f, 0.20f, 1.0f);
+                line_spec.LineWeight = 3.0f;
                 ImPlot::PlotLine("Filter Response", frequencies_plot.data(), frequency_response.data(),
-                                 frequencies_plot.size());
+                                 frequencies_plot.size(), line_spec);
             }
 
             for (size_t i = 0; i < freq_response_per_filter.size(); ++i)
             {
-                // TODO: ImPlot::SetNextLineStyle(ImVec4(0.2f, 0.2f, 0.8f, 0.5f), 1.0f);
+                ImPlotSpec line_spec{};
+                line_spec.LineColor = ImVec4(0.2f, 0.2f, 0.8f, 0.5f);
+                line_spec.LineWeight = 1.0f;
                 std::string label = "Filter " + std::to_string(i + 1);
                 ImPlot::PlotLine(label.c_str(), frequencies_plot.data(), freq_response_per_filter[i].data(),
-                                 frequencies_plot.size());
+                                 frequencies_plot.size(), line_spec);
             }
 
             if (ImGui::Button("Apply"))
@@ -1713,8 +1729,10 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
     std::array<double, 2> early_xs = {0.f, ir_duration};
     std::array<double, 2> early_ys1 = {-1.f, -1.f};
     std::array<double, 2> early_ys2 = {1.f, 1.f};
-    // TODO: ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.250f);
-    ImPlot::PlotShaded("Early RIR", early_xs.data(), early_ys1.data(), early_ys2.data(), 2);
+
+    ImPlotSpec spec{};
+    spec.FillAlpha = 0.25f;
+    ImPlot::PlotShaded("Early RIR", early_xs.data(), early_ys1.data(), early_ys2.data(), 2, spec);
 
     return duration_changed;
 }

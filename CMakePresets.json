@@ -7,13 +7,13 @@
     },
     "configurePresets": [
         {
-            "name": "common-ninja",
-            "hidden": true,
-            "displayName": "Common-Ninja",
+            "name": "gcc-ninja",
+            "displayName": "GCC - Ninja",
             "generator": "Ninja Multi-Config",
-            "binaryDir": "${sourceDir}/build/ninja",
+            "binaryDir": "${sourceDir}/build/gcc",
             "cacheVariables": {
-                "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
                 "CPM_audio_utils_SOURCE:": "${sourceDir}/../audio_utils",
                 "CPM_sfFDN_SOURCE:": "${sourceDir}/../sfFDN",
                 "CPM_FdnOpt_SOURCE:": "${sourceDir}/../fdn_opt"
@@ -23,8 +23,12 @@
             "name": "llvm-ninja",
             "displayName": "LLVM - Ninja",
             "description": "Build for LLVM",
-            "inherits": "common-ninja",
-            "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake"
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/build/ninja",
+            "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake",
+            "cacheVariables": {
+                "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+            }
         },
         {
             "name": "windows",
@@ -32,30 +36,17 @@
             "description": "Build for Windows",
             "generator": "Visual Studio 18 2026",
             "binaryDir": "${sourceDir}/build/windows",
-            "toolchainFile": "${sourceDir}/cmake/msvc-toolchain.cmake",
-            "cacheVariables": {
-                "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
-                "CPM_audio_utils_SOURCE:": "${sourceDir}/../audio_utils",
-                "CPM_sfFDN_SOURCE:": "${sourceDir}/../sfFDN",
-                "CPM_FdnOpt_SOURCE:": "${sourceDir}/../fdn_opt"
-            }
+            "toolchainFile": "${sourceDir}/cmake/msvc-toolchain.cmake"
         }
     ],
     "buildPresets": [
         {
-            "name": "llvm-debug",
-            "configurePreset": "llvm-ninja",
-            "configuration": "Debug"
+            "name": "llvm",
+            "configurePreset": "llvm-ninja"
         },
         {
-            "name": "llvm-release",
-            "configurePreset": "llvm-ninja",
-            "configuration": "Release"
-        },
-        {
-            "name": "llvm-relwithdebinfo",
-            "configurePreset": "llvm-ninja",
-            "configuration": "RelWithDebInfo"
+            "name": "gcc",
+            "configurePreset": "gcc-ninja"
         },
         {
             "name": "windows",

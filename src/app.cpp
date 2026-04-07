@@ -172,9 +172,9 @@ FDNToolboxApp::FDNToolboxApp()
     load_rir_browser.SetTypeFilters({".wav"});
 
     show_tc_filter_designer_ = false;
-    fdn_config_ = presets::kDefaultFDNConfig;
-    fdn_config_A_ = presets::kDefaultFDNConfig;
-    fdn_config_B_ = presets::kDefaultFDNConfig;
+    fdn_config_ = presets::GetDefaultFDNConfig();
+    fdn_config_A_ = presets::GetDefaultFDNConfig();
+    fdn_config_B_ = presets::GetDefaultFDNConfig();
 
     stft_options_ = {
 #ifndef NDEBUG
@@ -1483,9 +1483,11 @@ void FDNToolboxApp::DrawSpectrum()
             }
             if (peak_radio == 1 || peak_radio == 2)
             {
-                // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Asterisk, 2.0f);
+                ImPlotSpec spec{};
+                spec.Marker = ImPlotMarker_Asterisk;
+                spec.MarkerSize = 2.0f;
                 ImPlot::PlotScatter("Peaks", spectrum_data.peaks_freqs.data(), spectrum_data.peaks.data(),
-                                    spectrum_data.peaks.size());
+                                    spectrum_data.peaks.size(), spec);
             }
 
             if (peak_radio == 3)
@@ -1890,7 +1892,6 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
         ImPlot3D::PushColormap(ImPlotColormap_Viridis);
         ImPlot3D::PushStyleVar(ImPlot3DStyleVar_FillAlpha, 0.8f);
         ImPlot3D::SetupBoxScale(2.0, 1.0, 0.8);
-        // TODO: ImPlot3D::SetNextLineStyle(ImPlot3D::GetColormapColor(1));
         ImPlot3DSpec spec{};
         spec.Flags = ImPlot3DSurfaceFlags_None;
         spec.LineColor = ImPlot3D::GetColormapColor(1);
@@ -1983,21 +1984,31 @@ void FDNToolboxApp::DrawEchoDensity()
 
         if (echo_density_data.mixing_time < time_data.back())
         {
-            // TODO: ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), 2.0f);
-            // ImPlot::PlotInfLines("Mixing Time", &echo_density_data.mixing_time, 1, ImPlotInfLinesFlags_None);
+            ImPlotSpec spec{};
+            spec.LineColor = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+            spec.LineWeight = 2.0f;
+            spec.Flags = ImPlotLineFlags_None;
+            ImPlot::PlotInfLines("Mixing Time", &echo_density_data.mixing_time, 1, spec);
         }
 
         if (show_rir)
         {
             auto rir_echo_density_data = rir_analyzer_.GetEchoDensityData(window_size_ms, hop_size_ms);
-            // TODO: ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
+            ImPlotSpec spec{};
+            spec.LineColor = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
+            spec.LineWeight = 2.0f;
+            spec.Flags = ImPlotLineFlags_None;
             ImPlot::PlotLine("RIR Echo Density", rir_echo_density_data.sparse_indices.data(),
-                             rir_echo_density_data.echo_density.data(), rir_echo_density_data.sparse_indices.size());
+                             rir_echo_density_data.echo_density.data(), rir_echo_density_data.sparse_indices.size(),
+                             spec);
 
             if (rir_echo_density_data.mixing_time < time_data.back())
             {
-                // TODO: ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
-                ImPlot::PlotInfLines("RIR Mixing Time", &rir_echo_density_data.mixing_time, 1);
+                ImPlotSpec spec{};
+                spec.LineColor = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
+                spec.LineWeight = 2.0f;
+                spec.Flags = ImPlotLineFlags_None;
+                ImPlot::PlotInfLines("RIR Mixing Time", &rir_echo_density_data.mixing_time, 1, spec);
             }
         }
 
@@ -2034,17 +2045,21 @@ void FDNToolboxApp::DrawT60s()
         tick_labels.assign(t60_data.octave_band_frequencies.begin(), t60_data.octave_band_frequencies.end());
         ImPlot::SetupAxisTicks(ImAxis_X1, tick_labels.data(), tick_labels.size(), nullptr, false);
 
-        // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
+        ImPlotSpec spec{};
+        spec.Marker = ImPlotMarker_Circle;
+        spec.MarkerSize = 7.0f;
         ImPlot::PlotLine("RT60s", t60_data.octave_band_frequencies.data(), t60_data.t60_octaves.data(),
-                         t60_data.t60_octaves.size());
+                         t60_data.t60_octaves.size(), spec);
 
         if (show_rir)
         {
             auto rir_t60_data = rir_analyzer_.GetT60Data(db_start, db_end);
 
-            // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Square, 7.0f);
+            ImPlotSpec spec{};
+            spec.Marker = ImPlotMarker_Square;
+            spec.MarkerSize = 7.0f;
             ImPlot::PlotLine("RIR RT60s", rir_t60_data.octave_band_frequencies.data(), rir_t60_data.t60_octaves.data(),
-                             rir_t60_data.t60_octaves.size());
+                             rir_t60_data.t60_octaves.size(), spec);
         }
 
         ImPlot::EndPlot();
