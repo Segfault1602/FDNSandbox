@@ -298,8 +298,9 @@ EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
     }
 
     return EnergyDecayReliefData{
-        .energy_decay_relief = std::mdspan<const float, std::dextents<size_t, 2>, std::layout_left>(
-            edr_data_.data(), edr_bin_count_, edr_frame_count_),
+        .energy_decay_relief = std::span<const float>(edr_data_),
+        .bin_count = edr_bin_count_,
+        .frame_count = edr_frame_count_,
     };
 }
 

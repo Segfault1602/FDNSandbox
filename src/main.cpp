@@ -5,6 +5,7 @@
 #include <imgui_impl_opengl3.h>
 #include <imgui_internal.h>
 #include <implot.h>
+#include <implot3d.h>
 
 #include <GLFW/glfw3.h>
 #include <cstddef>
@@ -42,6 +43,7 @@ int main()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
+    ImPlot3D::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
@@ -110,6 +112,7 @@ int main()
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+    ImPlot3D::DestroyContext();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
 

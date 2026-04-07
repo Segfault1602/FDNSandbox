@@ -8,7 +8,6 @@
 
 #include <cassert>
 #include <complex>
-#include <mdspan>
 #include <numbers>
 #include <span>
 #include <stdexcept>
@@ -115,19 +114,9 @@ std::vector<float> pchip(std::span<const float> x, std::span<const float> y, std
     return yq;
 }
 
-std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w, size_t sr)
+std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std::span<const float> w, size_t sr)
 {
-    // sos must be a multiple of 6 coefficients
-    if (sos.size() % 6 != 0)
-    {
-        throw std::runtime_error("SOS coefficients must be a multiple of 6");
-    }
-    if (sos.size() < 6)
-    {
-        throw std::runtime_error("SOS coefficients must have at least 6 coefficients");
-    }
-
-    const size_t K = sos.size() / 6;
+    const size_t K = sos.size();
 
     Eigen::Map<const Eigen::ArrayXf> w_map(w.data(), w.size());
     Eigen::ArrayXcf dig_w(w.size());
@@ -141,16 +130,18 @@ std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w
         dig_w = Eigen::exp(std::complex(0.0f, 1.0f) * w_map);
     }
 
-    Eigen::Map<const Eigen::ArrayXf> b_map(sos.data(), 3);
-    Eigen::Map<const Eigen::ArrayXf> a_map(sos.data() + 3, 3);
+    Eigen::Array3f b_coeffs = {sos[0].b0, sos[0].b1, sos[0].b2};
+    Eigen::Array3f a_coeffs = {sos[0].a0, sos[0].a1, sos[0].a2};
 
-    Eigen::ArrayXcf h_complex = Polyval(b_map, dig_w) / Polyval(a_map, dig_w);
+    Eigen::ArrayXcf h_complex = Polyval(b_coeffs, dig_w) / Polyval(a_coeffs, dig_w);
 
     for (size_t i = 1; i < K; ++i)
     {
-        Eigen::Map<const Eigen::ArrayXf> b_map(sos.data() + (i * 6), 3);
-        Eigen::Map<const Eigen::ArrayXf> a_map(sos.data() + (i * 6) + 3, 3);
-        Eigen::ArrayXcf h = Polyval(b_map, dig_w) / Polyval(a_map, dig_w);
+        Eigen::Array3f b_coeffs = {sos[i].b0, sos[i].b1, sos[i].b2};
+        Eigen::Array3f a_coeffs = {sos[i].a0, sos[i].a1, sos[i].a2};
+        // Eigen::Map<const Eigen::ArrayXf> b_map(sos.data() + (i * 6), 3);
+        // Eigen::Map<const Eigen::ArrayXf> a_map(sos.data() + (i * 6) + 3, 3);
+        Eigen::ArrayXcf h = Polyval(b_coeffs, dig_w) / Polyval(a_coeffs, dig_w);
 
         h_complex = h_complex * h;
     }

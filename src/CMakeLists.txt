@@ -55,13 +55,14 @@ elseif(WIN32)
 
 else()
     # ========= OpenGL implementation =========
+    find_package(TBB REQUIRED)
     add_executable(${PROJECT_NAME} main.cpp)
 
     target_link_libraries(
         ${PROJECT_NAME}
         PRIVATE fdn_sandbox_app
                 imgui
-                implot
+                tbb
                 ${OPENGL_LIBRARIES}
     )
 

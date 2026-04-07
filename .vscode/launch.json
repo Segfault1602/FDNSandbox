@@ -5,6 +5,30 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "(gdb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/ninja/src/Debug/FDNSandbox",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
             "name": "(Windows) FDNSandbox",
             "type": "cppvsdbg",
             "request": "launch",
@@ -25,31 +49,6 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "console": "externalTerminal"
-        },
-        {
-            "name": "FDNSandbox",
-            "type": "lldb-dap",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/Debug/src/FDNSandbox",
-            "args": [],
-            "stopOnEntry": false,
-            "cwd": "${workspaceFolder}",
-            "env": [],
-            "runInTerminal": false
-        },
-        {
-            "name": "sfFDN Tests",
-            "type": "lldb-dap",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/externals/sffdn/tests/Debug/tests",
-            "args": [
-                "-tc=VelvetFFM"
-            ],
-            "stopOnEntry": false,
-            "cwd": "${workspaceFolder}",
-            "env": [],
-            "runInTerminal": false,
-            // "MIMode": "lldb"
         }
     ]
 }

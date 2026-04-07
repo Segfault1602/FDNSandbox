@@ -257,11 +257,11 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         }
 
         // Plot the RT60 values
-        ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
+        // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
         ImPlot::PlotScatter("RT60", frequencies.data(), t60s.data(), t60s.size());
 
         ImPlot::PlotLine("RT60 Line", frequencies_plot.data(), t60s_plot.data(), t60s_plot.size());
-        ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.250f);
+        // TODO: ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.250f);
         ImPlot::PlotShaded("RT60 Area", frequencies_plot.data(), t60s_plot.data(), t60s_plot.size(), 0.f);
 
         ImPlot::EndPlot();
@@ -282,8 +282,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         gains = utils::T60ToGainsDb(t60s, kTestDelay, Settings::Instance().SampleRate());
         gains_plot = gains; // utils::pchip(frequencies, gains, frequencies_plot);
         std::vector<float> t60s_f(t60s.begin(), t60s.end());
-        std::vector<float> sos =
-            sfFDN::GetTwoFilter(t60s_f, kTestDelay, Settings::Instance().SampleRate(), shelf_cutoff);
+        auto sos = sfFDN::GetTwoFilter(t60s_f, kTestDelay, Settings::Instance().SampleRate(), shelf_cutoff);
 
         H = utils::AbsFreqz(sos, filter_freqs_plot, Settings::Instance().SampleRate());
 
@@ -309,13 +308,13 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
         ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), frequencies_d.size(), nullptr, false);
 
-        ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.70f, 0.20f, 1.0f), 4.0f);
-        ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
+        // TODO: ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.70f, 0.20f, 1.0f), 4.0f);
+        // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
         ImPlot::PlotLine("Target Gain", frequencies_plot.data(), gains_plot.data(), frequencies_plot.size());
 
         if (H.size() > 0)
         {
-            ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
+            // TODO:ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
             ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), filter_freqs_plot.size());
         }
 
@@ -351,7 +350,7 @@ void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
             const char* label_fmt = info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
             ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
-                                ImPlotPoint(0, 0), ImPlotPoint(1, 1), 0);
+                                ImPlotPoint(0, 0), ImPlotPoint(1, 1));
 
             ImPlot::EndPlot();
         }
@@ -367,7 +366,7 @@ void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
                 const char* label_fmt =
                     info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
                 ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
-                                    ImPlotPoint(0, 0), ImPlotPoint(1, 1), 0);
+                                    ImPlotPoint(0, 0), ImPlotPoint(1, 1));
 
                 ImPlot::EndPlot();
             }
@@ -376,7 +375,9 @@ void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
             {
                 ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, axes_flags);
 
-                ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, ImPlotBarsFlags_Horizontal);
+                ImPlotSpec spec{};
+                spec.Flags = ImPlotBarsFlags_Horizontal;
+                ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, spec);
                 ImPlot::EndPlot();
             }
         }
@@ -500,7 +501,7 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
             ImPlot::SetupAxesLimits(-0.45, input_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Input Gains", input_gains.data(), input_gains.size(), 0.90, 0, ImPlotBarsFlags_None);
+            ImPlot::PlotBars("Input Gains", input_gains.data(), input_gains.size(), 0.90, 0);
             ImPlot::EndPlot();
         }
 
@@ -508,7 +509,7 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
             ImPlot::SetupAxesLimits(-0.45, output_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Output Gains", output_gains.data(), output_gains.size(), 0.90, 0, ImPlotBarsFlags_None);
+            ImPlot::PlotBars("Output Gains", output_gains.data(), output_gains.size(), 0.90, 0);
             ImPlot::EndPlot();
         }
 
@@ -525,7 +526,7 @@ void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
 
         ImPlot::SetupAxesLimits(-1, config.delays.size(), 0, max_delay, ImPlotCond_Always);
 
-        ImPlot::PlotBars("##Delays", config.delays.data(), config.delays.size(), 0.90, 0, ImPlotBarsFlags_None);
+        ImPlot::PlotBars("##Delays", config.delays.data(), config.delays.size(), 0.90, 0);
         ImPlot::EndPlot();
     }
 }
@@ -565,7 +566,7 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config)
         ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
         const char* label_fmt = N < 10 ? "%.2f" : nullptr; // Adjust label format based on N size
         ImPlot::PlotHeatmap("heat", feedback_matrix.data(), N, N, -1, 1, label_fmt, ImPlotPoint(0, 0),
-                            ImPlotPoint(1, 1), 0);
+                            ImPlotPoint(1, 1));
 
         ImPlot::EndPlot();
     }
@@ -1422,6 +1423,23 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
                 {
                     delay_filter_type = static_cast<sfFDN::DelayFilterType>(i);
                     config_changed = true;
+
+                    switch (delay_filter_type)
+                    {
+                    case sfFDN::DelayFilterType::Proportional:
+                        config.attenuation_filter_config = sfFDN::ProportionalAttenuationConfig{.t60 = feedback_gain};
+                        break;
+                    case sfFDN::DelayFilterType::OnePole:
+                        config.attenuation_filter_config = sfFDN::TwoBandFilterConfig{.t60s = {t60s[0], t60s[1]}};
+                        break;
+                    case sfFDN::DelayFilterType::ThreeBand:
+                        config.attenuation_filter_config = sfFDN::ThreeBandFilterConfig{
+                            .t60s = {t60s[0], t60s[1], t60s[2]}, .freqs = {frequencies[0], frequencies[1]}};
+                        break;
+                    case sfFDN::DelayFilterType::TwoFilter:
+                        config.attenuation_filter_config = sfFDN::TenBandFilterConfig{};
+                        break;
+                    }
                 }
             }
             ImGui::EndCombo();
@@ -1604,15 +1622,14 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
             {
                 config_changed = true;
 
-                std::vector<float> sos =
-                    sfFDN::DesignGraphicEQ(tc_gains, frequencies, Settings::Instance().SampleRate());
+                auto sos = sfFDN::DesignGraphicEQ(tc_gains, frequencies, Settings::Instance().SampleRate());
                 frequency_response = utils::AbsFreqz(sos, frequencies_plot, Settings::Instance().SampleRate());
 
                 uint32_t filter_order = sos.size() / 6; // Each biquad has 6 coefficients
                 freq_response_per_filter.resize(filter_order);
                 for (uint32_t i = 0; i < filter_order; ++i)
                 {
-                    std::span<const float> single_sos = std::span(sos).subspan(i * 6, 6);
+                    auto single_sos = std::span(sos).subspan(i * 6, 6);
                     freq_response_per_filter[i] =
                         utils::AbsFreqz(single_sos, frequencies_plot, Settings::Instance().SampleRate());
 
@@ -1629,19 +1646,19 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
                 }
             }
 
-            ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
+            // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
             ImPlot::PlotScatter("RT60", frequencies.data(), tc_gains.data(), tc_gains.size());
 
             if (frequency_response.size() > 0)
             {
-                ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
+                // TODO: ImPlot::SetNextLineStyle(ImVec4(0.70f, 0.20f, 0.20f, 1.0f), 3.0f);
                 ImPlot::PlotLine("Filter Response", frequencies_plot.data(), frequency_response.data(),
                                  frequencies_plot.size());
             }
 
             for (size_t i = 0; i < freq_response_per_filter.size(); ++i)
             {
-                ImPlot::SetNextLineStyle(ImVec4(0.2f, 0.2f, 0.8f, 0.5f), 1.0f);
+                // TODO: ImPlot::SetNextLineStyle(ImVec4(0.2f, 0.2f, 0.8f, 0.5f), 1.0f);
                 std::string label = "Filter " + std::to_string(i + 1);
                 ImPlot::PlotLine(label.c_str(), frequencies_plot.data(), freq_response_per_filter[i].data(),
                                  frequencies_plot.size());
@@ -1696,7 +1713,7 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
     std::array<double, 2> early_xs = {0.f, ir_duration};
     std::array<double, 2> early_ys1 = {-1.f, -1.f};
     std::array<double, 2> early_ys2 = {1.f, 1.f};
-    ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.250f);
+    // TODO: ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.250f);
     ImPlot::PlotShaded("Early RIR", early_xs.data(), early_ys1.data(), early_ys2.data(), 2);
 
     return duration_changed;

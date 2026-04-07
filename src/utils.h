@@ -67,7 +67,7 @@ std::vector<float> pchip(std::span<const float> x, std::span<const float> y, std
  * @param sr The sample rate.
  * @return A vector containing the absolute frequency response.
  */
-std::vector<float> AbsFreqz(std::span<const float> sos, std::span<const float> w, size_t sr);
+std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std::span<const float> w, size_t sr);
 
 /**
  * @brief Write audio samples to a file.
@@ -91,5 +91,17 @@ std::string GetDelayLengthTypeName(int type);
 std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate);
 
 std::vector<float> ComputeRMS(std::span<const float> buffer, uint32_t block_size, uint32_t hop_size);
+
+struct Span2D
+{
+    std::span<float> data;
+    size_t rows;
+    size_t cols;
+
+    float& operator()(size_t i, size_t j)
+    {
+        return data[i * cols + j];
+    }
+};
 
 } // namespace utils

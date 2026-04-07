@@ -8,7 +8,6 @@
 
 #include <bitset>
 #include <cstdint>
-#include <mdspan>
 #include <memory>
 #include <span>
 #include <vector>
@@ -50,7 +49,9 @@ struct EnergyDecayCurveData
 
 struct EnergyDecayReliefData
 {
-    std::mdspan<const float, std::dextents<size_t, 2>, std::layout_left> energy_decay_relief;
+    std::span<const float> energy_decay_relief;
+    uint32_t bin_count;
+    uint32_t frame_count;
 };
 
 struct T60Data

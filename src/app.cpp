@@ -30,7 +30,6 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
-#include <mdspan>
 #include <memory>
 #include <numbers>
 #include <span>
@@ -1253,14 +1252,14 @@ void FDNToolboxApp::DrawSettingsWindow()
 
     ImGui::SeparatorText("Style Settings");
 
-    ImPlotStyle& style = ImPlot::GetStyle();
+    // ImPlotStyle& style = ImPlot::GetStyle();
 
-    float line_weight = style.LineWeight;
-    ImGui::SetNextItemWidth(200);
-    if (ImGui::SliderFloat("Line Weight", &line_weight, 1.0f, 5.0f))
-    {
-        style.LineWeight = line_weight;
-    }
+    // float line_weight = style.LineWeight;
+    // ImGui::SetNextItemWidth(200);
+    // if (ImGui::SliderFloat("Line Weight", &line_weight, 1.0f, 5.0f))
+    // {
+    //     style.LineWeight = line_weight;
+    // }
 
     ImGui::SetNextItemWidth(200);
     ImGui::ShowFontSelector("ImGui Font");
@@ -1359,9 +1358,10 @@ void FDNToolboxApp::DrawSpectrogram()
         ImPlot::SetupAxisLimits(ImAxis_X1, tmin, tmax, ImGuiCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.f, bin_count, ImGuiCond_Always);
 
+        ImPlotSpec spec{};
+        spec.Flags = ImPlotHeatmapFlags_ColMajor;
         ImPlot::PlotHeatmap("##Spectrogram", spectrogram_data.data.data(), spectrogram_data.bin_count,
-                            spectrogram_data.frame_count, min_dB, max_dB, nullptr, {tmin, 0}, {tmax, bin_count},
-                            ImPlotHeatmapFlags_ColMajor);
+                            spectrogram_data.frame_count, min_dB, max_dB, nullptr, {tmin, 0}, {tmax, bin_count}, spec);
 
         // Add colorbar
 
@@ -1483,9 +1483,9 @@ void FDNToolboxApp::DrawSpectrum()
             }
             if (peak_radio == 1 || peak_radio == 2)
             {
-                ImPlot::SetNextMarkerStyle(ImPlotMarker_Asterisk, 2.0f);
+                // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Asterisk, 2.0f);
                 ImPlot::PlotScatter("Peaks", spectrum_data.peaks_freqs.data(), spectrum_data.peaks.data(),
-                                    spectrum_data.peaks.size(), ImPlotScatterFlags_None);
+                                    spectrum_data.peaks.size());
             }
 
             if (peak_radio == 3)
@@ -1494,7 +1494,7 @@ void FDNToolboxApp::DrawSpectrum()
                 ImPlot::SetupAxesLimits(-60.0, 20.0, 0.0, 1000.0, ImPlotCond_Always);
 
                 ImPlot::PlotHistogram("Histogram", spectrum_data.peaks.data(), spectrum_data.peaks.size(),
-                                      ImPlotBin_Sqrt, 0.95f, ImPlotRange(-60, 20), ImPlotHistogramFlags_None);
+                                      ImPlotBin_Sqrt, 0.95f, ImPlotRange(-60, 20));
             }
 
             // if (!lock_freq_range)
@@ -1800,16 +1800,19 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
                 {
                     continue;
                 }
+
+                ImPlotSpec spec;
+                spec.Flags = ImPlotLineFlags_None;
+                spec.Stride = kDownsampleFactor * sizeof(float);
                 ImPlot::PlotLine(octave_band_names[i], fdn_analyzer_.GetTimeData().data(),
                                  edc_data.edc_octaves[i].data(), edc_data.edc_octaves[i].size() / kDownsampleFactor,
-                                 ImPlotLineFlags_None, 0, kDownsampleFactor * sizeof(float));
+                                 spec);
 
                 if (show_rir && !rir_edc_data.edc_octaves.empty())
                 {
                     ImPlot::PlotLine(std::string("RIR " + std::string(octave_band_names[i])).c_str(),
                                      rir_analyzer_.GetTimeData().data(), rir_edc_data.edc_octaves[i].data(),
-                                     rir_edc_data.edc_octaves[i].size() / kDownsampleFactor, ImPlotLineFlags_None, 0,
-                                     kDownsampleFactor * sizeof(float));
+                                     rir_edc_data.edc_octaves[i].size() / kDownsampleFactor, spec);
                 }
             }
         }
@@ -1845,8 +1848,8 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
     static std::vector<float> y_data;
 
     // constexpr uint32_t kDownsampleFactor = 1024;
-    const uint32_t y_size = edr.energy_decay_relief.extent(0);
-    const uint32_t x_size = edr.energy_decay_relief.extent(1);
+    const uint32_t y_size = edr.bin_count;
+    const uint32_t x_size = edr.frame_count;
 
     const size_t grid_size = x_size * y_size;
 
@@ -1855,29 +1858,29 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
         x_data.resize(grid_size);
         y_data.resize(grid_size);
 
-        auto x_mdspan = std::mdspan(x_data.data(), y_size, x_size);
-        auto y_mdspan = std::mdspan(y_data.data(), y_size, x_size);
+        auto x_mdspan = utils::Span2D(x_data, y_size, x_size);
+        auto y_mdspan = utils::Span2D(y_data, y_size, x_size);
         for (size_t i = 0; i < y_size; ++i)
         {
             for (size_t j = 0; j < x_size; ++j)
             {
-                x_mdspan[i, j] = (j) / static_cast<float>(Settings::Instance().SampleRate()); // Time in seconds
-                y_mdspan[i, j] = static_cast<float>(i);                                       // Octave band index
+                x_mdspan(i, j) = (j) / static_cast<float>(Settings::Instance().SampleRate()); // Time in seconds
+                y_mdspan(i, j) = static_cast<float>(i);                                       // Octave band index
             }
         }
     }
 
     static std::vector<float> z_data;
     z_data.resize(grid_size);
-    auto z_mdspan = std::mdspan(z_data.data(), y_size, x_size);
+    auto z_mdspan = utils::Span2D(z_data, y_size, x_size);
     for (size_t i = 0; i < y_size; ++i)
     {
         for (size_t j = 0; j < x_size; ++j)
         {
-            z_mdspan[i, j] = edr.energy_decay_relief[i, j];
-            if (z_mdspan[i, j] < -80.0f)
+            z_mdspan(i, j) = edr.energy_decay_relief[i + j * y_size];
+            if (z_mdspan(i, j) < -80.0f)
             {
-                z_mdspan[i, j] = -80.0f; // Clamp to -80 dB for better visualization
+                z_mdspan(i, j) = -80.0f; // Clamp to -80 dB for better visualization
             }
         }
     }
@@ -1887,13 +1890,15 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
         ImPlot3D::PushColormap(ImPlotColormap_Viridis);
         ImPlot3D::PushStyleVar(ImPlot3DStyleVar_FillAlpha, 0.8f);
         ImPlot3D::SetupBoxScale(2.0, 1.0, 0.8);
-        ImPlot3D::SetNextLineStyle(ImPlot3D::GetColormapColor(1));
-
+        // TODO: ImPlot3D::SetNextLineStyle(ImPlot3D::GetColormapColor(1));
+        ImPlot3DSpec spec{};
+        spec.Flags = ImPlot3DSurfaceFlags_None;
+        spec.LineColor = ImPlot3D::GetColormapColor(1);
         ImPlot3D::SetupAxes("Time (s)", "Octave Band", "Level (dB)", ImPlot3DAxisFlags_AutoFit,
                             ImPlot3DAxisFlags_AutoFit, ImPlot3DAxisFlags_AutoFit);
 
-        ImPlot3D::PlotSurface("EDR Surface", x_data.data(), y_data.data(), z_data.data(), x_size, y_size,
-                              ImPlot3DSurfaceFlags_None);
+        ImPlot3D::PlotSurface("EDR Surface", x_data.data(), y_data.data(), z_data.data(), x_size, y_size, 0.0, 0.0,
+                              spec);
 
         ImPlot3D::PopStyleVar();
         ImPlot3D::PopColormap();
@@ -1978,22 +1983,21 @@ void FDNToolboxApp::DrawEchoDensity()
 
         if (echo_density_data.mixing_time < time_data.back())
         {
-            ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), 2.0f);
-            ImPlot::PlotInfLines("Mixing Time", &echo_density_data.mixing_time, 1, ImPlotInfLinesFlags_None);
+            // TODO: ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), 2.0f);
+            // ImPlot::PlotInfLines("Mixing Time", &echo_density_data.mixing_time, 1, ImPlotInfLinesFlags_None);
         }
 
         if (show_rir)
         {
             auto rir_echo_density_data = rir_analyzer_.GetEchoDensityData(window_size_ms, hop_size_ms);
-            ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
+            // TODO: ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
             ImPlot::PlotLine("RIR Echo Density", rir_echo_density_data.sparse_indices.data(),
                              rir_echo_density_data.echo_density.data(), rir_echo_density_data.sparse_indices.size());
 
             if (rir_echo_density_data.mixing_time < time_data.back())
             {
-                ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
-                ImPlot::PlotInfLines("RIR Mixing Time", &rir_echo_density_data.mixing_time, 1,
-                                     ImPlotInfLinesFlags_None);
+                // TODO: ImPlot::SetNextLineStyle(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), 2.0f);
+                ImPlot::PlotInfLines("RIR Mixing Time", &rir_echo_density_data.mixing_time, 1);
             }
         }
 
@@ -2030,7 +2034,7 @@ void FDNToolboxApp::DrawT60s()
         tick_labels.assign(t60_data.octave_band_frequencies.begin(), t60_data.octave_band_frequencies.end());
         ImPlot::SetupAxisTicks(ImAxis_X1, tick_labels.data(), tick_labels.size(), nullptr, false);
 
-        ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
+        // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 7.0f);
         ImPlot::PlotLine("RT60s", t60_data.octave_band_frequencies.data(), t60_data.t60_octaves.data(),
                          t60_data.t60_octaves.size());
 
@@ -2038,7 +2042,7 @@ void FDNToolboxApp::DrawT60s()
         {
             auto rir_t60_data = rir_analyzer_.GetT60Data(db_start, db_end);
 
-            ImPlot::SetNextMarkerStyle(ImPlotMarker_Square, 7.0f);
+            // TODO: ImPlot::SetNextMarkerStyle(ImPlotMarker_Square, 7.0f);
             ImPlot::PlotLine("RIR RT60s", rir_t60_data.octave_band_frequencies.data(), rir_t60_data.t60_octaves.data(),
                              rir_t60_data.t60_octaves.size());
         }

@@ -175,7 +175,7 @@ else()
                ${GLFW_INCLUDE_DIR}
                ${GLAD_INCLUDE_DIR}
     )
-    target_link_libraries(imgui ${OPENGL_LIBRARIES} glfw)
+    target_link_libraries(imgui PUBLIC ${OPENGL_LIBRARIES} glfw)
 endif()
 
 cpmaddpackage(
