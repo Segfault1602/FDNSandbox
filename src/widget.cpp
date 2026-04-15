@@ -125,15 +125,16 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
 
         if (point_changed)
         {
-            sfFDN::ThreeBandAbsorptionParams three_band_params;
-            three_band_params.t60_dc = static_cast<float>(t60s_draggable[0]);
-            three_band_params.t60_mid = static_cast<float>(t60s_draggable[1]);
-            three_band_params.t60_ny = static_cast<float>(t60s_draggable[2]);
-            three_band_params.low_shelf_cutoff = static_cast<float>(frequencies_draggable[0]);
-            three_band_params.high_shelf_cutoff = static_cast<float>(frequencies_draggable[1]);
-            three_band_params.q = 1.f / std::numbers::sqrt2_v<float>;
-            three_band_params.sample_rate = static_cast<float>(Settings::Instance().SampleRate());
-            auto sos = sfFDN::DesignThreeBandAbsorption(three_band_params, kTestDelay);
+            sfFDN::ThreeBandFilterOptions three_band_options;
+            three_band_options.t60s[0] = static_cast<float>(t60s_draggable[0]);
+            three_band_options.t60s[1] = static_cast<float>(t60s_draggable[1]);
+            three_band_options.t60s[2] = static_cast<float>(t60s_draggable[2]);
+            three_band_options.freqs[0] = static_cast<float>(frequencies_draggable[0]);
+            three_band_options.freqs[1] = static_cast<float>(frequencies_draggable[1]);
+            three_band_options.q = 1.f / std::numbers::sqrt2_v<float>;
+            three_band_options.sample_rate = static_cast<float>(Settings::Instance().SampleRate());
+            three_band_options.delay = kTestDelay;
+            auto sos = sfFDN::DesignThreeBandAbsorption(three_band_options);
 
             H = utils::AbsFreqz(sos, filter_freqs_plot, Settings::Instance().SampleRate());
             // Convert to T60 values for plotting on the primary y-axis
@@ -287,7 +288,14 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         gains = utils::T60ToGainsDb(t60s, kTestDelay, Settings::Instance().SampleRate());
         gains_plot = gains; // utils::pchip(frequencies, gains, frequencies_plot);
         std::vector<float> t60s_f(t60s.begin(), t60s.end());
-        auto sos = sfFDN::GetTwoFilter(t60s_f, kTestDelay, Settings::Instance().SampleRate(), shelf_cutoff);
+
+        sfFDN::TenBandFilterOptions ten_band_options;
+        std::ranges::copy(t60s_f, ten_band_options.t60s.begin());
+        ten_band_options.sample_rate = static_cast<float>(Settings::Instance().SampleRate());
+        ten_band_options.delay = kTestDelay;
+        ten_band_options.shelf_cutoff = shelf_cutoff;
+
+        auto sos = sfFDN::DesignTenBandAbsorption(ten_band_options);
 
         H = utils::AbsFreqz(sos, filter_freqs_plot, Settings::Instance().SampleRate());
 
@@ -342,61 +350,66 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
     return config_changed;
 }
 
-void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
-{
-    // 2 stage per row
-    const int num_plots = info.stage_count * 2 + 1; // Each stage has a matrix and a delay, plus one initial matrix
-    constexpr int kPlotsPerRow = 4;
-    int num_rows = (num_plots + kPlotsPerRow - 1) / kPlotsPerRow;
+// void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
+// {
+//     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_RdBu;
+//     // 2 stage per row
+//     const int num_plots = info.stage_count * 2 + 1; // Each stage has a matrix and a delay, plus one initial matrix
+//     constexpr int kPlotsPerRow = 4;
+//     int num_rows = (num_plots + kPlotsPerRow - 1) / kPlotsPerRow;
 
-    int subplot_height = num_rows * 200; // Height of each subplot row
+//     int subplot_height = num_rows * 200; // Height of each subplot row
 
-    constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
-    if (ImPlot::BeginSubplots("Cascaded Feedback Matrix", num_rows, kPlotsPerRow, ImVec2(800, subplot_height),
-                              ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
-    {
-        // Plot the initial matrix
-        if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
-        {
-            const auto& matrix = info.matrices[0];
-            ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
-            const char* label_fmt = info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
-            ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
-                                ImPlotPoint(0, 0), ImPlotPoint(1, 1));
+//     constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
+//     if (ImPlot::BeginSubplots("Cascaded Feedback Matrix", num_rows, kPlotsPerRow, ImVec2(800, subplot_height),
+//                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
+//     {
+//         // Plot the initial matrix
+//         ImPlot::PushColormap(feedback_matrix_colormap);
+//         if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
+//         {
+//             const auto& matrix = info.matrices[0];
+//             ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
+//             const char* label_fmt = info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
+//             ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
+//                                 ImPlotPoint(0, 0), ImPlotPoint(1, 1));
 
-            ImPlot::EndPlot();
-        }
+//             ImPlot::EndPlot();
+//         }
+//         ImPlot::PopColormap();
 
-        for (size_t i = 0; i < info.stage_count; ++i)
-        {
-            const auto& matrix = info.matrices[i + 1];
-            const auto& delays = info.delays[i];
+//         for (size_t i = 0; i < info.stage_count; ++i)
+//         {
+//             const auto& matrix = info.matrices[i + 1];
+//             const auto& delays = info.delays[i];
 
-            if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
-            {
-                ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
-                const char* label_fmt =
-                    info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
-                ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
-                                    ImPlotPoint(0, 0), ImPlotPoint(1, 1));
+//             if (ImPlot::BeginPlot("##delays", ImVec2(50, 50), ImPlotFlags_NoLegend))
+//             {
+//                 ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, axes_flags);
 
-                ImPlot::EndPlot();
-            }
+//                 ImPlotSpec spec{};
+//                 spec.Flags = ImPlotBarsFlags_Horizontal;
+//                 ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, spec);
+//                 ImPlot::EndPlot();
+//             }
 
-            if (ImPlot::BeginPlot("##delays", ImVec2(50, 50), ImPlotFlags_NoLegend))
-            {
-                ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, axes_flags);
+//             ImPlot::PushColormap(feedback_matrix_colormap);
+//             if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
+//             {
+//                 ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
+//                 const char* label_fmt =
+//                     info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
+//                 ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
+//                                     ImPlotPoint(0, 0), ImPlotPoint(1, 1));
 
-                ImPlotSpec spec{};
-                spec.Flags = ImPlotBarsFlags_Horizontal;
-                ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, spec);
-                ImPlot::EndPlot();
-            }
-        }
+//                 ImPlot::EndPlot();
+//             }
+//             ImPlot::PopColormap();
+//         }
 
-        ImPlot::EndSubplots();
-    }
-}
+//         ImPlot::EndSubplots();
+//     }
+// }
 
 bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 {
@@ -460,15 +473,40 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 
     ImGui::DragFloatRange2("Gain Range", &min_gain, &max_gain, 0.01f, -1.0f, 1.0f, "%.2f");
 
-    for (uint32_t i = 0; i < N; ++i)
+    const float spacing = 4;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
+
+    constexpr uint32_t max_sliders_per_row = 8;
+    const uint32_t sliders_per_row = std::min(static_cast<uint32_t>(N), max_sliders_per_row);
+    const uint32_t num_rows = (N + sliders_per_row - 1) / sliders_per_row;
+
+    for (uint32_t row = 0; row < num_rows; ++row)
     {
-        std::string label = "Gain " + std::to_string(i + 1);
-        config_changed |= ImGui::SliderFloat(label.c_str(), &gains[i], -1.f, 1.0f, "%.2f");
+        for (uint32_t i = 0; i < sliders_per_row; ++i)
+        {
+            size_t index = row * sliders_per_row + i;
+            if (index >= N)
+            {
+                break;
+            }
+            if (i > 0)
+            {
+                ImGui::SameLine();
+            }
+
+            ImGui::PushID(static_cast<int>(index));
+            config_changed |=
+                ImGui::VSliderFloat("##v", ImVec2(18, 50), &gains[index], -1.f, 1.0f, "", ImGuiSliderFlags_None);
+            if (ImGui::IsItemActive() || ImGui::IsItemHovered())
+                ImGui::SetTooltip("%.3f", gains[index]);
+            ImGui::PopID();
+        }
     }
+    ImGui::PopStyleVar();
 
     ImGui::Text("Adjust all:");
     ImGui::SameLine();
-    if (ImGui::Button("-"))
+    if (ImGui::Button("-", ImVec2(30, 0)))
     {
         config_changed = true;
         for (uint32_t i = 0; i < N; ++i)
@@ -478,7 +516,7 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("+"))
+    if (ImGui::Button("+", ImVec2(30, 0)))
     {
         config_changed = true;
         for (uint32_t i = 0; i < N; ++i)
@@ -491,21 +529,21 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 }
 } // namespace
 
-void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
+void DrawInputOutputGainsPlot(const sfFDN::FDNConfig2& config, sfFDN::FDN* fdn)
 {
     if (ImPlot::BeginSubplots("##Input/Output_Gains", 2, 1, ImVec2(-1, 200),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
-        std::vector<float> input_gains(config.N, 0.0f);
-        std::vector<float> output_gains(config.N, 0.0f);
+        std::vector<float> input_gains(config.fdn_size, 0.0f);
+        std::vector<float> output_gains(config.fdn_size, 0.0f);
         if (fdn)
         {
             fdn_info::GetInputAndOutputGains(fdn, input_gains, output_gains);
         }
         else
         {
-            input_gains = config.input_gains;
-            output_gains = config.output_gains;
+            input_gains = config.input_block_config.parallel_gains_config.gains;
+            output_gains = config.output_block_config.parallel_gains_config.gains;
         }
 
         constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
@@ -529,48 +567,51 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
     }
 }
 
-void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
+void DrawDelaysPlot(const sfFDN::FDNConfig2& config, uint32_t max_delay)
 {
     if (ImPlot::BeginPlot("Delays", ImVec2(-1, 100), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
         constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
         ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
 
-        ImPlot::SetupAxesLimits(-1, config.delays.size(), 0, max_delay, ImPlotCond_Always);
+        ImPlot::SetupAxesLimits(-1, config.delay_bank_config.delays.size(), 0, max_delay, ImPlotCond_Always);
 
-        ImPlot::PlotBars("##Delays", config.delays.data(), config.delays.size(), 0.90, 0);
+        ImPlot::PlotBars("##Delays", config.delay_bank_config.delays.data(), config.delay_bank_config.delays.size(),
+                         0.90, 0);
         ImPlot::EndPlot();
     }
 }
 
-void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config)
+void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig2& config, sfFDN::FDN* fdn)
 {
     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_RdBu;
 
     static std::vector<float> feedback_matrix;
-    const uint32_t N = config.N;
+    const uint32_t N = config.fdn_size;
 
-    std::visit(
-        [&](auto&& arg) {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, std::vector<float>>)
-            {
-                feedback_matrix = arg;
-            }
-            else if constexpr (std::is_same_v<T, sfFDN::CascadedFeedbackMatrixInfo>)
-            {
-                feedback_matrix = arg.matrices[0]; // Just show the first stage for simplicity
-            }
-        },
-        config.matrix_info);
+    if (fdn)
+    {
+        uint32_t matrix_size;
+        feedback_matrix.resize(N * N);
+        if (!fdn_info::GetFeedbackMatrix(fdn, feedback_matrix, matrix_size))
+        {
+            feedback_matrix.clear();
+        }
+        assert(matrix_size == N);
+    }
+
+    // std::visit(
+    //     [&](auto&& arg) {
+    //         sfFDN::ScalarMatrixType matrix_type = arg.type;
+    //         feedback_matrix = sfFDN::GenerateMatrix(N, matrix_type);
+    //     },
+    //     config.feedback_matrix_config);
 
     ImPlot::PushColormap(feedback_matrix_colormap);
 
-    constexpr float kColorBarWidth = 75.0f;
     float win_width = ImGui::GetContentRegionAvail().x;
 
-    if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(win_width - kColorBarWidth, 300),
-                          ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
+    if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(win_width, 300), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
 
         constexpr ImPlotAxisFlags axes_flags =
@@ -583,13 +624,12 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config)
         ImPlot::EndPlot();
     }
 
-    ImGui::SameLine();
-    ImPlot::ColormapScale("##FBColorbar", -1, 1, ImVec2(kColorBarWidth, 300));
-
     ImPlot::PopColormap();
 }
 
-bool DrawInputGainsWidget(sfFDN::FDNConfig& config)
+#if 0
+
+bool DrawInputGainsWidget(sfFDN::FDNConfig2& config)
 {
     if (config.input_gains.size() != config.N)
     {
@@ -632,7 +672,7 @@ bool DrawInputGainsWidget(sfFDN::FDNConfig& config)
     return config_changed;
 }
 
-bool DrawOutputGainsWidget(sfFDN::FDNConfig& config)
+bool DrawOutputGainsWidget(sfFDN::FDNConfig2& config)
 {
     if (config.output_gains.size() != config.N)
     {
@@ -675,7 +715,7 @@ bool DrawOutputGainsWidget(sfFDN::FDNConfig& config)
     return config_changed;
 }
 
-bool DrawDelayLengthsWidget(sfFDN::FDNConfig& config, int& min_delay, int& max_delay, uint32_t random_seed)
+bool DrawDelayLengthsWidget(sfFDN::FDNConfig2& config, int& min_delay, int& max_delay, uint32_t random_seed)
 {
     bool config_changed = false;
     bool should_update_delays = false;
@@ -799,7 +839,7 @@ bool DrawDelayLengthsWidget(sfFDN::FDNConfig& config, int& min_delay, int& max_d
     return config_changed;
 }
 
-bool DrawExtraDelayWidget(sfFDN::FDNConfig& config, bool force_update)
+bool DrawExtraDelayWidget(sfFDN::FDNConfig2& config, bool force_update)
 {
     bool config_changed = force_update;
 
@@ -1149,7 +1189,7 @@ bool DrawTimeVaryingDelayWidget(sfFDN::TimeVaryingDelayConfig& config, uint32_t 
     return config_changed;
 }
 
-bool DrawDiffuserWidget(sfFDN::FDNConfig& config, bool force_update)
+bool DrawDiffuserWidget(sfFDN::FDNConfig2& config, bool force_update)
 {
     bool config_changed = force_update;
     const uint32_t N = config.N;
@@ -1183,7 +1223,7 @@ bool DrawDiffuserWidget(sfFDN::FDNConfig& config, bool force_update)
     return config_changed;
 }
 
-bool DrawScalarMatrixWidget(sfFDN::FDNConfig& config, uint32_t random_seed)
+bool DrawScalarMatrixWidget(sfFDN::FDNConfig2& config, uint32_t random_seed)
 {
     bool config_changed = false;
     bool should_update_feedback_matrix = false;
@@ -1388,7 +1428,7 @@ bool DrawScalarMatrixWidget(sfFDN::FDNConfig& config, uint32_t random_seed)
     return config_changed;
 }
 
-bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
+bool DrawDelayFilterWidget(sfFDN::FDNConfig2& config)
 {
     bool config_changed = false;
     static float feedback_gain = 0.9999f;
@@ -1536,7 +1576,7 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
     return config_changed;
 }
 
-bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
+bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig2& config)
 {
     static bool show_tc_filter_designer = false;
     static std::vector<float> tc_gains(kNBands, 0.f);
@@ -1694,6 +1734,7 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
 
     return config_changed;
 }
+#endif
 
 bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const float> time_data, double& ir_duration)
 {

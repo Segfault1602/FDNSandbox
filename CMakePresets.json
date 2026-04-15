@@ -14,9 +14,10 @@
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "gcc",
                 "CMAKE_CXX_COMPILER": "g++",
-                "CPM_audio_utils_SOURCE:": "${sourceDir}/../audio_utils",
-                "CPM_sfFDN_SOURCE:": "${sourceDir}/../sfFDN",
-                "CPM_FdnOpt_SOURCE:": "${sourceDir}/../fdn_opt"
+                "CPM_audio_utils_SOURCE:": "/home/alex/src/audio_utils",
+                "CPM_sfFDN_SOURCE:": "/home/alex/src/sfFDN",
+                "CPM_FdnOpt_SOURCE:": "/home/alex/src/fdn_opt",
+                "CPM_ensmallen_SOURCE:": "/home/alex/src/ensmallen"
             }
         },
         {
@@ -27,7 +28,10 @@
             "binaryDir": "${sourceDir}/build/ninja",
             "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake",
             "cacheVariables": {
-                "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+                "CPM_audio_utils_SOURCE:": "/home/alex/src/audio_utils",
+                "CPM_sfFDN_SOURCE:": "/home/alex/src/sfFDN",
+                "CPM_FdnOpt_SOURCE:": "/home/alex/src/fdn_opt",
+                "CPM_ensmallen_SOURCE:": "/home/alex/src/ensmallen"
             }
         },
         {

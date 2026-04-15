@@ -11,6 +11,7 @@
 #include <numbers>
 #include <span>
 #include <stdexcept>
+#include <variant>
 #include <vector>
 
 #include "settings.h"
@@ -19,6 +20,16 @@
 
 namespace
 {
+// helper type for the visitor #4
+template <class... Ts>
+struct overloaded : Ts...
+{
+    using Ts::operator()...;
+};
+// explicit deduction guide (not needed as of C++20)
+template <class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
 Eigen::ArrayXcf Polyval(const Eigen::ArrayXf& p, const Eigen::ArrayXcf& x)
 {
     Eigen::ArrayXcf result = Eigen::ArrayXcf::Zero(x.size());
@@ -302,6 +313,60 @@ std::string GetDelayLengthTypeName(int type)
     return "Unknown";
 }
 
+std::string GetDelayInterpolationTypeName(int type)
+{
+    sfFDN::DelayInterpolationType interp_type = static_cast<sfFDN::DelayInterpolationType>(type);
+    switch (interp_type)
+    {
+    case sfFDN::DelayInterpolationType::None:
+        return "None";
+    case sfFDN::DelayInterpolationType::Linear:
+        return "Linear";
+    case sfFDN::DelayInterpolationType::Allpass:
+        return "Allpass";
+    case sfFDN::DelayInterpolationType::Lagrange:
+        return "Lagrange";
+    default:
+        return "Unknown";
+    }
+}
+
+sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNConfig2& config)
+{
+    for (auto& config_variant : config.loop_filter_configs)
+    {
+        if (std::holds_alternative<sfFDN::AttenuationFilterBankOptions>(config_variant))
+        {
+            return std::get<sfFDN::AttenuationFilterBankOptions>(config_variant);
+        }
+    }
+
+    assert(false);
+    // Create a default one if not found
+    sfFDN::AttenuationFilterBankOptions default_config;
+    for (auto i = 0; i < config.fdn_size; ++i)
+    {
+        default_config.filter_configs.emplace_back(sfFDN::ProportionalAttenuationOptions{
+            .t60 = 1.f, .delay = -1.f, .sample_rate = static_cast<float>(config.sample_rate)});
+    }
+
+    config.loop_filter_configs.emplace_back(default_config);
+    return default_config;
+}
+
+void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig2& config,
+                                         const sfFDN::AttenuationFilterBankOptions& new_options)
+{
+    for (auto i = 0u; i < config.loop_filter_configs.size(); ++i)
+    {
+        if (std::holds_alternative<sfFDN::AttenuationFilterBankOptions>(config.loop_filter_configs[i]))
+        {
+            config.loop_filter_configs[i] = new_options;
+            return;
+        }
+    }
+}
+
 std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate)
 {
     std::vector<float> gains(t60s.size(), 0.0f);
@@ -327,6 +392,92 @@ std::vector<float> ComputeRMS(std::span<const float> buffer, uint32_t block_size
         rms_values.push_back(rms);
     }
     return rms_values;
+}
+
+void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size)
+{
+    std::visit(
+        overloaded{
+            [new_size](sfFDN::ParallelGainsOptions& config) { config.gains.resize(new_size, 0.5f); },
+            [new_size](sfFDN::ParallelSchroederAllpassSectionOptions& config) { config.sections.resize(new_size); },
+            [new_size](sfFDN::AttenuationFilterBankOptions& config) {
+                auto previous_size = config.filter_configs.size();
+                config.filter_configs.resize(new_size);
+
+                auto last_config = config.filter_configs.back();
+                for (size_t i = previous_size; i < new_size; ++i)
+                {
+                    config.filter_configs[i] = last_config;
+                }
+            },
+            [new_size](sfFDN::DelayBankOptions& config) { config.delays.resize(new_size, 512.f); },
+            [new_size](sfFDN::DelayBankTimeVaryingOptions& config) { config.delays.resize(new_size, 512.f); },
+            [new_size](sfFDN::CascadedFeedbackMatrixOptions& config) { config.matrix_size = new_size; },
+            [new_size](sfFDN::ScalarFeedbackMatrixOptions& config) {
+                config.matrix_size = new_size;
+                if (config.custom_matrix.has_value())
+                {
+                    config.custom_matrix->resize(new_size * new_size, 0.f);
+                }
+            },
+        },
+        config_variant);
+}
+
+void ResizeFDNConfig(sfFDN::FDNConfig2& config, uint32_t new_size)
+{
+    config.fdn_size = new_size;
+
+    config.delay_bank_config.delays.resize(new_size, 512.f);
+
+    config.input_block_config.parallel_gains_config.gains.resize(new_size, 0.5f);
+
+    for (auto& processor_variant : config.input_block_config.multichannel_processors)
+    {
+        ResizeMultichannelProcessorConfigs(processor_variant, new_size);
+    }
+
+    config.output_block_config.parallel_gains_config.gains.resize(new_size, 0.5f);
+    for (auto& processor_variant : config.output_block_config.multichannel_processors)
+    {
+        ResizeMultichannelProcessorConfigs(processor_variant, new_size);
+    }
+
+    for (auto& processor_variant : config.loop_filter_configs)
+    {
+        ResizeMultichannelProcessorConfigs(processor_variant, new_size);
+    }
+
+    std::visit([new_size](auto&& feedback_matrix_config) { feedback_matrix_config.matrix_size = new_size; },
+               config.feedback_matrix_config);
+}
+
+std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& processor_variant)
+{
+    return std::visit(overloaded{
+                          [](const sfFDN::SchroederAllpassSectionOptions&) { return "Schroeder Allpass"; },
+                          [](const sfFDN::AllpassFilterOptions&) { return "Allpass Filter"; },
+                          [](const sfFDN::CascadedBiquadsOptions&) { return "Cascaded Biquads"; },
+                          [](const sfFDN::FirOptions&) { return "FIR Filter"; },
+                          [](const sfFDN::DelayOptions&) { return "Delay"; },
+                          [](const sfFDN::GraphicEQOptions&) { return "Graphic EQ"; },
+                      },
+                      processor_variant);
+}
+
+std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& processor_variant)
+{
+    return std::visit(
+        overloaded{
+            [](const sfFDN::ParallelGainsOptions&) { return "Parallel Gains"; },
+            [](const sfFDN::ParallelSchroederAllpassSectionOptions&) { return "Parallel Schroeder Allpass"; },
+            [](const sfFDN::AttenuationFilterBankOptions&) { return "Attenuation Filter Bank"; },
+            [](const sfFDN::DelayBankOptions&) { return "Delay Bank"; },
+            [](const sfFDN::DelayBankTimeVaryingOptions&) { return "Time-Varying Delay Bank"; },
+            [](const sfFDN::CascadedFeedbackMatrixOptions&) { return "Cascaded Feedback Matrix"; },
+            [](const sfFDN::ScalarFeedbackMatrixOptions&) { return "Scalar Feedback Matrix"; },
+        },
+        processor_variant);
 }
 
 template std::vector<double> LogSpace(double start, double stop, size_t num);

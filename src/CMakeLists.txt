@@ -8,9 +8,10 @@ target_sources(
             fdn_analyzer.cpp
             ir_analyzer.cpp
             fdn_info.cpp
+            fdn_widget.cpp
             presets.cpp
             app_imconfig.h
-            optimization_gui.cpp
+            # optimization_gui.cpp
 )
 target_link_libraries(
     fdn_sandbox_app

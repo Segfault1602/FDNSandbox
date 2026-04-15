@@ -13,7 +13,7 @@ class OptimizationGUI
     OptimizationGUI(quill::Logger* logger);
     ~OptimizationGUI() = default;
 
-    bool Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir);
+    bool Draw(sfFDN::FDNConfig2& fdn_config, std::span<const float> target_rir);
 
   private:
     fdn_optimization::FDNOptimizer fdn_optimizer_;

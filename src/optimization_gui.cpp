@@ -191,7 +191,7 @@ OptimizationGUI::OptimizationGUI(quill::Logger* logger)
 {
 }
 
-bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir)
+bool OptimizationGUI::Draw(sfFDN::FDNConfig2& fdn_config, std::span<const float> target_rir)
 {
     bool updated_fdn = false;
     float content_region_width = ImGui::GetContentRegionAvail().x;

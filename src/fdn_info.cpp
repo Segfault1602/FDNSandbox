@@ -161,7 +161,7 @@ bool GetInputAndOutputGains(const sfFDN::FDN* fdn, std::vector<float>& input_gai
 bool GetDelays(const sfFDN::FDN* fdn, std::vector<uint32_t>& delays)
 {
     const sfFDN::DelayBank& delay_bank = fdn->GetDelayBank();
-    std::vector<uint32_t> delay_values = delay_bank.GetDelays();
+    auto delay_values = delay_bank.GetDelays();
 
     delays.resize(delay_values.size());
     std::ranges::copy(delay_values, delays.begin());

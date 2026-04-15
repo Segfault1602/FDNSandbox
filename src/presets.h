@@ -7,7 +7,7 @@
 namespace presets
 {
 
-sfFDN::FDNConfig GetDefaultFDNConfig();
+sfFDN::FDNConfig2 GetDefaultFDNConfig();
 
 std::unique_ptr<sfFDN::FDN> CreateDefaultFDN();
 
