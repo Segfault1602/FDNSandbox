@@ -10,9 +10,9 @@
 namespace presets
 {
 
-sfFDN::FDNConfig2 GetDefaultFDNConfig()
+sfFDN::FDNConfig GetDefaultFDNConfig()
 {
-    sfFDN::FDNConfig2 config{};
+    sfFDN::FDNConfig config{};
     config.fdn_size = 8;
     config.transposed = false;
     config.direct_gain = 0.0f;
@@ -33,7 +33,7 @@ sfFDN::FDNConfig2 GetDefaultFDNConfig()
     sfFDN::AttenuationFilterBankOptions attenuation_filter_bank_options{};
     for (auto delay : config.delay_bank_config.delays)
     {
-        sfFDN::ProportionalAttenuationOptions attenuation_options{
+        sfFDN::HomogenousFilterOptions attenuation_options{
             .t60 = 1.f, .delay = delay, .sample_rate = static_cast<float>(config.sample_rate)};
         attenuation_filter_bank_options.filter_configs.push_back(attenuation_options);
     }

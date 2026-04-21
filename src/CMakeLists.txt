@@ -11,14 +11,14 @@ target_sources(
             fdn_widget.cpp
             presets.cpp
             app_imconfig.h
-            # optimization_gui.cpp
+            optimization_gui.cpp
 )
 target_link_libraries(
     fdn_sandbox_app
     PUBLIC audio_utils
            quill::quill
            readerwriterqueue
-           sfFDN.sfFDN
+           sfFDN::sfFDN
            imgui
            fdn_optimization
            SndFile::sndfile

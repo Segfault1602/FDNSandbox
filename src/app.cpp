@@ -5,8 +5,8 @@
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft_utils.h>
 
-// #include "optimization_gui.h"
 #include "fdn_widget.h"
+#include "optimization_gui.h"
 #include "presets.h"
 #include "settings.h"
 #include "utils.h"
@@ -128,7 +128,7 @@ FDNToolboxApp::FDNToolboxApp()
     , fdn_cleanup_queue_(16)
     , direct_delay_(0, Settings::Instance().SampleRate())
     , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
-    // , optimization_gui_(Settings::Instance().GetLogger())
+    , optimization_gui_(Settings::Instance().GetLogger())
     , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
     , load_config_browser(0)
     , save_config_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
@@ -442,6 +442,7 @@ void FDNToolboxApp::loop()
         ImGui::DockBuilderDockWindow("RT60s", dock_main_id);
         ImGui::DockBuilderDockWindow("Cepstrum", dock_main_id);
         ImGui::DockBuilderDockWindow("Echo Density", dock_main_id);
+        ImGui::DockBuilderDockWindow("Optimization Loss", dock_main_id);
         ImGui::DockBuilderFinish(dockspace_id);
     }
 
@@ -466,6 +467,8 @@ void FDNToolboxApp::loop()
 
     DrawVisualization();
 
+    DrawOptimizationLoss();
+
     ImGui::End(); // End the main window
 
     if (first_time)
@@ -485,7 +488,7 @@ void FDNToolboxApp::UpdateFDN()
     auto start = std::chrono::high_resolution_clock::now();
     fdn_config_.sample_rate = Settings::Instance().SampleRate();
 
-    gui_fdn_ = sfFDN::CreateFDNFromConfig2(fdn_config_);
+    gui_fdn_ = sfFDN::CreateFDNFromConfig(fdn_config_);
     gui_fdn_->SetDirectGain(0.f);
 
     // Need to use CloneFDN() here because CreateFDNFromConfig is not always deterministic (e.g. when using random
@@ -618,7 +621,7 @@ void FDNToolboxApp::DrawMainMenuBar()
         std::string filename = load_config_browser.GetSelected().string();
         try
         {
-            // sfFDN::FDNConfig2::LoadFromFile(filename, fdn_config_);
+            // sfFDN::FDNConfig::LoadFromFile(filename, fdn_config_);
             UpdateFDN();
         }
         catch (const std::exception& e)
@@ -638,7 +641,7 @@ void FDNToolboxApp::DrawMainMenuBar()
 
         // try
         // {
-        //     sfFDN::FDNConfig2::SaveToFile(filename, fdn_config_);
+        //     sfFDN::FDNConfig::SaveToFile(filename, fdn_config_);
         // }
         // catch (const std::exception& e)
         // {
@@ -750,6 +753,35 @@ bool FDNToolboxApp::DrawFDNConfigurator()
 
     if (ImGui::TreeNode("Edit feedback matrix"))
     {
+        bool is_cascaded =
+            std::holds_alternative<sfFDN::CascadedFeedbackMatrixOptions>(fdn_config_.feedback_matrix_config);
+
+        if (ImGui::Checkbox("Cascaded", &is_cascaded))
+        {
+            config_changed = true;
+            if (is_cascaded)
+            {
+                sfFDN::CascadedFeedbackMatrixOptions cascaded_options;
+                std::visit(
+                    [&cascaded_options](auto&& options) {
+                        cascaded_options.matrix_size = options.matrix_size;
+                        cascaded_options.type = options.type;
+                    },
+                    fdn_config_.feedback_matrix_config);
+                fdn_config_.feedback_matrix_config = cascaded_options;
+            }
+            else
+            {
+                sfFDN::ScalarFeedbackMatrixOptions scalar_options;
+                std::visit(
+                    [&scalar_options](auto&& options) {
+                        scalar_options.matrix_size = options.matrix_size;
+                        scalar_options.type = options.type;
+                    },
+                    fdn_config_.feedback_matrix_config);
+                fdn_config_.feedback_matrix_config = scalar_options;
+            }
+        }
         config_changed |= DrawFDNOptions(fdn_config_.feedback_matrix_config, fdn_config_);
         ImGui::TreePop();
     }
@@ -786,7 +818,7 @@ bool FDNToolboxApp::DrawFDNConfigurator()
             std::visit(
                 [&selected_filter_type](auto&& options) {
                     using T = std::decay_t<decltype(options)>;
-                    if constexpr (std::is_same_v<T, sfFDN::ProportionalAttenuationOptions>)
+                    if constexpr (std::is_same_v<T, sfFDN::HomogenousFilterOptions>)
                     {
                         selected_filter_type = 0;
                     }
@@ -814,7 +846,7 @@ bool FDNToolboxApp::DrawFDNConfigurator()
                     switch (selected_filter_type)
                     {
                     case 0:
-                        att_filter_options = sfFDN::ProportionalAttenuationOptions{};
+                        att_filter_options = sfFDN::HomogenousFilterOptions{};
                         break;
                     case 1:
                         att_filter_options = sfFDN::TwoBandFilterOptions{};
@@ -1450,10 +1482,10 @@ void FDNToolboxApp::DrawOptimizationWindow()
         return;
     }
 
-    // if (optimization_gui_.Draw(fdn_config_, rir_analyzer_.GetImpulseResponse()))
-    // {
-    //     UpdateFDN();
-    // }
+    if (optimization_gui_.Draw(fdn_config_, rir_analyzer_.GetImpulseResponse()))
+    {
+        UpdateFDN();
+    }
 
     ImGui::End();
 }
@@ -1469,6 +1501,19 @@ void FDNToolboxApp::DrawVisualization()
     DrawEnergyDecayRelief();
     DrawT60s();
     DrawEchoDensity();
+}
+
+void FDNToolboxApp::DrawOptimizationLoss()
+{
+    if (!ImGui::Begin("Optimization Loss"))
+    {
+        ImGui::End();
+        return;
+    }
+
+    optimization_gui_.PlotLossHistory();
+
+    ImGui::End();
 }
 
 void FDNToolboxApp::DrawSpectrogram()

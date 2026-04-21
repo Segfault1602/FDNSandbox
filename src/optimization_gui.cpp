@@ -37,25 +37,15 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
     }
     else if (algo_type == fdn_optimization::OptimizationAlgoType::SPSA)
     {
-        static float alpha = 0.01f;
-        static float gamma = 0.101f;
-        static float step_size = 0.9f;
-        static float evaluation_step_size = 0.9f;
-        static int max_iterations = 1000000;
+        static fdn_optimization::SPSAParameters spsa_params;
 
-        ImGui::InputFloat("Alpha", &alpha, 0.001f, 0.1f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputFloat("Gamma", &gamma, 0.05f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputFloat("Step Size", &step_size, 0.1f, 2.0f, "%.3f");
-        ImGui::InputFloat("Evaluation Step Size", &evaluation_step_size, 0.1f, 2.0f, "%.3f");
-        ImGui::InputInt("Max Iterations", &max_iterations);
+        ImGui::InputDouble("Alpha", &spsa_params.alpha, 0.001f, 0.1f, "%.3f", ImGuiSliderFlags_Logarithmic);
+        ImGui::InputDouble("Gamma", &spsa_params.gamma, 0.05f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
+        ImGui::InputDouble("Step Size", &spsa_params.step_size, 0.1f, 2.0f, "%.3f");
+        ImGui::InputDouble("Evaluation Step Size", &spsa_params.evaluationStepSize, 0.1f, 2.0f, "%.3f");
+        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &spsa_params.max_iterations);
 
-        return fdn_optimization::SPSAParameters{
-            .alpha = alpha,
-            .gamma = gamma,
-            .step_size = step_size,
-            .evaluationStepSize = evaluation_step_size,
-            .max_iterations = static_cast<size_t>(max_iterations),
-        };
+        return spsa_params;
     }
     else if (algo_type == fdn_optimization::OptimizationAlgoType::SimulatedAnnealing)
     {
@@ -191,7 +181,7 @@ OptimizationGUI::OptimizationGUI(quill::Logger* logger)
 {
 }
 
-bool OptimizationGUI::Draw(sfFDN::FDNConfig2& fdn_config, std::span<const float> target_rir)
+bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir)
 {
     bool updated_fdn = false;
     float content_region_width = ImGui::GetContentRegionAvail().x;
@@ -261,8 +251,6 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig2& fdn_config, std::span<const float>
                             &kMinWeight, &kMaxWeight, "%.2f");
         ImGui::SliderScalar("Sparsity Weight", ImGuiDataType_Double, &opt_info_.sparsity_weight, &kMinWeight,
                             &kMaxWeight, "%.2f");
-        ImGui::SliderScalar("Power Envelope Weight", ImGuiDataType_Double, &opt_info_.power_envelope_weight,
-                            &kMinWeight, &kMaxWeight, "%.2f");
 
         ImGui::PopItemWidth();
     }
@@ -447,21 +435,13 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig2& fdn_config, std::span<const float>
             loss_history = result.loss_history[0];
             all_loss_histories = result.loss_history;
             loss_names = result.loss_names;
+
+            loss_history_.losses = result.loss_history;
+            loss_history_.loss_names = result.loss_names;
+            loss_history_.loss_names.insert(loss_history_.loss_names.begin(), "Total Loss");
         }
 
         fdn_config = result.optimized_fdn_config;
-
-        if (optimize_filters_checkbox_)
-        {
-            if (std::holds_alternative<sfFDN::TenBandFilterConfig>(fdn_config.attenuation_filter_config))
-            {
-                const sfFDN::TenBandFilterConfig& attenuation_config =
-                    std::get<sfFDN::TenBandFilterConfig>(fdn_config.attenuation_filter_config);
-                LOG_INFO(logger_, "Optimized T60s: {}", attenuation_config.t60s);
-            }
-
-            LOG_INFO(logger_, "Optimized Tone Correction Gains: {}", fdn_config.tc_gains);
-        }
 
         updated_fdn = true;
     }
@@ -483,28 +463,53 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig2& fdn_config, std::span<const float>
 
     ImGui::BeginChild("Loss Plot", ImVec2(-1, -1), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
 
-    if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
-    {
-        ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
-        ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-        ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
+    PlotLossHistory();
+    // if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
+    // {
+    //     ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
+    //     ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+    //     ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
 
-        double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
+    //     double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
+    //     ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
 
-        ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
+    //     ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
 
-        for (auto i = 1u; i < all_loss_histories.size(); ++i)
-        {
-            const std::vector<double>& other_loss_history = all_loss_histories[i];
-            ImPlot::PlotLine((loss_names[i - 1]).c_str(), other_loss_history.data(),
-                             static_cast<int>(other_loss_history.size()));
-        }
-        ImPlot::EndPlot();
-    }
+    //     for (auto i = 1u; i < all_loss_histories.size(); ++i)
+    //     {
+    //         const std::vector<double>& other_loss_history = all_loss_histories[i];
+    //         ImPlot::PlotLine((loss_names[i - 1]).c_str(), other_loss_history.data(),
+    //                          static_cast<int>(other_loss_history.size()));
+    //     }
+    //     ImPlot::EndPlot();
+    // }
     ImGui::EndChild();
 
     ImGui::PopStyleVar();
 
     return updated_fdn;
+}
+
+void OptimizationGUI::PlotLossHistory()
+{
+    if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
+    {
+        ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
+        ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        // ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
+
+        // double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
+        // ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
+
+        // ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
+
+        auto loss_count = loss_history_.losses.size();
+        assert(loss_count == loss_history_.loss_names.size());
+        for (auto i = 0u; i < loss_count; ++i)
+        {
+            ImPlot::PlotLine(loss_history_.loss_names[i].c_str(), loss_history_.losses[i].data(),
+                             static_cast<int>(loss_history_.losses[i].size()));
+        }
+        ImPlot::EndPlot();
+    }
 }

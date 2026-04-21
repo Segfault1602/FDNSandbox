@@ -90,9 +90,9 @@ std::string GetDelayLengthTypeName(int type);
 
 std::string GetDelayInterpolationTypeName(int type);
 
-sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNConfig2& config);
+sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNConfig& config);
 
-void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig2& config,
+void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig& config,
                                          const sfFDN::AttenuationFilterBankOptions& new_options);
 
 std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate);
@@ -111,7 +111,7 @@ struct Span2D
     }
 };
 
-void ResizeFDNConfig(sfFDN::FDNConfig2& config, uint32_t new_size);
+void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size);
 
 std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& processor_variant);
 std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& processor_variant);

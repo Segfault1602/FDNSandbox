@@ -3,6 +3,8 @@
 #include <imgui.h>
 #include <implot.h>
 
+#include <imfilebrowser.h>
+
 #include <sffdn/sffdn.h>
 
 #include "utils.h"
@@ -67,6 +69,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ScalarFeedbackMatrixOptions& config)
     if (config_changed)
     {
         config.type = static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type);
+        config.custom_matrix = sfFDN::GenerateMatrix(config.matrix_size, config.type, config.rng_seed, config.arg);
     }
 
     return config_changed;
@@ -514,7 +517,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::ParallelSchroederAllpassSectionOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOptions& config)
 {
     bool config_changed = false;
 
@@ -607,7 +610,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ParallelSchroederAllpassSectionOptions&
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::ProportionalAttenuationOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::HomogenousFilterOptions& config)
 {
     bool config_changed = false;
 
@@ -705,9 +708,68 @@ bool FDNWidgetVisitor::operator()(sfFDN::CascadedBiquadsOptions&)
     return false;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::FirOptions&)
+bool FDNWidgetVisitor::operator()(sfFDN::FirOptions& config)
 {
-    return false;
+    bool config_changed = false;
+
+    static std::map<std::ptrdiff_t, int> filter_type_map;
+    if (filter_type_map.size() > 100)
+    {
+        filter_type_map.clear();
+    }
+
+    auto it = filter_type_map.find(reinterpret_cast<std::ptrdiff_t>(&config));
+    if (it == filter_type_map.end())
+    {
+        filter_type_map[reinterpret_cast<std::ptrdiff_t>(&config)] = 0;
+        it = filter_type_map.find(reinterpret_cast<std::ptrdiff_t>(&config));
+    }
+
+    int filter_type = it->second;
+    config_changed |= ImGui::RadioButton("File", &filter_type, 0);
+    ImGui::SameLine();
+    config_changed |= ImGui::RadioButton("Velvet", &filter_type, 1);
+
+    it->second = filter_type;
+
+    if (filter_type == 0)
+    {
+        if (config.coeffs.empty())
+        {
+            config.coeffs = {1.f};
+        }
+        static ImGui::FileBrowser file_dialog;
+        file_dialog.SetTitle("Select FIR file");
+        file_dialog.SetTypeFilters({".wav"});
+        if (ImGui::Button("Select FIR file"))
+        {
+            file_dialog.Open();
+        }
+        file_dialog.Display();
+        if (file_dialog.HasSelected())
+        {
+            std::string filename = file_dialog.GetSelected().string();
+            config.coeffs = utils::ReadAudioFile(filename, 0);
+            config_changed = true;
+            file_dialog.ClearSelected();
+        }
+    }
+    else if (filter_type == 1)
+    {
+        config_changed |= DrawVelvetNoiseDecorrelatorConfig(config, fdn_config);
+    }
+
+    if (ImPlot::BeginPlot("Velvet decorrelator", ImVec2(-1, 200), ImPlotFlags_NoLegend))
+    {
+        ImPlot::SetupAxes("Samples", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        // ImPlot::SetupAxisLimits(ImAxis_X1, 0, config.sequence.size(), ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0, 1.0, ImPlotCond_Always);
+
+        ImPlot::PlotLine("Velvet Noise", config.coeffs.data(), config.coeffs.size());
+        ImPlot::EndPlot();
+    }
+
+    return config_changed;
 }
 
 bool FDNWidgetVisitor::operator()(sfFDN::AttenuationFilterBankOptions&)
@@ -715,44 +777,44 @@ bool FDNWidgetVisitor::operator()(sfFDN::AttenuationFilterBankOptions&)
     return false;
 }
 
-bool DrawFDNOptions(sfFDN::DelayBankOptions& config, const sfFDN::FDNConfig2& fdn_config)
+bool DrawFDNOptions(sfFDN::DelayBankOptions& config, const sfFDN::FDNConfig& fdn_config)
 {
     FDNWidgetVisitor widget{fdn_config};
     return widget(config);
 }
 
-bool DrawFDNOptions(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig2& fdn_config)
+bool DrawFDNOptions(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig& fdn_config)
 {
     FDNWidgetVisitor widget{fdn_config};
     return widget(config);
 }
 
-bool DrawFDNOptions(sfFDN::attenuation_filter_variant_t& config_variant, const sfFDN::FDNConfig2& fdn_config)
+bool DrawFDNOptions(sfFDN::attenuation_filter_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config)
 {
     FDNWidgetVisitor widget{fdn_config};
     return std::visit(widget, config_variant);
 }
 
-bool DrawFDNOptions(sfFDN::single_channel_processor_variant_t& config_variant, const sfFDN::FDNConfig2& fdn_config)
+bool DrawFDNOptions(sfFDN::single_channel_processor_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config)
 {
     FDNWidgetVisitor widget{fdn_config};
     return std::visit(widget, config_variant);
 }
 
-bool DrawFDNOptions(sfFDN::multi_channel_processor_variant_t& config_variant, const sfFDN::FDNConfig2& fdn_config)
+bool DrawFDNOptions(sfFDN::multi_channel_processor_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config)
 {
     FDNWidgetVisitor widget{fdn_config};
     return std::visit(widget, config_variant);
 }
 
-bool DrawFDNOptions(sfFDN::feedback_matrix_variant_t& config_variant, const sfFDN::FDNConfig2& fdn_config)
+bool DrawFDNOptions(sfFDN::feedback_matrix_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config)
 {
     FDNWidgetVisitor widget{fdn_config};
     return std::visit(widget, config_variant);
 }
 
 bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_variant_t>& processors,
-                                    sfFDN::FDNConfig2& fdn_config)
+                                    sfFDN::FDNConfig& fdn_config)
 {
     bool config_changed = false;
     ImGui::SeparatorText("Single Channel Processors");
@@ -813,7 +875,7 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
 
 std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelProcessorPopup()
 {
-    const std::array<const char*, 2> single_channel_processor_names = {"Delay", "Schroeder Allpass"};
+    const std::array single_channel_processor_names = {"Delay", "Schroeder Allpass", "Velvet Noise Decorrelator"};
     std::optional<sfFDN::single_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("single_channel_processor_popup"))
     {
@@ -829,6 +891,9 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
                     new_processor =
                         sfFDN::SchroederAllpassSectionOptions{.delays = {47}, .gains = {0.7f}, .parallel = false};
                     break;
+                case 2:
+                    new_processor = sfFDN::FirOptions{};
+                    break;
                 default:
                     break;
                 }
@@ -840,7 +905,7 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
 }
 
 bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_variant_t>& processors,
-                                   sfFDN::FDNConfig2& fdn_config, bool is_loop_filter)
+                                   sfFDN::FDNConfig& fdn_config, bool is_loop_filter)
 {
     bool config_changed = false;
 
@@ -916,7 +981,7 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
                     config_changed = true;
                     break;
                 case 1:
-                    processors.emplace_back(sfFDN::ParallelSchroederAllpassSectionOptions{});
+                    processors.emplace_back(sfFDN::MultichannelSchroederAllpassSectionOptions{});
                     config_changed = true;
                     break;
                 case 2:
@@ -931,5 +996,39 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
     }
 
     ImGui::PopID();
+    return config_changed;
+}
+
+bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::FDNConfig&)
+{
+    bool config_changed = false;
+    constexpr const char* kOvnSequences[] = {"decorrelator32_oVND15.wav", "decorrelator32_oVND30.wav"};
+    static uint32_t selected_file = 0;
+    if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_file]))
+    {
+        for (int i = 0; i < IM_ARRAYSIZE(kOvnSequences); i++)
+        {
+            bool is_selected = (selected_file == i);
+            if (ImGui::Selectable(kOvnSequences[i], is_selected))
+            {
+                selected_file = i;
+                config_changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
+    uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
+
+    static uint32_t channel = 0;
+    config_changed |= ImGui::InputInt("Channel", reinterpret_cast<int*>(&channel), 1, 1);
+    channel = std::clamp(channel, 0u, max_channels > 0 ? max_channels - 1 : 0u);
+
+    if (config_changed)
+    {
+        config.coeffs = utils::ReadAudioFile(file_path.string(), channel);
+    }
+
     return config_changed;
 }

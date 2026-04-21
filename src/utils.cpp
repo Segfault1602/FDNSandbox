@@ -331,7 +331,7 @@ std::string GetDelayInterpolationTypeName(int type)
     }
 }
 
-sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNConfig2& config)
+sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNConfig& config)
 {
     for (auto& config_variant : config.loop_filter_configs)
     {
@@ -346,7 +346,7 @@ sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNC
     sfFDN::AttenuationFilterBankOptions default_config;
     for (auto i = 0; i < config.fdn_size; ++i)
     {
-        default_config.filter_configs.emplace_back(sfFDN::ProportionalAttenuationOptions{
+        default_config.filter_configs.emplace_back(sfFDN::HomogenousFilterOptions{
             .t60 = 1.f, .delay = -1.f, .sample_rate = static_cast<float>(config.sample_rate)});
     }
 
@@ -354,7 +354,7 @@ sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNC
     return default_config;
 }
 
-void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig2& config,
+void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig& config,
                                          const sfFDN::AttenuationFilterBankOptions& new_options)
 {
     for (auto i = 0u; i < config.loop_filter_configs.size(); ++i)
@@ -399,7 +399,7 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
     std::visit(
         overloaded{
             [new_size](sfFDN::ParallelGainsOptions& config) { config.gains.resize(new_size, 0.5f); },
-            [new_size](sfFDN::ParallelSchroederAllpassSectionOptions& config) { config.sections.resize(new_size); },
+            [new_size](sfFDN::MultichannelSchroederAllpassSectionOptions& config) { config.sections.resize(new_size); },
             [new_size](sfFDN::AttenuationFilterBankOptions& config) {
                 auto previous_size = config.filter_configs.size();
                 config.filter_configs.resize(new_size);
@@ -424,7 +424,7 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
         config_variant);
 }
 
-void ResizeFDNConfig(sfFDN::FDNConfig2& config, uint32_t new_size)
+void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size)
 {
     config.fdn_size = new_size;
 
@@ -470,7 +470,7 @@ std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& pro
     return std::visit(
         overloaded{
             [](const sfFDN::ParallelGainsOptions&) { return "Parallel Gains"; },
-            [](const sfFDN::ParallelSchroederAllpassSectionOptions&) { return "Parallel Schroeder Allpass"; },
+            [](const sfFDN::MultichannelSchroederAllpassSectionOptions&) { return "Parallel Schroeder Allpass"; },
             [](const sfFDN::AttenuationFilterBankOptions&) { return "Attenuation Filter Bank"; },
             [](const sfFDN::DelayBankOptions&) { return "Delay Bank"; },
             [](const sfFDN::DelayBankTimeVaryingOptions&) { return "Time-Varying Delay Bank"; },

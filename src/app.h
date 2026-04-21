@@ -47,6 +47,7 @@ class FDNToolboxApp
     void DrawCepstrum();
     void DrawEchoDensity();
     void DrawT60s();
+    void DrawOptimizationLoss();
 
     void UpdateFDN();
 
@@ -63,10 +64,10 @@ class FDNToolboxApp
     moodycamel::ReaderWriterQueue<std::unique_ptr<sfFDN::FDN>> fdn_update_queue_;
     moodycamel::ReaderWriterQueue<std::unique_ptr<sfFDN::FDN>> fdn_cleanup_queue_;
 
-    sfFDN::FDNConfig2 fdn_config_;
+    sfFDN::FDNConfig fdn_config_;
 
-    sfFDN::FDNConfig2 fdn_config_A_;
-    sfFDN::FDNConfig2 fdn_config_B_;
+    sfFDN::FDNConfig fdn_config_A_;
+    sfFDN::FDNConfig fdn_config_B_;
 
     enum class AudioState
     {
@@ -93,7 +94,7 @@ class FDNToolboxApp
     sfFDN::Delay direct_delay_;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
-    // OptimizationGUI optimization_gui_;
+    OptimizationGUI optimization_gui_;
 
     ImGui::FileBrowser save_ir_browser;
     ImGui::FileBrowser load_config_browser;

@@ -529,7 +529,7 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 }
 } // namespace
 
-void DrawInputOutputGainsPlot(const sfFDN::FDNConfig2& config, sfFDN::FDN* fdn)
+void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 {
     if (ImPlot::BeginSubplots("##Input/Output_Gains", 2, 1, ImVec2(-1, 200),
                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
@@ -567,7 +567,7 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig2& config, sfFDN::FDN* fdn)
     }
 }
 
-void DrawDelaysPlot(const sfFDN::FDNConfig2& config, uint32_t max_delay)
+void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
 {
     if (ImPlot::BeginPlot("Delays", ImVec2(-1, 100), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
@@ -582,7 +582,7 @@ void DrawDelaysPlot(const sfFDN::FDNConfig2& config, uint32_t max_delay)
     }
 }
 
-void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig2& config, sfFDN::FDN* fdn)
+void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 {
     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_RdBu;
 
@@ -629,7 +629,7 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig2& config, sfFDN::FDN* fdn)
 
 #if 0
 
-bool DrawInputGainsWidget(sfFDN::FDNConfig2& config)
+bool DrawInputGainsWidget(sfFDN::FDNConfig& config)
 {
     if (config.input_gains.size() != config.N)
     {
@@ -672,7 +672,7 @@ bool DrawInputGainsWidget(sfFDN::FDNConfig2& config)
     return config_changed;
 }
 
-bool DrawOutputGainsWidget(sfFDN::FDNConfig2& config)
+bool DrawOutputGainsWidget(sfFDN::FDNConfig& config)
 {
     if (config.output_gains.size() != config.N)
     {
@@ -715,7 +715,7 @@ bool DrawOutputGainsWidget(sfFDN::FDNConfig2& config)
     return config_changed;
 }
 
-bool DrawDelayLengthsWidget(sfFDN::FDNConfig2& config, int& min_delay, int& max_delay, uint32_t random_seed)
+bool DrawDelayLengthsWidget(sfFDN::FDNConfig& config, int& min_delay, int& max_delay, uint32_t random_seed)
 {
     bool config_changed = false;
     bool should_update_delays = false;
@@ -839,7 +839,7 @@ bool DrawDelayLengthsWidget(sfFDN::FDNConfig2& config, int& min_delay, int& max_
     return config_changed;
 }
 
-bool DrawExtraDelayWidget(sfFDN::FDNConfig2& config, bool force_update)
+bool DrawExtraDelayWidget(sfFDN::FDNConfig& config, bool force_update)
 {
     bool config_changed = force_update;
 
@@ -1189,7 +1189,7 @@ bool DrawTimeVaryingDelayWidget(sfFDN::TimeVaryingDelayConfig& config, uint32_t 
     return config_changed;
 }
 
-bool DrawDiffuserWidget(sfFDN::FDNConfig2& config, bool force_update)
+bool DrawDiffuserWidget(sfFDN::FDNConfig& config, bool force_update)
 {
     bool config_changed = force_update;
     const uint32_t N = config.N;
@@ -1223,7 +1223,7 @@ bool DrawDiffuserWidget(sfFDN::FDNConfig2& config, bool force_update)
     return config_changed;
 }
 
-bool DrawScalarMatrixWidget(sfFDN::FDNConfig2& config, uint32_t random_seed)
+bool DrawScalarMatrixWidget(sfFDN::FDNConfig& config, uint32_t random_seed)
 {
     bool config_changed = false;
     bool should_update_feedback_matrix = false;
@@ -1428,7 +1428,7 @@ bool DrawScalarMatrixWidget(sfFDN::FDNConfig2& config, uint32_t random_seed)
     return config_changed;
 }
 
-bool DrawDelayFilterWidget(sfFDN::FDNConfig2& config)
+bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
 {
     bool config_changed = false;
     static float feedback_gain = 0.9999f;
@@ -1576,7 +1576,7 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig2& config)
     return config_changed;
 }
 
-bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig2& config)
+bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
 {
     static bool show_tc_filter_designer = false;
     static std::vector<float> tc_gains(kNBands, 0.f);
