@@ -37,6 +37,7 @@ class FDNToolboxApp
     void DrawAudioPlayer();
     void DrawSettingsWindow();
     void DrawOptimizationWindow();
+    void DrawFDNInfoWindow();
     void DrawVisualization();
     void DrawSpectrogram();
     void DrawSpectrum();

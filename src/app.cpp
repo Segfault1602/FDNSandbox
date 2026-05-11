@@ -430,6 +430,7 @@ void FDNToolboxApp::loop()
         ImGui::DockBuilderDockWindow("Audio Player", dock_id_ir);
         ImGui::DockBuilderDockWindow("Settings", dock_id_ir);
         ImGui::DockBuilderDockWindow("Optimization", dock_id_ir);
+        ImGui::DockBuilderDockWindow("FDN Info", dock_id_ir);
         ImGui::DockBuilderDockWindow("FDN Configurator", dock_id_fdn);
         ImGui::DockBuilderDockWindow("Extras", dock_id_fdn);
         ImGui::DockBuilderDockWindow("Visualization", dock_main_id);
@@ -464,6 +465,8 @@ void FDNToolboxApp::loop()
     DrawSettingsWindow();
 
     DrawOptimizationWindow();
+
+    DrawFDNInfoWindow();
 
     DrawVisualization();
 
@@ -1486,6 +1489,24 @@ void FDNToolboxApp::DrawOptimizationWindow()
     {
         UpdateFDN();
     }
+
+    ImGui::End();
+}
+
+void FDNToolboxApp::DrawFDNInfoWindow()
+{
+    if (!ImGui::Begin("FDN Info"))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("FDN Size: %u", fdn_config_.fdn_size);
+
+    nlohmann::json json_config = fdn_config_;
+    std::string json_str = json_config.dump(4); // Pretty print with 4
+    ImGui::InputTextMultiline("##FDNConfig", &json_str[0], json_str.size(), ImVec2(-1, -1),
+                              ImGuiInputTextFlags_ReadOnly);
 
     ImGui::End();
 }

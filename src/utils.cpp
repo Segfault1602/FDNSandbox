@@ -448,8 +448,24 @@ void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size)
         ResizeMultichannelProcessorConfigs(processor_variant, new_size);
     }
 
-    std::visit([new_size](auto&& feedback_matrix_config) { feedback_matrix_config.matrix_size = new_size; },
-               config.feedback_matrix_config);
+    std::visit(
+        [new_size](auto&& feedback_matrix_config) {
+            feedback_matrix_config.matrix_size = new_size;
+            if (feedback_matrix_config.type == sfFDN::ScalarMatrixType::Hadamard && !IsPowerOfTwo(new_size))
+            {
+                feedback_matrix_config.type = sfFDN::ScalarMatrixType::Random;
+            }
+
+            using T = std::decay_t<decltype(feedback_matrix_config)>;
+            if constexpr (std::is_same_v<T, sfFDN::ScalarFeedbackMatrixOptions>)
+            {
+                if (feedback_matrix_config.custom_matrix.has_value())
+                {
+                    feedback_matrix_config.custom_matrix = sfFDN::GenerateMatrix(new_size, feedback_matrix_config.type);
+                }
+            }
+        },
+        config.feedback_matrix_config);
 }
 
 std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& processor_variant)

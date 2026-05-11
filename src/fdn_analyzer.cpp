@@ -169,9 +169,9 @@ FilterData FDNAnalyzer::GetFilterData()
         filter_mag_responses_.clear();
         filter_phase_responses_.clear();
 
-        if (fdn_->GetFilterBank())
+        if (fdn_->GetLoopFilter())
         {
-            auto filter_bank = fdn_->GetFilterBank();
+            auto filter_bank = fdn_->GetLoopFilter();
             filter_bank->Clear();
 
             const uint32_t kFilterCount = filter_bank->InputChannelCount();

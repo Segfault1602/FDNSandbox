@@ -190,7 +190,6 @@ cpmaddpackage(
     "AUDIO_UTILS_USE_SANITIZER OFF"
 )
 
-
 cpmaddpackage(
     NAME
     sfFDN
@@ -198,17 +197,16 @@ cpmaddpackage(
     https://github.com/Segfault1602/sfFDN.git
     GIT_TAG
     main
-    )
+)
 
-
-    cpmaddpackage(
-        NAME
-        FdnOpt
-        GIT_REPOSITORY
-        "https://github.com/Segfault1602/fdn_opt.git"
-        GIT_TAG
-        main
-        )
+cpmaddpackage(
+    NAME
+    FdnOpt
+    GIT_REPOSITORY
+    "https://github.com/Segfault1602/fdn_opt.git"
+    GIT_TAG
+    main
+)
 
 message(STATUS "Found audio_utils: ${audio_utils_SOURCE_DIR}")
 message(STATUS "Found sfFDN: ${sfFDN_SOURCE_DIR}")

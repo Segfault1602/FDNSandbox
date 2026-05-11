@@ -398,6 +398,10 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config)
         ImGui::OpenPopup("Delay Presets");
     }
 
+    static bool make_prime = false;
+    ImGui::SameLine();
+    config_changed |= ImGui::Checkbox("Make Prime", &make_prime);
+
     if (ImGui::BeginPopup("Delay Presets"))
     {
         for (int i = 0; i < static_cast<int>(sfFDN::DelayLengthType::Count); ++i)
@@ -425,6 +429,14 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config)
         {
             config_changed |= ImGui::SliderFloat(label.c_str(), &config.delays[i], static_cast<float>(min_delay),
                                                  static_cast<float>(max_delay));
+        }
+    }
+
+    if (config_changed && make_prime)
+    {
+        for (auto& delay : config.delays)
+        {
+            delay = utils::GetClosestPrime(static_cast<uint32_t>(delay));
         }
     }
 
