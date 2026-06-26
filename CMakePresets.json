@@ -13,11 +13,7 @@
             "binaryDir": "${sourceDir}/build/gcc",
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "gcc",
-                "CMAKE_CXX_COMPILER": "g++",
-                "CPM_audio_utils_SOURCE:": "/home/alex/src/audio_utils",
-                "CPM_sfFDN_SOURCE:": "/home/alex/src/sfFDN",
-                "CPM_FdnOpt_SOURCE:": "/home/alex/src/fdn_opt",
-                "CPM_ensmallen_SOURCE:": "/home/alex/src/ensmallen"
+                "CMAKE_CXX_COMPILER": "g++"
             }
         },
         {
@@ -26,13 +22,7 @@
             "description": "Build for LLVM",
             "generator": "Ninja Multi-Config",
             "binaryDir": "${sourceDir}/build/ninja",
-            "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake",
-            "cacheVariables": {
-                "CPM_audio_utils_SOURCE:": "/home/alex/src/audio_utils",
-                "CPM_sfFDN_SOURCE:": "/home/alex/src/sfFDN",
-                "CPM_FdnOpt_SOURCE:": "/home/alex/src/fdn_opt",
-                "CPM_ensmallen_SOURCE:": "/home/alex/src/ensmallen"
-            }
+            "toolchainFile": "${sourceDir}/cmake/llvm-toolchain.cmake"
         },
         {
             "name": "windows",

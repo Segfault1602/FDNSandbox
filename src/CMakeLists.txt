@@ -15,10 +15,10 @@ target_sources(
 )
 target_link_libraries(
     fdn_sandbox_app
-    PUBLIC audio_utils
+    PUBLIC audio_utils::audio_utils
            quill::quill
            readerwriterqueue
-           sfFDN::sfFDN
+           sfFDN.sfFDN
            imgui
            fdn_optimization
            SndFile::sndfile
