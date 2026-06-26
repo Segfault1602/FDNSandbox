@@ -8,7 +8,6 @@
 
 #include <bitset>
 #include <cstdint>
-#include <memory>
 #include <span>
 #include <vector>
 
@@ -79,7 +78,7 @@ enum class AnalysisType : uint8_t
     Cepstrum = 6,
     EchoDensity = 7,
     T60s = 8,
-    AnalysisTypeCount
+    AnalysisTypeCount = 9
 };
 
 class IRAnalyzer
@@ -92,7 +91,7 @@ class IRAnalyzer
 
     std::span<const float> GetImpulseResponse();
 
-    bool IsClipping();
+    bool IsClipping() const;
     std::span<const float> GetTimeData();
 
     SpectrogramData GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale = false);

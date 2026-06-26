@@ -3,6 +3,8 @@ set(CMAKE_CXX_STANDARD 20)
 
 project(FDNSandbox)
 
+add_compile_options(-march=native)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(APPLE)
@@ -10,7 +12,7 @@ if(APPLE)
 endif()
 
 option(FDN_SANDBOX_ENABLE_HARDENING "Enable hardening" ON)
-option(FDN_SANDBOX_USE_SANITIZER "Use AddressSanitizer" OFF)
+option(FDN_SANDBOX_USE_SANITIZER "Use AddressSanitizer" ON)
 
 include(cmake/project-warnings.cmake)
 include(cmake/project-options.cmake)

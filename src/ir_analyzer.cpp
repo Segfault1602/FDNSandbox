@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <numbers>
 
 namespace
 {
@@ -46,6 +45,7 @@ IRAnalyzer::IRAnalyzer(uint32_t samplerate, quill::Logger* logger)
     , overall_t60_(0.0f)
     , echo_density_window_size_ms_(25)
     , echo_density_hop_size_ms_(10)
+    , mixing_time_(0.0f)
 {
 }
 
@@ -79,7 +79,7 @@ std::span<const float> IRAnalyzer::GetTimeData()
     return time_data_;
 }
 
-bool IRAnalyzer::IsClipping()
+bool IRAnalyzer::IsClipping() const
 {
     return is_clipping_;
 }
