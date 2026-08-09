@@ -420,6 +420,16 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
                     config.custom_matrix->resize(new_size * new_size, 0.f);
                 }
             },
+            [new_size](sfFDN::MultichannelFirOptions& config) {
+                auto previous_size = config.coeffs.size();
+                config.coeffs.resize(new_size);
+
+                auto last_config = config.coeffs.back();
+                for (size_t i = previous_size; i < new_size; ++i)
+                {
+                    config.coeffs[i] = last_config;
+                }
+            },
         },
         config_variant);
 }
@@ -492,6 +502,7 @@ std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& pro
             [](const sfFDN::DelayBankTimeVaryingOptions&) { return "Time-Varying Delay Bank"; },
             [](const sfFDN::CascadedFeedbackMatrixOptions&) { return "Cascaded Feedback Matrix"; },
             [](const sfFDN::ScalarFeedbackMatrixOptions&) { return "Scalar Feedback Matrix"; },
+            [](const sfFDN::MultichannelFirOptions&) { return "Multichannel FIR Filter"; },
         },
         processor_variant);
 }

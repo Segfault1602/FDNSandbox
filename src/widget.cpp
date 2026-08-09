@@ -59,6 +59,185 @@ std::vector<float> GetMatrixFromClipboard(uint32_t N)
     return feedback_matrix;
 }
 
+// void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
+// {
+//     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_RdBu;
+//     // 2 stage per row
+//     const int num_plots = info.stage_count * 2 + 1; // Each stage has a matrix and a delay, plus one initial matrix
+//     constexpr int kPlotsPerRow = 4;
+//     int num_rows = (num_plots + kPlotsPerRow - 1) / kPlotsPerRow;
+
+//     int subplot_height = num_rows * 200; // Height of each subplot row
+
+//     constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
+//     if (ImPlot::BeginSubplots("Cascaded Feedback Matrix", num_rows, kPlotsPerRow, ImVec2(800, subplot_height),
+//                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
+//     {
+//         // Plot the initial matrix
+//         ImPlot::PushColormap(feedback_matrix_colormap);
+//         if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
+//         {
+//             const auto& matrix = info.matrices[0];
+//             ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
+//             const char* label_fmt = info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
+//             ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
+//                                 ImPlotPoint(0, 0), ImPlotPoint(1, 1));
+
+//             ImPlot::EndPlot();
+//         }
+//         ImPlot::PopColormap();
+
+//         for (size_t i = 0; i < info.stage_count; ++i)
+//         {
+//             const auto& matrix = info.matrices[i + 1];
+//             const auto& delays = info.delays[i];
+
+//             if (ImPlot::BeginPlot("##delays", ImVec2(50, 50), ImPlotFlags_NoLegend))
+//             {
+//                 ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, axes_flags);
+
+//                 ImPlotSpec spec{};
+//                 spec.Flags = ImPlotBarsFlags_Horizontal;
+//                 ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, spec);
+//                 ImPlot::EndPlot();
+//             }
+
+//             ImPlot::PushColormap(feedback_matrix_colormap);
+//             if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
+//             {
+//                 ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
+//                 const char* label_fmt =
+//                     info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
+//                 ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
+//                                     ImPlotPoint(0, 0), ImPlotPoint(1, 1));
+
+//                 ImPlot::EndPlot();
+//             }
+//             ImPlot::PopColormap();
+//         }
+
+//         ImPlot::EndSubplots();
+//     }
+// }
+
+bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
+{
+    bool config_changed = false;
+    const size_t N = gains.size();
+    if (ImGui::Button("Distribute"))
+    {
+        config_changed = true;
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            gains[i] = 1.0f / N; // Distribute gains evenly
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Randomize"))
+    {
+        config_changed = true;
+        std::random_device rd;                                           // Obtain a random number from hardware
+        std::mt19937 eng(rd());                                          // Seed the generator
+        std::uniform_real_distribution<float> distr(min_gain, max_gain); // Define the range
+
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            gains[i] = distr(eng); // Generate random gains
+        }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::BeginPopupContextItem("Gains Popup"))
+    {
+        static float value = 0.0f; // Default value
+        if (ImGui::Selectable("Set to 0.5"))
+        {
+            value = 0.5f;
+            config_changed = true;
+        }
+        if (ImGui::Selectable("Set to -0.5"))
+        {
+            value = -0.5f;
+            config_changed = true;
+        }
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::DragFloat("##Value", &value, 0.01f, -1.0f, 1.0f))
+        {
+            config_changed = true;
+        }
+
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            gains[i] = value; // Set all gains to the specified value
+        }
+
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::Button("Set all to..."))
+    {
+        config_changed = true;
+        ImGui::OpenPopup("Gains Popup");
+    }
+
+    ImGui::DragFloatRange2("Gain Range", &min_gain, &max_gain, 0.01f, -1.0f, 1.0f, "%.2f");
+
+    const float spacing = 4;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
+
+    constexpr uint32_t max_sliders_per_row = 8;
+    const uint32_t sliders_per_row = std::min(static_cast<uint32_t>(N), max_sliders_per_row);
+    const uint32_t num_rows = (N + sliders_per_row - 1) / sliders_per_row;
+
+    for (uint32_t row = 0; row < num_rows; ++row)
+    {
+        for (uint32_t i = 0; i < sliders_per_row; ++i)
+        {
+            size_t index = row * sliders_per_row + i;
+            if (index >= N)
+            {
+                break;
+            }
+            if (i > 0)
+            {
+                ImGui::SameLine();
+            }
+
+            ImGui::PushID(static_cast<int>(index));
+            config_changed |=
+                ImGui::VSliderFloat("##v", ImVec2(18, 50), &gains[index], -1.f, 1.0f, "", ImGuiSliderFlags_None);
+            if (ImGui::IsItemActive() || ImGui::IsItemHovered())
+                ImGui::SetTooltip("%.3f", gains[index]);
+            ImGui::PopID();
+        }
+    }
+    ImGui::PopStyleVar();
+
+    ImGui::Text("Adjust all:");
+    ImGui::SameLine();
+    if (ImGui::Button("-", ImVec2(30, 0)))
+    {
+        config_changed = true;
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            gains[i] *= 0.9f;
+        }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("+", ImVec2(30, 0)))
+    {
+        config_changed = true;
+        for (uint32_t i = 0; i < N; ++i)
+        {
+            gains[i] *= 1.1f;
+        }
+    }
+
+    return config_changed;
+}
+} // namespace
+
 bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool& show_3band_designer)
 {
     if (!ImGui::Begin("3-Band Designer", &show_3band_designer))
@@ -347,185 +526,6 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
     ImGui::End();
     return config_changed;
 }
-
-// void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
-// {
-//     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_RdBu;
-//     // 2 stage per row
-//     const int num_plots = info.stage_count * 2 + 1; // Each stage has a matrix and a delay, plus one initial matrix
-//     constexpr int kPlotsPerRow = 4;
-//     int num_rows = (num_plots + kPlotsPerRow - 1) / kPlotsPerRow;
-
-//     int subplot_height = num_rows * 200; // Height of each subplot row
-
-//     constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
-//     if (ImPlot::BeginSubplots("Cascaded Feedback Matrix", num_rows, kPlotsPerRow, ImVec2(800, subplot_height),
-//                               ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
-//     {
-//         // Plot the initial matrix
-//         ImPlot::PushColormap(feedback_matrix_colormap);
-//         if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
-//         {
-//             const auto& matrix = info.matrices[0];
-//             ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
-//             const char* label_fmt = info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
-//             ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
-//                                 ImPlotPoint(0, 0), ImPlotPoint(1, 1));
-
-//             ImPlot::EndPlot();
-//         }
-//         ImPlot::PopColormap();
-
-//         for (size_t i = 0; i < info.stage_count; ++i)
-//         {
-//             const auto& matrix = info.matrices[i + 1];
-//             const auto& delays = info.delays[i];
-
-//             if (ImPlot::BeginPlot("##delays", ImVec2(50, 50), ImPlotFlags_NoLegend))
-//             {
-//                 ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, axes_flags);
-
-//                 ImPlotSpec spec{};
-//                 spec.Flags = ImPlotBarsFlags_Horizontal;
-//                 ImPlot::PlotBars("delays", delays.data(), info.channel_count, 0.5, 0, spec);
-//                 ImPlot::EndPlot();
-//             }
-
-//             ImPlot::PushColormap(feedback_matrix_colormap);
-//             if (ImPlot::BeginPlot("##matrix", ImVec2(50, 50), ImPlotFlags_CanvasOnly))
-//             {
-//                 ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
-//                 const char* label_fmt =
-//                     info.channel_count < 4 ? "%.2f" : nullptr; // Adjust label format based on N size
-//                 ImPlot::PlotHeatmap("heat", matrix.data(), info.channel_count, info.channel_count, -1, 1, label_fmt,
-//                                     ImPlotPoint(0, 0), ImPlotPoint(1, 1));
-
-//                 ImPlot::EndPlot();
-//             }
-//             ImPlot::PopColormap();
-//         }
-
-//         ImPlot::EndSubplots();
-//     }
-// }
-
-bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
-{
-    bool config_changed = false;
-    const size_t N = gains.size();
-    if (ImGui::Button("Distribute"))
-    {
-        config_changed = true;
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] = 1.0f / N; // Distribute gains evenly
-        }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Randomize"))
-    {
-        config_changed = true;
-        std::random_device rd;                                           // Obtain a random number from hardware
-        std::mt19937 eng(rd());                                          // Seed the generator
-        std::uniform_real_distribution<float> distr(min_gain, max_gain); // Define the range
-
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] = distr(eng); // Generate random gains
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::BeginPopupContextItem("Gains Popup"))
-    {
-        static float value = 0.0f; // Default value
-        if (ImGui::Selectable("Set to 0.5"))
-        {
-            value = 0.5f;
-            config_changed = true;
-        }
-        if (ImGui::Selectable("Set to -0.5"))
-        {
-            value = -0.5f;
-            config_changed = true;
-        }
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::DragFloat("##Value", &value, 0.01f, -1.0f, 1.0f))
-        {
-            config_changed = true;
-        }
-
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] = value; // Set all gains to the specified value
-        }
-
-        ImGui::EndPopup();
-    }
-
-    if (ImGui::Button("Set all to..."))
-    {
-        config_changed = true;
-        ImGui::OpenPopup("Gains Popup");
-    }
-
-    ImGui::DragFloatRange2("Gain Range", &min_gain, &max_gain, 0.01f, -1.0f, 1.0f, "%.2f");
-
-    const float spacing = 4;
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
-
-    constexpr uint32_t max_sliders_per_row = 8;
-    const uint32_t sliders_per_row = std::min(static_cast<uint32_t>(N), max_sliders_per_row);
-    const uint32_t num_rows = (N + sliders_per_row - 1) / sliders_per_row;
-
-    for (uint32_t row = 0; row < num_rows; ++row)
-    {
-        for (uint32_t i = 0; i < sliders_per_row; ++i)
-        {
-            size_t index = row * sliders_per_row + i;
-            if (index >= N)
-            {
-                break;
-            }
-            if (i > 0)
-            {
-                ImGui::SameLine();
-            }
-
-            ImGui::PushID(static_cast<int>(index));
-            config_changed |=
-                ImGui::VSliderFloat("##v", ImVec2(18, 50), &gains[index], -1.f, 1.0f, "", ImGuiSliderFlags_None);
-            if (ImGui::IsItemActive() || ImGui::IsItemHovered())
-                ImGui::SetTooltip("%.3f", gains[index]);
-            ImGui::PopID();
-        }
-    }
-    ImGui::PopStyleVar();
-
-    ImGui::Text("Adjust all:");
-    ImGui::SameLine();
-    if (ImGui::Button("-", ImVec2(30, 0)))
-    {
-        config_changed = true;
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] *= 0.9f;
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("+", ImVec2(30, 0)))
-    {
-        config_changed = true;
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] *= 1.1f;
-        }
-    }
-
-    return config_changed;
-}
-} // namespace
 
 void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 {

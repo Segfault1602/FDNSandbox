@@ -127,10 +127,16 @@
         "regex": "cpp",
         "armadillo": "cpp"
     },
-    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.intelliSenseEngine": "disabled",
     "C_Cpp.default.compileCommands": [
         "${workspaceFolder}/build/ninja/compile_commands.json"
     ],
     "C_Cpp.default.intelliSenseMode": "windows-clang-x64",
-    "C_Cpp.default.compilerPath": ""
+    "C_Cpp.default.compilerPath": "",
+    "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}/build/ninja",
+        "--background-index",
+        "--clang-tidy",
+        "--header-insertion=never"
+    ]
 }

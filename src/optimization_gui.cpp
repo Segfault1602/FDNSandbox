@@ -11,10 +11,14 @@
 #include "optimizer.h"
 #include "settings.h"
 
+#include <algorithm>
 #include <span>
 
 namespace
 {
+constexpr double kMaxWeight = 2.0;
+constexpr double kMinWeight = 0.0;
+
 fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimization::OptimizationAlgoType algo_type)
 {
     ImGui::PushItemWidth(200);
@@ -177,7 +181,6 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
 
 OptimizationGUI::OptimizationGUI(quill::Logger* logger)
     : fdn_optimizer_(logger)
-    , logger_(logger)
 {
 }
 
@@ -192,104 +195,25 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
     ImGui::SeparatorText("Setup");
 
     opt_info_.parameters_to_optimize.clear();
-    ImGui::Checkbox("Optimize Gains", &optimize_gains_checkbox_);
 
-    if (optimize_gains_checkbox_)
+    static int optimize_type = 0;
+    ImGui::RadioButton("Colorless Optimization", &optimize_type, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("RIR Match Optimization", &optimize_type, 1);
+
+    ImGui::Separator();
+
+    if (optimize_type == 0)
     {
-        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Gains);
+        DrawColorlessSettings();
+    }
+    else if (optimize_type == 1)
+    {
+        DrawRIRMatchSettings(!target_rir.empty());
     }
 
-    ImGui::Checkbox("Optimize Matrix", &optimize_matrix_checkbox_);
-    if (optimize_matrix_checkbox_)
-    {
-        static int matrix_type = 0;
-        ImGui::RadioButton("Random", &matrix_type, 0);
-        ImGui::SameLine();
-        ImGui::RadioButton("Householder", &matrix_type, 1);
-        ImGui::SameLine();
-        ImGui::RadioButton("Circulant", &matrix_type, 2);
-
-        if (matrix_type == 0)
-        {
-            opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix);
-        }
-        else if (matrix_type == 1)
-        {
-            opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Householder);
-        }
-        else if (matrix_type == 2)
-        {
-            opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Circulant);
-        }
-    }
-
-    const bool has_target_rir = !target_rir.empty();
-    ImGui::BeginDisabled(!has_target_rir);
-    ImGui::Checkbox("Optimize Filters", &optimize_filters_checkbox_);
-    ImGui::EndDisabled();
-
-    if (optimize_filters_checkbox_)
-    {
-        optimize_gains_checkbox_ = false;
-        optimize_matrix_checkbox_ = false;
-        opt_info_.parameters_to_optimize.clear();
-        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters);
-        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::TonecorrectionFilters);
-        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::OverallGain);
-    }
-
-    constexpr double kMaxWeight = 2.0;
-    constexpr double kMinWeight = 0.0;
-
-    if (optimize_gains_checkbox_ || optimize_matrix_checkbox_)
-    {
-        ImGui::SeparatorText("Objective Weights");
-
-        ImGui::PushItemWidth(100);
-
-        ImGui::SliderScalar("Spectral Flatness Weight", ImGuiDataType_Double, &opt_info_.spectral_flatness_weight,
-                            &kMinWeight, &kMaxWeight, "%.2f");
-        ImGui::SliderScalar("Sparsity Weight", ImGuiDataType_Double, &opt_info_.sparsity_weight, &kMinWeight,
-                            &kMaxWeight, "%.2f");
-
-        ImGui::PopItemWidth();
-    }
     else if (optimize_filters_checkbox_)
     {
-        ImGui::SeparatorText("RIR Match Weights");
-
-        ImGui::PushItemWidth(100);
-
-        ImGui::SliderScalar("EDC Weight", ImGuiDataType_Double, &opt_info_.edc_weight, &kMinWeight, &kMaxWeight,
-                            "%.2f");
-        ImGui::SliderScalar("Mel EDR Weight", ImGuiDataType_Double, &opt_info_.mel_edr_weight, &kMinWeight, &kMaxWeight,
-                            "%.2f");
-
-        constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};
-        static int selected_fft_size_index = 3; // Default to 4096
-        if (ImGui::BeginCombo("Mel EDR FFT Size", kFFTSizeOptions[selected_fft_size_index]))
-        {
-            for (int i = 0; i < static_cast<int>(kFFTSizeOptions.size()); ++i)
-            {
-                bool is_selected = (selected_fft_size_index == i);
-                if (ImGui::Selectable(kFFTSizeOptions[i], is_selected))
-                {
-                    selected_fft_size_index = i;
-                    opt_info_.mel_edr_fft_length = 512 * static_cast<uint32_t>(1 << i);
-                }
-            }
-            ImGui::EndCombo();
-        }
-
-        ImGui::InputScalar("Mel EDR Hop Size", ImGuiDataType_U32, &opt_info_.mel_edr_hop_size);
-        ImGui::InputScalar("Mel EDR Window Size", ImGuiDataType_U32, &opt_info_.mel_edr_window_size);
-        ImGui::InputScalar("Mel EDR Num Bands", ImGuiDataType_U32, &opt_info_.mel_edr_num_bands);
-
-        opt_info_.mel_edr_window_size = std::clamp(opt_info_.mel_edr_window_size, 256u, opt_info_.mel_edr_fft_length);
-        opt_info_.mel_edr_hop_size = std::clamp(opt_info_.mel_edr_hop_size, 32u, opt_info_.mel_edr_window_size - 1);
-        opt_info_.mel_edr_num_bands = std::clamp(opt_info_.mel_edr_num_bands, 8u, 128u);
-
-        ImGui::PopItemWidth();
     }
 
     ImGui::EndChild();
@@ -351,13 +275,51 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
         {
             opt_info_.initial_fdn_config = fdn_config;
             opt_info_.ir_size = Settings::Instance().SampleRate();
-            if (has_target_rir)
+            if (!target_rir.empty())
             {
                 opt_info_.target_rir.clear();
                 opt_info_.target_rir.reserve(target_rir.size());
                 std::ranges::copy(target_rir, std::back_inserter(opt_info_.target_rir));
             }
 
+            std::vector<std::shared_ptr<fdn_optimization::AudioLoss>> loss_functions;
+            if (optimize_gains_checkbox_ || optimize_matrix_checkbox_)
+            {
+                if (spectral_flatness_weight_ > 0.0)
+                {
+                    constexpr float kTargetSpectralFlatness = 0.5575f;
+                    loss_functions.push_back(std::make_shared<fdn_optimization::SpectralFlatnessLoss>(
+                        kTargetSpectralFlatness, spectral_flatness_weight_));
+                }
+
+                if (sparsity_weight_ > 0.0)
+                {
+                    loss_functions.push_back(
+                        std::make_shared<fdn_optimization::TimeDomainSparsityLoss>(sparsity_weight_));
+                }
+            }
+            else if (optimize_filters_checkbox_)
+            {
+                if (edc_weight_ > 0.0)
+                {
+                    loss_functions.push_back(
+                        std::make_shared<fdn_optimization::EnergyDecayCurveLoss>(target_rir, edc_weight_));
+                }
+
+                if (mel_edr_weight_ > 0.0)
+                {
+                    audio_utils::analysis::EnergyDecayReliefOptions edr_options{.fft_length = mel_edr_fft_length_,
+                                                                                .hop_size = mel_edr_hop_size_,
+                                                                                .window_size = mel_edr_window_size_,
+                                                                                .window_type =
+                                                                                    audio_utils::FFTWindowType::Hann,
+                                                                                .n_mels = mel_edr_num_bands_,
+                                                                                .to_db = true};
+                    loss_functions.push_back(std::make_shared<fdn_optimization::WeightedEDRLoss>(
+                        target_rir, edr_options, -20.0f, mel_edr_weight_));
+                }
+            }
+            fdn_optimizer_.SetLossFunctions(loss_functions);
             fdn_optimizer_.StartOptimization(opt_info_);
             ImGui::OpenPopup("Optimization Progress");
         }
@@ -381,8 +343,7 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
             ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history_vec.size() * 1.25),
                                     ImPlotCond_Always);
 
-            double max_loss =
-                loss_history_vec.empty() ? 1.0 : *std::max_element(loss_history_vec.begin(), loss_history_vec.end());
+            double max_loss = loss_history_vec.empty() ? 1.0 : *std::ranges::max_element(loss_history_vec);
             ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Always);
 
             ImPlot::PlotLine("Loss", loss_history_vec.data(), static_cast<int>(loss_history_vec.size()));
@@ -512,4 +473,97 @@ void OptimizationGUI::PlotLossHistory()
         }
         ImPlot::EndPlot();
     }
+}
+
+void OptimizationGUI::DrawColorlessSettings()
+{
+    ImGui::Checkbox("Optimize Gains", &optimize_gains_checkbox_);
+
+    if (optimize_gains_checkbox_)
+    {
+        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Gains);
+    }
+
+    ImGui::Checkbox("Optimize Matrix", &optimize_matrix_checkbox_);
+    if (optimize_matrix_checkbox_)
+    {
+        static int matrix_type = 0;
+        ImGui::RadioButton("Random", &matrix_type, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Householder", &matrix_type, 1);
+        ImGui::SameLine();
+        ImGui::RadioButton("Circulant", &matrix_type, 2);
+
+        if (matrix_type == 0)
+        {
+            opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix);
+        }
+        else if (matrix_type == 1)
+        {
+            opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Householder);
+        }
+        else if (matrix_type == 2)
+        {
+            opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Circulant);
+        }
+    }
+
+    ImGui::SeparatorText("Objective Weights");
+
+    ImGui::PushItemWidth(100);
+
+    ImGui::SliderScalar("Spectral Flatness Weight", ImGuiDataType_Double, &spectral_flatness_weight_, &kMinWeight,
+                        &kMaxWeight, "%.2f");
+    ImGui::SliderScalar("Sparsity Weight", ImGuiDataType_Double, &sparsity_weight_, &kMinWeight, &kMaxWeight, "%.2f");
+
+    ImGui::PopItemWidth();
+}
+
+void OptimizationGUI::DrawRIRMatchSettings(bool has_target_rir)
+{
+    ImGui::BeginDisabled(!has_target_rir);
+    ImGui::Checkbox("Optimize Filters", &optimize_filters_checkbox_);
+    ImGui::EndDisabled();
+
+    if (optimize_filters_checkbox_)
+    {
+        optimize_gains_checkbox_ = false;
+        optimize_matrix_checkbox_ = false;
+        opt_info_.parameters_to_optimize.clear();
+        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters);
+        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::TonecorrectionFilters);
+        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::OverallGain);
+    }
+
+    ImGui::SeparatorText("RIR Match Weights");
+
+    ImGui::PushItemWidth(100);
+
+    ImGui::SliderScalar("EDC Weight", ImGuiDataType_Double, &edc_weight_, &kMinWeight, &kMaxWeight, "%.2f");
+    ImGui::SliderScalar("Mel EDR Weight", ImGuiDataType_Double, &mel_edr_weight_, &kMinWeight, &kMaxWeight, "%.2f");
+
+    constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};
+    static int selected_fft_size_index = 3; // Default to 4096
+    if (ImGui::BeginCombo("Mel EDR FFT Size", kFFTSizeOptions[selected_fft_size_index]))
+    {
+        for (int i = 0; i < static_cast<int>(kFFTSizeOptions.size()); ++i)
+        {
+            bool is_selected = (selected_fft_size_index == i);
+            if (ImGui::Selectable(kFFTSizeOptions[i], is_selected))
+            {
+                selected_fft_size_index = i;
+                mel_edr_fft_length_ = 512 * static_cast<uint32_t>(1 << i);
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::InputScalar("Mel EDR Hop Size", ImGuiDataType_U32, &mel_edr_hop_size_);
+    ImGui::InputScalar("Mel EDR Window Size", ImGuiDataType_U32, &mel_edr_window_size_);
+    ImGui::InputScalar("Mel EDR Num Bands", ImGuiDataType_U32, &mel_edr_num_bands_);
+
+    mel_edr_window_size_ = std::clamp(mel_edr_window_size_, 256u, mel_edr_fft_length_);
+    mel_edr_hop_size_ = std::clamp(mel_edr_hop_size_, 32u, mel_edr_window_size_ - 1);
+
+    ImGui::PopItemWidth();
 }

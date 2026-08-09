@@ -305,6 +305,13 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
     auto end_time = std::chrono::steady_clock::now();
     auto fdn_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
 
+    // If the FDN output ever goes above |5.0|, it is likely unstable. Clear the fdn
+    if (std::ranges::any_of(fdn_output_data, [](float sample) { return std::abs(sample) > 5.0f; }))
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "FDN output exceeded |5.0|, likely unstable. Clearing FDN.");
+        audio_fdn_->Clear();
+    }
+
     static int last_reverb_type = kFDN_REVERB;
     const int reverb_type = reverb_engine_.load();
 
@@ -810,11 +817,24 @@ bool FDNToolboxApp::DrawFDNConfigurator()
 
         if (ImGui::BeginTabItem("Loop Filters"))
         {
+            assert(fdn_config_.attenuation_filter_bank_config.has_value());
+            auto att_filterbank_options = fdn_config_.attenuation_filter_bank_config.value();
+
             const std::array<const char*, 4> filter_types = {"Homogenous", "2 Bands", "3 Bands", "10 Bands"};
 
+            bool indepedent_t60s = att_filterbank_options.filter_configs.size() > 1;
+            ImGui::Checkbox("Independent T60s", &indepedent_t60s);
+
             int selected_filter_type = 0;
-            auto att_filterbank_options = utils::FindAttenuationFilterBankOptions(fdn_config_);
-            assert(att_filterbank_options.filter_configs.size() == fdn_config_.fdn_size);
+
+            if (!indepedent_t60s)
+            {
+                att_filterbank_options.filter_configs.resize(1);
+            }
+            else
+            {
+                att_filterbank_options.filter_configs.resize(fdn_config_.fdn_size);
+            }
 
             // Right now every delay will have the same filter type
             auto att_filter_options = att_filterbank_options.filter_configs.front();
@@ -864,19 +884,41 @@ bool FDNToolboxApp::DrawFDNConfigurator()
                 }
             }
 
-            config_changed |= DrawFDNOptions(att_filter_options, fdn_config_);
-
-            if (config_changed)
+            if (!indepedent_t60s)
             {
-                att_filterbank_options.filter_configs.clear();
+                config_changed |= DrawFDNOptions(att_filter_options, fdn_config_);
+
+                if (config_changed)
+                {
+                    att_filterbank_options.filter_configs.clear();
+                    // for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
+                    {
+                        att_filterbank_options.filter_configs.emplace_back(att_filter_options);
+                    }
+                    fdn_config_.attenuation_filter_bank_config = att_filterbank_options;
+                }
+            }
+            else
+            {
+                if (att_filterbank_options.filter_configs.size() != fdn_config_.fdn_size || config_changed)
+                {
+                    att_filterbank_options.filter_configs.clear();
+                    for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
+                    {
+                        att_filterbank_options.filter_configs.emplace_back(att_filter_options);
+                    }
+                }
+
                 for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
                 {
-                    att_filterbank_options.filter_configs.emplace_back(att_filter_options);
+                    ImGui::PushID(i);
+                    config_changed |= DrawFDNOptions(att_filterbank_options.filter_configs[i], fdn_config_);
+                    ImGui::PopID();
                 }
-                utils::ReplaceAttenuationFilterBankOptions(fdn_config_, att_filterbank_options);
+                fdn_config_.attenuation_filter_bank_config = att_filterbank_options;
             }
 
-            config_changed |= DrawMultiChannelProcessorList(fdn_config_.loop_filter_configs, fdn_config_, true);
+            config_changed |= DrawMultiChannelProcessorList(fdn_config_.loop_filter_configs, fdn_config_);
 
             ImGui::EndTabItem();
         }
@@ -893,7 +935,7 @@ bool FDNToolboxApp::DrawFDNConfigurator()
                 DrawSingleChannelProcessorList(fdn_config_.output_block_config.single_channel_processors, fdn_config_);
 
             config_changed |=
-                DrawMultiChannelProcessorList(fdn_config_.input_block_config.multichannel_processors, fdn_config_);
+                DrawMultiChannelProcessorList(fdn_config_.output_block_config.multichannel_processors, fdn_config_);
 
             ImGui::EndTabItem();
         }
@@ -1689,7 +1731,7 @@ void FDNToolboxApp::DrawSpectrum()
         if (ImPlot::BeginPlot(plot_title.c_str(), ImVec2(), ImPlotFlags_NoLegend))
         {
             ImPlotAxisFlags x_axis_flags = ImPlotAxisFlags_AutoFit;
-            ImPlotAxisFlags y_axis_flags = ImPlotAxisFlags_AutoFit;
+            ImPlotAxisFlags y_axis_flags = ImPlotAxisFlags_None;
 
             // if (plot_type_changed && !lock_freq_range)
             // {
@@ -1703,7 +1745,7 @@ void FDNToolboxApp::DrawSpectrum()
                 // ImPlot::SetupAxesLimits(frequency_range_min, frequency_range_max, -60.0, 0.0,
                 //                         (lock_freq_range) ? ImPlotCond_Always : ImPlotCond_Once);
 
-                // ImPlot::SetupAxisLimits(ImAxis_Y1, -60.0f, 10.f, ImPlotCond_Always);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, -60.0f, 20.0f, ImPlotCond_Always);
                 // ImPlot::SetupAxisLimits(ImAxis_X1, 0.f, Settings::Instance().SampleRate() / 2.f,
                 // ImPlotCond_Once);
                 ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, spectrum_data.frequency_bins.back());

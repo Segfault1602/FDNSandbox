@@ -196,7 +196,7 @@ cpmaddpackage(
     GIT_REPOSITORY
     https://github.com/Segfault1602/sfFDN.git
     GIT_TAG
-    main
+    develop
 )
 
 cpmaddpackage(

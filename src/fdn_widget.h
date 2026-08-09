@@ -6,25 +6,26 @@ struct FDNWidgetVisitor
 {
     const sfFDN::FDNConfig& fdn_config;
 
-    bool operator()(sfFDN::ScalarFeedbackMatrixOptions& config);
-    bool operator()(sfFDN::CascadedFeedbackMatrixOptions& config);
-    bool operator()(sfFDN::ModulationOptions& config);
-    bool operator()(sfFDN::ParallelGainsOptions& config);
-    bool operator()(sfFDN::DelayOptions& config);
-    bool operator()(sfFDN::DelayBankOptions& config);
-    bool operator()(sfFDN::DelayBankTimeVaryingOptions& config);
-    bool operator()(sfFDN::SchroederAllpassSectionOptions& config);
-    bool operator()(sfFDN::MultichannelSchroederAllpassSectionOptions& config);
-    bool operator()(sfFDN::HomogenousFilterOptions& config);
-    bool operator()(sfFDN::TwoBandFilterOptions& config);
-    bool operator()(sfFDN::ThreeBandFilterOptions& config);
-    bool operator()(sfFDN::TenBandFilterOptions& config);
-    bool operator()(sfFDN::GraphicEQOptions& config);
+    bool operator()(sfFDN::ScalarFeedbackMatrixOptions& config) const;
+    bool operator()(sfFDN::CascadedFeedbackMatrixOptions& config) const;
+    bool operator()(sfFDN::ModulationOptions& config) const;
+    bool operator()(sfFDN::ParallelGainsOptions& config) const;
+    bool operator()(sfFDN::DelayOptions& config) const;
+    bool operator()(sfFDN::DelayBankOptions& config) const;
+    bool operator()(sfFDN::DelayBankTimeVaryingOptions& config) const;
+    bool operator()(sfFDN::SchroederAllpassSectionOptions& config) const;
+    bool operator()(sfFDN::MultichannelSchroederAllpassSectionOptions& config) const;
+    bool operator()(sfFDN::HomogenousFilterOptions& config) const;
+    bool operator()(sfFDN::TwoBandFilterOptions& config) const;
+    bool operator()(sfFDN::ThreeBandFilterOptions& config) const;
+    bool operator()(sfFDN::TenBandFilterOptions& config) const;
+    bool operator()(sfFDN::GraphicEQOptions& config) const;
 
-    bool operator()(sfFDN::AllpassFilterOptions& config);
-    bool operator()(sfFDN::CascadedBiquadsOptions& config);
-    bool operator()(sfFDN::FirOptions& config);
-    bool operator()(sfFDN::AttenuationFilterBankOptions& config);
+    bool operator()(sfFDN::AllpassFilterOptions& config) const;
+    bool operator()(sfFDN::CascadedBiquadsOptions& config) const;
+    bool operator()(sfFDN::FirOptions& config) const;
+    bool operator()(sfFDN::MultichannelFirOptions& config) const;
+    bool operator()(sfFDN::AttenuationFilterBankOptions& config) const;
 };
 
 bool DrawFDNOptions(sfFDN::DelayBankOptions& config, const sfFDN::FDNConfig& fdn_config);
@@ -40,6 +41,8 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
 std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelProcessorPopup();
 
 bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_variant_t>& processors,
-                                   sfFDN::FDNConfig& fdn_config, bool is_loop_filter = false);
+                                   sfFDN::FDNConfig& fdn_config);
+std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProcessorPopup(
+    const sfFDN::FDNConfig& fdn_config);
 
 bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::FDNConfig& fdn_config);

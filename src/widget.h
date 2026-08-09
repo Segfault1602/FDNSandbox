@@ -11,6 +11,9 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn);
 void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay);
 void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn);
 
+bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool& show_3band_designer);
+bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer);
+
 // bool DrawInputGainsWidget(sfFDN::FDNConfig& config);
 // bool DrawOutputGainsWidget(sfFDN::FDNConfig& config);
 // bool DrawDelayLengthsWidget(sfFDN::FDNConfig& config, int& min_delay, int& max_delay, uint32_t random_seed);

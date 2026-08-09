@@ -41,6 +41,7 @@ if(APPLE)
     target_link_libraries(
         ${PROJECT_NAME}
         PRIVATE imgui
+                OpenMP::OpenMP_CXX
                 fdn_sandbox_app
                 "-framework Metal"
                 "-framework MetalKit"

@@ -12,7 +12,7 @@
 #include "imgui_impl_metal.h"
 #include "implot.h"
 #include "implot3d.h"
-#include <stdio.h>
+#include <omp.h>
 
 #define GLFW_INCLUDE_NONE
 #define GLFW_EXPOSE_NATIVE_COCOA
@@ -87,11 +87,13 @@ int main(int, char**)
     style.ScaleAllSizes(main_scale);
     style.FontScaleDpi = main_scale;
 
-    style.FontSizeBase = 18.0f;
+    style.FontSizeBase = 28.0f;
     io.Fonts->AddFontDefault();
     auto medium_font = io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Medium.ttf");
     io.FontDefault = medium_font;
 
+    // Set openmp threads to 4 because otherwise it might try to use the economy cores
+    omp_set_num_threads(4);
 
     FDNToolboxApp app;
 

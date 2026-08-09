@@ -8,8 +8,11 @@
 #include <sffdn/sffdn.h>
 
 #include "utils.h"
+#include "widget.h"
 
+#include <algorithm>
 #include <random>
+#include <ranges>
 #include <vector>
 
 namespace
@@ -54,7 +57,7 @@ bool DrawScalarMatrixTypeComboBox(int& selected_matrix_type, uint32_t fdn_size)
 }
 } // namespace
 
-bool FDNWidgetVisitor::operator()(sfFDN::ScalarFeedbackMatrixOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::ScalarFeedbackMatrixOptions& config) const
 {
     bool config_changed = false;
     if (config.matrix_size != fdn_config.fdn_size)
@@ -75,7 +78,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ScalarFeedbackMatrixOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::CascadedFeedbackMatrixOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::CascadedFeedbackMatrixOptions& config) const
 {
     bool config_changed = false;
     if (config.matrix_size != fdn_config.fdn_size)
@@ -86,7 +89,9 @@ bool FDNWidgetVisitor::operator()(sfFDN::CascadedFeedbackMatrixOptions& config)
 
     constexpr uint32_t kMaxStages = 10;
     constexpr uint32_t kMinStages = 0;
-    config_changed |= ImGui::InputScalar("Stage Count", ImGuiDataType_U32, &config.stage_count);
+    constexpr uint32_t kStep = 1;
+    config_changed |= ImGui::InputScalar("Stage Count", ImGuiDataType_U32, &config.stage_count, &kStep, nullptr, "%u",
+                                         ImGuiInputTextFlags_None);
     config.stage_count = std::clamp(config.stage_count, kMinStages, kMaxStages);
 
     constexpr float kMinSparsity = 1.f;
@@ -101,7 +106,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::CascadedFeedbackMatrixOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::ModulationOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::ModulationOptions& config) const
 {
     bool config_changed = false;
 
@@ -146,7 +151,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ModulationOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::ParallelGainsOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::ParallelGainsOptions& config) const
 {
     // TODO: should find a way to make this not static...
     static float min_gain = -1.f;
@@ -273,7 +278,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ParallelGainsOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config) const
 {
     bool config_changed = false;
 
@@ -342,7 +347,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config) const
 {
     bool config_changed = false;
 
@@ -402,6 +407,12 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config)
     ImGui::SameLine();
     config_changed |= ImGui::Checkbox("Make Prime", &make_prime);
 
+    ImGui::SameLine();
+    if (ImGui::Button("Ordering"))
+    {
+        ImGui::OpenPopup("Delay Ordering");
+    }
+
     if (ImGui::BeginPopup("Delay Presets"))
     {
         for (int i = 0; i < static_cast<int>(sfFDN::DelayLengthType::Count); ++i)
@@ -412,6 +423,29 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config)
                                                        static_cast<sfFDN::DelayLengthType>(i));
                 config_changed = true;
             }
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("Delay Ordering"))
+    {
+        if (ImGui::Selectable("Randomize"))
+        {
+            std::random_device rd;
+            std::mt19937 eng(rd());
+            std::shuffle(config.delays.begin(), config.delays.end(), eng);
+            config_changed = true;
+        }
+        if (ImGui::Selectable("Sort Ascending"))
+        {
+            std::ranges::sort(config.delays);
+            config_changed = true;
+        }
+        if (ImGui::Selectable("Sort Descending"))
+        {
+            std::ranges::sort(config.delays, std::greater<>());
+
+            config_changed = true;
         }
         ImGui::EndPopup();
     }
@@ -445,7 +479,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::DelayBankTimeVaryingOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::DelayBankTimeVaryingOptions& config) const
 {
     bool config_changed = false;
 
@@ -458,7 +492,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayBankTimeVaryingOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config) const
 {
     bool config_changed = false;
 
@@ -529,7 +563,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOptions& config) const
 {
     bool config_changed = false;
 
@@ -622,7 +656,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::HomogenousFilterOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::HomogenousFilterOptions& config) const
 {
     bool config_changed = false;
 
@@ -635,7 +669,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::HomogenousFilterOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::TwoBandFilterOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::TwoBandFilterOptions& config) const
 {
     bool config_changed = false;
 
@@ -652,7 +686,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::TwoBandFilterOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::ThreeBandFilterOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::ThreeBandFilterOptions& config) const
 {
     bool config_changed = false;
 
@@ -666,6 +700,17 @@ bool FDNWidgetVisitor::operator()(sfFDN::ThreeBandFilterOptions& config)
     config_changed |=
         ImGui::DragFloat2("Cutoff", config.freqs.data(), 1.f, 125.f, 16000.f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp);
 
+    static bool show_filter_designer = false;
+    if (ImGui::Button("Edit"))
+    {
+        show_filter_designer = true;
+    }
+
+    if (show_filter_designer)
+    {
+        config_changed |= Draw3BandDesigner(config.t60s, config.freqs, show_filter_designer);
+    }
+
     config.freqs[0] = std::clamp(config.freqs[0], 125.f, 8000.f);
     config.freqs[1] = std::clamp(config.freqs[1], 8000.f, 16000.f);
 
@@ -676,7 +721,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ThreeBandFilterOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::TenBandFilterOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::TenBandFilterOptions& config) const
 {
     bool config_changed = false;
 
@@ -691,12 +736,26 @@ bool FDNWidgetVisitor::operator()(sfFDN::TenBandFilterOptions& config)
         config_changed |= ImGui::DragFloat("##T60", &t60, 0.001f, 0.1f, 20.0f, "%.2f s", ImGuiSliderFlags_AlwaysClamp);
         t60 = std::clamp(t60, 0.1f, 20.f);
         ImGui::PopID();
-        if (i == 0 || i % 5 != 0)
+        ImGui::SameLine();
+        if (i == 4)
         {
-            ImGui::SameLine();
+            ImGui::NewLine();
         }
     }
     ImGui::PopItemWidth();
+    ImGui::NewLine();
+
+    static bool show_filter_designer = false;
+
+    if (ImGui::Button("Edit"))
+    {
+        show_filter_designer = true;
+    }
+
+    if (show_filter_designer)
+    {
+        config_changed |= DrawFilterDesigner(config.t60s, show_filter_designer);
+    }
 
     config.sample_rate = fdn_config.sample_rate;
     config.shelf_cutoff = 8000.f; // Fixed shelf cutoff for now
@@ -705,22 +764,22 @@ bool FDNWidgetVisitor::operator()(sfFDN::TenBandFilterOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::GraphicEQOptions&)
+bool FDNWidgetVisitor::operator()(sfFDN::GraphicEQOptions&) const
 {
     return false;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::AllpassFilterOptions&)
+bool FDNWidgetVisitor::operator()(sfFDN::AllpassFilterOptions&) const
 {
     return false;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::CascadedBiquadsOptions&)
+bool FDNWidgetVisitor::operator()(sfFDN::CascadedBiquadsOptions&) const
 {
     return false;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::FirOptions& config)
+bool FDNWidgetVisitor::operator()(sfFDN::FirOptions& config) const
 {
     bool config_changed = false;
 
@@ -784,7 +843,53 @@ bool FDNWidgetVisitor::operator()(sfFDN::FirOptions& config)
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::AttenuationFilterBankOptions&)
+bool FDNWidgetVisitor::operator()(sfFDN::MultichannelFirOptions& config) const
+{
+    bool config_changed = false;
+
+    if (config.coeffs.size() != fdn_config.fdn_size)
+    {
+        config.coeffs.resize(fdn_config.fdn_size, std::vector<float>{1.f});
+        config_changed = true;
+    }
+
+    // Only support velvet noise decorrelator for now
+    constexpr const std::array<const char*, 2> kOvnSequences = {"decorrelator32_oVND15.wav",
+                                                                "decorrelator32_oVND30.wav"};
+    static uint32_t selected_file = 0;
+    if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_file]))
+    {
+        for (int i = 0; i < kOvnSequences.size(); i++)
+        {
+            bool is_selected = (selected_file == i);
+            if (ImGui::Selectable(kOvnSequences[i], is_selected))
+            {
+                selected_file = i;
+                config_changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
+    uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
+
+    static uint32_t channel = 0;
+    config_changed |= ImGui::InputInt("Channel", reinterpret_cast<int*>(&channel), 1, 1);
+    channel = std::clamp(channel, 0u, max_channels > 0 ? max_channels - 1 : 0u);
+
+    if (config_changed)
+    {
+        for (uint32_t i = channel; i < channel + fdn_config.fdn_size; ++i)
+        {
+            config.coeffs[i - channel] = utils::ReadAudioFile(file_path.string(), i % max_channels);
+        }
+    }
+
+    return config_changed;
+}
+
+bool FDNWidgetVisitor::operator()(sfFDN::AttenuationFilterBankOptions&) const
 {
     return false;
 }
@@ -840,7 +945,7 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
         for (size_t i = 0; i < processors.size(); ++i)
         {
             auto& processor = processors[i];
-            std::ptrdiff_t processor_id = reinterpret_cast<std::ptrdiff_t>(&processor);
+            auto processor_id = reinterpret_cast<std::ptrdiff_t>(&processor);
             ImGui::PushID(static_cast<int>(processor_id));
             if (ImGui::Button("edit"))
             {
@@ -863,9 +968,9 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
         }
 
         // Remove processors in reverse order to avoid invalidating indices
-        for (auto it = processors_to_remove.rbegin(); it != processors_to_remove.rend(); ++it)
+        for (auto& it : std::ranges::reverse_view(processors_to_remove))
         {
-            processors.erase(processors.begin() + *it);
+            processors.erase(processors.begin() + it);
             config_changed = true;
         }
     }
@@ -892,6 +997,7 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
     if (ImGui::BeginPopup("single_channel_processor_popup"))
     {
         for (int i = 0; i < single_channel_processor_names.size(); i++)
+        {
             if (ImGui::Selectable(single_channel_processor_names[i]))
             {
                 switch (i)
@@ -910,6 +1016,7 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
                     break;
                 }
             }
+        }
         ImGui::EndPopup();
     }
 
@@ -917,20 +1024,14 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
 }
 
 bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_variant_t>& processors,
-                                   sfFDN::FDNConfig& fdn_config, bool is_loop_filter)
+                                   sfFDN::FDNConfig& fdn_config)
 {
     bool config_changed = false;
 
-    std::ptrdiff_t id = reinterpret_cast<std::ptrdiff_t>(&processors);
+    auto id = reinterpret_cast<std::ptrdiff_t>(&processors);
     ImGui::PushID(static_cast<int>(id));
 
-    int index_offset = is_loop_filter ? 1 : 0;
-
-    if (is_loop_filter)
-    {
-        assert(!processors.empty());
-        assert(std::holds_alternative<sfFDN::AttenuationFilterBankOptions>(processors[0]));
-    }
+    int index_offset = 0;
 
     ImGui::SeparatorText("Multi-Channel Processors");
     if (processors.size() <= static_cast<size_t>(index_offset))
@@ -943,7 +1044,7 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
         for (size_t i = index_offset; i < processors.size(); ++i)
         {
             auto& processor = processors[i];
-            std::ptrdiff_t processor_id = reinterpret_cast<std::ptrdiff_t>(&processor);
+            auto processor_id = reinterpret_cast<std::ptrdiff_t>(&processor);
             ImGui::PushID(static_cast<int>(processor_id));
             if (ImGui::Button("edit"))
             {
@@ -979,36 +1080,64 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
         ImGui::OpenPopup("multi_channel_processor_popup");
     }
 
-    const std::array multi_channel_processor_names = {"Delays", "Schroeder Allpass", "Feedback Matrix"};
+    auto new_processor = DrawAddMultiChannelProcessorPopup(fdn_config);
+    if (new_processor.has_value())
+    {
+        processors.push_back(std::move(*new_processor));
+        config_changed = true;
+    }
+
+    ImGui::PopID();
+    return config_changed;
+}
+
+std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProcessorPopup(
+    const sfFDN::FDNConfig& fdn_config)
+{
+    const std::array multi_channel_processor_names = {"Delays", "Schroeder Allpass", "Feedback Matrix",
+                                                      "Velvet Noise Decorrelator"};
     std::optional<sfFDN::multi_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("multi_channel_processor_popup"))
     {
         for (int i = 0; i < multi_channel_processor_names.size(); i++)
+        {
             if (ImGui::Selectable(multi_channel_processor_names[i]))
             {
                 switch (i)
                 {
                 case 0:
-                    processors.emplace_back(sfFDN::DelayBankOptions{});
-                    config_changed = true;
+                {
+                    auto delay_bank_options =
+                        sfFDN::DelayBankOptions{.delays = std::vector<float>(fdn_config.fdn_size, 1.f),
+                                                .block_size = fdn_config.block_size,
+                                                .interpolation_type = sfFDN::DelayInterpolationType::None};
+                    new_processor.emplace(delay_bank_options);
                     break;
+                }
                 case 1:
-                    processors.emplace_back(sfFDN::MultichannelSchroederAllpassSectionOptions{});
-                    config_changed = true;
+                {
+                    auto schroeder_options = sfFDN::MultichannelSchroederAllpassSectionOptions{
+                        .sections = std::vector<sfFDN::SchroederAllpassSectionOptions>(
+                            fdn_config.fdn_size,
+                            sfFDN::SchroederAllpassSectionOptions{.delays = {47}, .gains = {0.7f}})};
+                    new_processor.emplace(schroeder_options);
                     break;
+                }
                 case 2:
-                    processors.emplace_back(sfFDN::ScalarFeedbackMatrixOptions{.matrix_size = fdn_config.fdn_size});
-                    config_changed = true;
+                    new_processor.emplace(sfFDN::ScalarFeedbackMatrixOptions{.matrix_size = fdn_config.fdn_size});
+                    break;
+                case 3:
+                    new_processor.emplace(sfFDN::MultichannelFirOptions{
+                        .coeffs = std::vector<std::vector<float>>(fdn_config.fdn_size, std::vector<float>{1.f})});
                     break;
                 default:
                     break;
                 }
             }
+        }
         ImGui::EndPopup();
     }
-
-    ImGui::PopID();
-    return config_changed;
+    return new_processor;
 }
 
 bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::FDNConfig&)
