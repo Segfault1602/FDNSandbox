@@ -103,6 +103,11 @@ bool FDNWidgetVisitor::operator()(sfFDN::CascadedFeedbackMatrixOptions& config) 
     int selected_matrix_type = static_cast<int>(config.type);
     config_changed |= DrawScalarMatrixTypeComboBox(selected_matrix_type, fdn_config.fdn_size);
 
+    if (config_changed)
+    {
+        config.type = static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type);
+    }
+
     return config_changed;
 }
 

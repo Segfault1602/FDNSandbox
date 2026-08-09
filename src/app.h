@@ -8,13 +8,14 @@
 #include "optimization_gui.h"
 #include <audio_utils/audio_file_manager.h>
 #include <audio_utils/audio_manager.h>
-#include <audio_utils/ring_buffer.h>
 #include <readerwriterqueue.h>
 
 #include <sffdn/sffdn.h>
 
+#include <array>
 #include <atomic>
 #include <span>
+#include <vector>
 
 class FDNToolboxApp
 {
@@ -80,6 +81,20 @@ class FDNToolboxApp
     std::atomic<float> audio_gain_ = 1.0f;
     std::atomic<float> dry_wet_mix_ = 0.5f;
     std::atomic<float> fdn_cpu_usage_ = 0.0f;
+    static constexpr size_t kCpuUsageWindowSize = 12;
+    std::array<float, kCpuUsageWindowSize> cpu_usage_samples_{};
+    size_t cpu_usage_sample_index_ = 0;
+    size_t cpu_usage_sample_count_ = 0;
+    float cpu_usage_sum_ = 0.0f;
+    float displayed_cpu_usage_ = 0.0f;
+    float cpu_usage_display_timer_ = 0.0f;
+
+    std::atomic<float> meter_rms_ = 0.0f;
+    std::atomic<float> meter_peak_ = 0.0f;
+    std::atomic<bool> meter_clipped_ = false;
+    std::vector<float> meter_squared_samples_;
+    size_t meter_sample_index_ = 0;
+    double meter_sum_squares_ = 0.0;
 
     constexpr static int kFDN_REVERB = 0;
     constexpr static int kCONV_REVERB = 1;
@@ -108,8 +123,6 @@ class FDNToolboxApp
         STFT,
         Mel
     } spectrogram_type_ = SpectrogramType::STFT;
-
-    ring_buffer<float> audio_output_buffer_;
 
     std::string loaded_rir_filename_{};
     fdn_analysis::IRAnalyzer rir_analyzer_;

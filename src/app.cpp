@@ -28,6 +28,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -40,6 +41,7 @@
 namespace
 {
 constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
+constexpr float kMeterIntegrationSeconds = 0.3f;
 
 struct MelFormatterContext
 {
@@ -158,7 +160,8 @@ FDNToolboxApp::FDNToolboxApp()
         throw std::runtime_error("Failed to create audio file manager");
     }
 
-    audio_output_buffer_.resize(Settings::Instance().SampleRate() * 0.5f);
+    meter_squared_samples_.resize(
+        static_cast<size_t>(static_cast<float>(Settings::Instance().SampleRate()) * kMeterIntegrationSeconds));
 
     save_ir_browser.SetTitle("Save Impulse Response");
     save_ir_browser.SetTypeFilters({".wav"});
@@ -350,12 +353,32 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
 
     std::span<float> output_data = reverb_type == kFDN_REVERB ? fdn_output_data : conv_output_data;
 
+    float block_peak = 0.0f;
     for (size_t i = 0; i < kSystemBlockSize; ++i)
     {
         output_data[i] = gain * ((wet_mix * output_data[i]) + (dry_mix * input_data[i]));
+
+        const float squared_sample = output_data[i] * output_data[i];
+        meter_sum_squares_ -= static_cast<double>(meter_squared_samples_[meter_sample_index_]);
+        meter_squared_samples_[meter_sample_index_] = squared_sample;
+        meter_sum_squares_ += static_cast<double>(squared_sample);
+        meter_sample_index_ = (meter_sample_index_ + 1) % meter_squared_samples_.size();
+        block_peak = std::max(block_peak, std::abs(output_data[i]));
     }
 
-    audio_output_buffer_.write(output_data.data(), output_data.size());
+    const double mean_square = std::max(0.0, meter_sum_squares_) / static_cast<double>(meter_squared_samples_.size());
+    const float rms = std::sqrt(static_cast<float>(mean_square));
+    meter_rms_.store(rms, std::memory_order_relaxed);
+
+    float previous_peak = meter_peak_.load(std::memory_order_relaxed);
+    while (previous_peak < block_peak &&
+           !meter_peak_.compare_exchange_weak(previous_peak, block_peak, std::memory_order_relaxed))
+    {
+    }
+    if (block_peak >= 1.0f)
+    {
+        meter_clipped_.store(true, std::memory_order_relaxed);
+    }
 
     for (size_t i = 0; i < kSystemBlockSize; ++i)
     {
@@ -369,8 +392,13 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
     const float allowed_time = (1e9 / Settings::Instance().SampleRate()) * frame_size; // in nanoseconds
     const float duration =
         reverb_type == kFDN_REVERB ? static_cast<float>(fdn_duration) : static_cast<float>(conv_duration);
-    float cpu_usage = static_cast<float>(duration) / allowed_time;
-    fdn_cpu_usage_.store(cpu_usage);
+    const float cpu_usage = duration / allowed_time;
+    cpu_usage_sum_ -= cpu_usage_samples_[cpu_usage_sample_index_];
+    cpu_usage_samples_[cpu_usage_sample_index_] = cpu_usage;
+    cpu_usage_sum_ += cpu_usage;
+    cpu_usage_sample_index_ = (cpu_usage_sample_index_ + 1) % kCpuUsageWindowSize;
+    cpu_usage_sample_count_ = std::min(cpu_usage_sample_count_ + 1, kCpuUsageWindowSize);
+    fdn_cpu_usage_.store(cpu_usage_sum_ / static_cast<float>(cpu_usage_sample_count_), std::memory_order_relaxed);
 
     static size_t highwater_mark = 0;
     if (duration > highwater_mark)
@@ -1331,40 +1359,41 @@ void FDNToolboxApp::DrawAudioPlayer()
         ImGui::PopItemWidth();
     }
 
-    static sfFDN::OnePoleFilter rms_filter;
-    rms_filter.SetPole(0.90f);
-    constexpr uint32_t kRMSBlockSize = 1024;
-    static std::vector<float> rms_buffer(kRMSBlockSize);
-    auto read_available = audio_output_buffer_.get_read_available();
-    static float rms_value = 0.0f;
+    constexpr float kMinMeterDb = -60.0f;
+    constexpr float kPeakHoldSeconds = 1.0f;
+    constexpr float kPeakReleaseDbPerSecond = 20.0f;
+    const float delta_time = ImGui::GetIO().DeltaTime;
+    const float rms_value = meter_rms_.load(std::memory_order_relaxed);
+    const float latest_peak = meter_peak_.exchange(0.0f, std::memory_order_relaxed);
+
+    static float displayed_peak = 0.0f;
+    static float peak_hold_timer = 0.0f;
     static bool clipping_warning_displayed = false;
     static float clipping_debounce_timer = 0.0f;
 
-    clipping_debounce_timer += ImGui::GetIO().DeltaTime;
-
-    while (read_available >= kRMSBlockSize)
+    if (latest_peak >= displayed_peak)
     {
-        size_t sample_read = kRMSBlockSize;
-        audio_output_buffer_.read(rms_buffer.data(), sample_read);
-        if (sample_read > 0)
-        {
-            auto rms = utils::ComputeRMS(rms_buffer, kRMSBlockSize, kRMSBlockSize);
-            for (const auto& sample : rms)
-            {
-                rms_value = rms_filter.Tick(sample);
-            }
+        displayed_peak = latest_peak;
+        peak_hold_timer = kPeakHoldSeconds;
+    }
+    else if (peak_hold_timer > 0.0f)
+    {
+        peak_hold_timer = std::max(0.0f, peak_hold_timer - delta_time);
+    }
+    else
+    {
+        const float release_gain = std::pow(10.0f, -kPeakReleaseDbPerSecond * delta_time / 20.0f);
+        displayed_peak = std::max(latest_peak, displayed_peak * release_gain);
+    }
 
-            for (const auto& sample : rms)
-            {
-                if (std::abs(sample) >= 1.0f)
-                {
-                    clipping_warning_displayed = true;
-                    clipping_debounce_timer = 0.f;
-                    break;
-                }
-            }
-        }
-        read_available -= sample_read;
+    if (meter_clipped_.exchange(false, std::memory_order_relaxed))
+    {
+        clipping_warning_displayed = true;
+        clipping_debounce_timer = 0.0f;
+    }
+    else
+    {
+        clipping_debounce_timer += delta_time;
     }
 
     if (clipping_warning_displayed && clipping_debounce_timer >= 1.0f)
@@ -1372,21 +1401,23 @@ void FDNToolboxApp::DrawAudioPlayer()
         clipping_warning_displayed = false;
     }
 
-    ImGui::Text("RMS Level (dB): %.2f", rms_value);
-    float rms_db = 20.f * std::log10(rms_value + 1e-10f);
-    ImGui::Text("RMS Level (dB FS): %.2f dB FS", rms_db);
+    const float rms_db = rms_value > 0.0f ? 20.0f * std::log10(rms_value) : kMinMeterDb;
+    const float peak_db = displayed_peak > 0.0f ? 20.0f * std::log10(displayed_peak) : kMinMeterDb;
+    const float meter_fraction = std::clamp((rms_db - kMinMeterDb) / -kMinMeterDb, 0.0f, 1.0f);
+    const std::string meter_overlay =
+        rms_db <= kMinMeterDb ? std::format("< {:.0f} dBFS", kMinMeterDb) : std::format("{:.1f} dBFS", rms_db);
 
-    ImGui::Text("Level:");
+    ImGui::Text("RMS level:");
     ImGui::SameLine();
     if (clipping_warning_displayed)
     {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
     }
-    else if (rms_value < 0.5f)
+    else if (rms_db < -12.0f)
     {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
     }
-    else if (rms_value >= 0.5f && rms_value < 0.6f)
+    else if (rms_db < -3.0f)
     {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
     }
@@ -1394,15 +1425,24 @@ void FDNToolboxApp::DrawAudioPlayer()
     {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
     }
-    ImGui::ProgressBar(rms_value, ImVec2(200.0f, 0.0f));
+    ImGui::ProgressBar(meter_fraction, ImVec2(200.0f, 0.0f), meter_overlay.c_str());
 
     ImGui::PopStyleColor();
+    ImGui::Text("Sample peak hold: %.1f dBFS", peak_db);
+    if (clipping_warning_displayed)
+    {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "CLIP");
+    }
 
-    static sfFDN::OnePoleFilter cpu_usage_filter;
-    cpu_usage_filter.SetPole(0.99f); // Set the pole for the low-pass filter
-    float cpu_usage = fdn_cpu_usage_.load();
-    cpu_usage = cpu_usage_filter.Tick(cpu_usage); // Apply low-pass filter to CPU usage
-    ImGui::Text("CPU Usage: %.2f%%", cpu_usage * 100.0f);
+    constexpr float kCpuUsageDisplayInterval = 0.25f;
+    cpu_usage_display_timer_ += ImGui::GetIO().DeltaTime;
+    if (cpu_usage_display_timer_ >= kCpuUsageDisplayInterval)
+    {
+        displayed_cpu_usage_ = fdn_cpu_usage_.load(std::memory_order_relaxed);
+        cpu_usage_display_timer_ = 0.0f;
+    }
+    ImGui::Text("CPU Usage: %.1f%%", displayed_cpu_usage_ * 100.0f);
 
     ImGui::End();
 }
