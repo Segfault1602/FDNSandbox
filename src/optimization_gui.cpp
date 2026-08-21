@@ -193,279 +193,31 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
 
 OptimizationGUI::OptimizationGUI(quill::Logger* logger)
     : fdn_optimizer_(logger)
+    , previous_loss_plot_statistics_{.min_loss = std::numeric_limits<double>::quiet_NaN(),
+                                     .max_loss = std::numeric_limits<double>::quiet_NaN()}
 {
 }
 
 bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir)
 {
-    bool updated_fdn = false;
-    float content_region_width = ImGui::GetContentRegionAvail().x;
+    const float content_region_width = ImGui::GetContentRegionAvail().x;
 
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
     ImGui::BeginChild("Optimization Parameters", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
                       ImGuiWindowFlags_None);
-    ImGui::SeparatorText("Setup");
-
-    opt_info_.parameters_to_optimize.clear();
-
-    static int optimize_type = 0;
-    ImGui::RadioButton("Colorless Optimization", &optimize_type, 0);
-    ImGui::SameLine();
-    ImGui::BeginDisabled(target_rir.empty());
-    ImGui::RadioButton("RIR Match Optimization", &optimize_type, 1);
-    ImGui::EndDisabled();
-
-    ImGui::Separator();
-
-    if (optimize_type == 0)
-    {
-        DrawColorlessSettings();
-    }
-    else if (optimize_type == 1)
-    {
-        ImGui::BeginDisabled(target_rir.empty());
-        DrawRIRMatchSettings(!target_rir.empty());
-        ImGui::EndDisabled();
-    }
-
-    else if (optimize_filters_checkbox_)
-    {
-    }
-
+    DrawSetupPanel(target_rir);
     ImGui::EndChild();
 
     ImGui::SameLine();
 
     ImGui::BeginChild("Optimization Results", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
                       ImGuiWindowFlags_None);
-
-    ImGui::SeparatorText("Optimization Parameters");
-
-    static fdn_optimization::OptimizationAlgoType selected_algorithm = fdn_optimization::OptimizationAlgoType::Adam;
-    if (ImGui::BeginCombo("Algorithm", fdn_optimization::OptimizationAlgoTypeToString(selected_algorithm)))
-    {
-        for (int i = 0; i < static_cast<int>(fdn_optimization::OptimizationAlgoType::Count); ++i)
-        {
-            bool is_selected = (selected_algorithm == static_cast<fdn_optimization::OptimizationAlgoType>(i));
-            if (ImGui::Selectable(fdn_optimization::OptimizationAlgoTypeToString(
-                                      static_cast<fdn_optimization::OptimizationAlgoType>(i)),
-                                  is_selected))
-            {
-                selected_algorithm = static_cast<fdn_optimization::OptimizationAlgoType>(i);
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    opt_info_.optimizer_params = DrawOptimizationParamGui(selected_algorithm);
-
-    if (selected_algorithm >= fdn_optimization::OptimizationAlgoType::Adam)
-    {
-        ImGui::PushItemWidth(200);
-        ImGui::SeparatorText("Gradient Settings");
-        constexpr std::array<std::string_view, 2> kGradientMethods = {"Central Difference", "Forward Difference"};
-        static int selected_gradient_method = 0;
-        if (ImGui::BeginCombo("Gradient Method", kGradientMethods[selected_gradient_method].data()))
-        {
-            for (int i = 0; i < static_cast<int>(kGradientMethods.size()); ++i)
-            {
-                bool is_selected = (selected_gradient_method == i);
-                if (ImGui::Selectable(kGradientMethods[i].data(), is_selected))
-                {
-                    selected_gradient_method = i;
-                    opt_info_.gradient_method = (i == 0) ? fdn_optimization::GradientMethod::CentralDifferences
-                                                         : fdn_optimization::GradientMethod::ForwardDifferences;
-                }
-            }
-            ImGui::EndCombo();
-        }
-
-        ImGui::PopItemWidth();
-    }
-
-    bool start_optimization = ImGui::Button("Run Optimization");
-
-    if (start_optimization)
-    {
-        if (!IsOptimizationActive(fdn_optimizer_.GetStatus()))
-        {
-            opt_info_.initial_fdn_config = fdn_config;
-            utils::NormalizeAttenuationFilterBank(opt_info_.initial_fdn_config);
-            opt_info_.ir_size = Settings::Instance().SampleRate();
-            if (!target_rir.empty())
-            {
-                opt_info_.target_rir.clear();
-                opt_info_.target_rir.reserve(target_rir.size());
-                std::ranges::copy(target_rir, std::back_inserter(opt_info_.target_rir));
-            }
-
-            std::vector<std::shared_ptr<fdn_optimization::AudioLoss>> loss_functions;
-            if (optimize_gains_checkbox_ || optimize_matrix_checkbox_)
-            {
-                if (spectral_flatness_weight_ > 0.0)
-                {
-                    constexpr float kTargetSpectralFlatness = 0.5575f;
-                    loss_functions.push_back(std::make_shared<fdn_optimization::SpectralFlatnessLoss>(
-                        kTargetSpectralFlatness, spectral_flatness_weight_));
-                }
-
-                if (sparsity_weight_ > 0.0)
-                {
-                    loss_functions.push_back(
-                        std::make_shared<fdn_optimization::TimeDomainSparsityLoss>(sparsity_weight_));
-                }
-            }
-            else if (optimize_filters_checkbox_)
-            {
-                if (edc_weight_ > 0.0)
-                {
-                    loss_functions.push_back(
-                        std::make_shared<fdn_optimization::EnergyDecayCurveLoss>(target_rir, edc_weight_));
-                }
-
-                if (mel_edr_weight_ > 0.0)
-                {
-                    audio_utils::analysis::EnergyDecayReliefOptions edr_options{.fft_length = mel_edr_fft_length_,
-                                                                                .hop_size = mel_edr_hop_size_,
-                                                                                .window_size = mel_edr_window_size_,
-                                                                                .window_type =
-                                                                                    audio_utils::FFTWindowType::Hann,
-                                                                                .n_mels = mel_edr_num_bands_,
-                                                                                .to_db = true};
-                    loss_functions.push_back(std::make_shared<fdn_optimization::WeightedEDRLoss>(
-                        target_rir, edr_options, -20.0f, mel_edr_weight_));
-                }
-            }
-            fdn_optimizer_.SetLossFunctions(loss_functions);
-            fdn_optimizer_.StartOptimization(opt_info_);
-            ImGui::OpenPopup("Optimization Progress");
-        }
-    }
-
-    ImGui::SetNextWindowSize(ImVec2(600, -1), ImGuiCond_Always);
-    if (ImGui::BeginPopupModal("Optimization Progress", nullptr, ImGuiWindowFlags_None))
-    {
-        fdn_optimization::OptimizationProgressInfo progress = fdn_optimizer_.GetProgress();
-
-        std::chrono::duration<double, std::chrono::seconds::period> elapsed_seconds = progress.elapsed_time;
-        ImGui::Text("Elapsed Time: %.2f seconds", elapsed_seconds.count());
-
-        uint32_t eval_count = progress.evaluation_count;
-        ImGui::Text("Evaluations: %u", eval_count);
-
-        if (!progress.loss_history.empty())
-        {
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-            if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, 250), ImPlotAxisFlags_None))
-            {
-                const std::vector<double>& loss_history_vec = progress.loss_history[0];
-                ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-                ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history_vec.size() * 1.25),
-                                        ImPlotCond_Always);
-                ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-
-                ImPlot::PlotLine("Total Loss", loss_history_vec.data(), static_cast<int>(loss_history_vec.size()), 1.0,
-                                 0.0,
-                                 fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Optimization, 1.8f));
-
-                for (auto i = 1u; i < progress.loss_history.size(); ++i)
-                {
-                    const std::vector<double>& other_loss_history = progress.loss_history[i];
-                    ImPlotSpec component_spec{};
-                    component_spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
-                    component_spec.LineWeight = 1.1f;
-                    ImPlot::PlotLine(("Component " + std::to_string(i)).c_str(), other_loss_history.data(),
-                                     static_cast<int>(other_loss_history.size()), 1.0, 0.0, component_spec);
-                }
-
-                if (!loss_history_vec.empty())
-                {
-                    const double best_loss = *std::ranges::min_element(loss_history_vec);
-                    fdn_sandbox::plot_ui::DrawHorizontalGuide(
-                        "Best Loss", best_loss, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk),
-                        1.0f);
-                    ImPlot::Annotation(static_cast<double>(loss_history_vec.size() - 1), best_loss,
-                                       fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk),
-                                       ImVec2(6.0f, -6.0f), true, "Best %.4g", best_loss);
-                }
-
-                ImPlot::EndPlot();
-            }
-        }
-
-        const auto status = fdn_optimizer_.GetStatus();
-        const char* progress_label = "Optimizing...";
-        if (status == fdn_optimization::OptimizationStatus::StartRequested)
-        {
-            progress_label = "Starting...";
-        }
-        else if (status == fdn_optimization::OptimizationStatus::CancelRequested)
-        {
-            progress_label = "Canceling...";
-        }
-
-        ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), progress_label);
-        ImGui::BeginDisabled(status == fdn_optimization::OptimizationStatus::CancelRequested);
-        if (ImGui::Button("Cancel"))
-        {
-            fdn_optimizer_.CancelOptimization();
-        }
-        ImGui::EndDisabled();
-
-        if (!IsOptimizationActive(fdn_optimizer_.GetStatus()))
-        {
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-    }
-
-    ImGui::SeparatorText("Results");
-
-    static double elapsed_time_sec = 0;
-    static uint32_t evaluation_count = 0;
-    static double initial_loss = 0.0;
-    static double final_loss = 0.0;
-
-    if (fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Completed ||
-        fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Canceled)
-    {
-        fdn_optimization::OptimizationResult result = fdn_optimizer_.GetResult();
-        elapsed_time_sec = std::chrono::duration<double, std::chrono::seconds::period>(result.total_time).count();
-        evaluation_count = result.total_evaluations;
-
-        if (!result.loss_history.empty())
-        {
-            initial_loss = result.loss_history[0].front();
-            final_loss = result.loss_history[0].back();
-
-            loss_history_.losses = result.loss_history;
-            loss_history_.loss_names = result.loss_names;
-            loss_history_.loss_names.insert(loss_history_.loss_names.begin(), "Total Loss");
-        }
-
-        fdn_config = result.optimized_fdn_config;
-
-        updated_fdn = true;
-    }
-    auto last_status = fdn_optimizer_.GetStatus();
-    if (last_status == fdn_optimization::OptimizationStatus::Canceled ||
-        last_status == fdn_optimization::OptimizationStatus::Completed)
-    {
-        fdn_optimizer_.ResetStatus();
-    }
-
-    ImGui::Text("Elapsed Time: %.2f seconds", elapsed_time_sec);
-    ImGui::Text("Evaluations: %u", evaluation_count);
-    ImGui::Text("Initial Loss: %.6f", initial_loss);
-    ImGui::Text("Final Loss: %.6f", final_loss);
-
+    const bool updated_fdn = DrawOptimizationPanel(fdn_config, target_rir);
     ImGui::EndChild();
 
     ImGui::SameLine();
 
     ImGui::BeginChild("Loss Plot", ImVec2(-1, -1), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
-
     PlotLossHistory();
     ImGui::EndChild();
 
@@ -474,91 +226,404 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
     return updated_fdn;
 }
 
+void OptimizationGUI::DrawSetupPanel(std::span<const float> target_rir)
+{
+    ImGui::SeparatorText("Setup");
+
+    opt_info_.parameters_to_optimize.clear();
+
+    ImGui::RadioButton("Colorless Optimization", &optimize_type_, 0);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(target_rir.empty());
+    ImGui::RadioButton("RIR Match Optimization", &optimize_type_, 1);
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+
+    if (optimize_type_ == 0)
+    {
+        DrawColorlessSettings();
+    }
+    else if (optimize_type_ == 1)
+    {
+        ImGui::BeginDisabled(target_rir.empty());
+        DrawRIRMatchSettings();
+        ImGui::EndDisabled();
+    }
+    else if (optimize_filters_checkbox_)
+    {
+    }
+}
+
+bool OptimizationGUI::DrawOptimizationPanel(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir)
+{
+    ImGui::SeparatorText("Optimization Parameters");
+    DrawAlgorithmSettings();
+
+    if (ImGui::Button("Run Optimization") && !IsOptimizationActive(fdn_optimizer_.GetStatus()))
+    {
+        StartOptimization(fdn_config, target_rir);
+    }
+
+    DrawOptimizationProgressPopup();
+
+    ImGui::SeparatorText("Results");
+    const bool updated_fdn = HandleOptimizationResult(fdn_config);
+    DrawResultSummary();
+    return updated_fdn;
+}
+
+void OptimizationGUI::DrawAlgorithmSettings()
+{
+    DrawAlgorithmSelector();
+    opt_info_.optimizer_params = DrawOptimizationParamGui(selected_algorithm_);
+
+    if (selected_algorithm_ >= fdn_optimization::OptimizationAlgoType::Adam)
+    {
+        DrawGradientSettings();
+    }
+}
+
+void OptimizationGUI::DrawAlgorithmSelector()
+{
+    if (!ImGui::BeginCombo("Algorithm", fdn_optimization::OptimizationAlgoTypeToString(selected_algorithm_)))
+    {
+        return;
+    }
+
+    for (int i = 0; i < static_cast<int>(fdn_optimization::OptimizationAlgoType::Count); ++i)
+    {
+        const auto algorithm = static_cast<fdn_optimization::OptimizationAlgoType>(i);
+        const bool is_selected = selected_algorithm_ == algorithm;
+        if (ImGui::Selectable(fdn_optimization::OptimizationAlgoTypeToString(algorithm), is_selected))
+        {
+            selected_algorithm_ = algorithm;
+        }
+    }
+    ImGui::EndCombo();
+}
+
+void OptimizationGUI::DrawGradientSettings()
+{
+    ImGui::PushItemWidth(200);
+    ImGui::SeparatorText("Gradient Settings");
+    constexpr std::array<std::string_view, 2> kGradientMethods = {"Central Difference", "Forward Difference"};
+    if (ImGui::BeginCombo("Gradient Method", kGradientMethods[selected_gradient_method_].data()))
+    {
+        for (int i = 0; i < static_cast<int>(kGradientMethods.size()); ++i)
+        {
+            const bool is_selected = selected_gradient_method_ == i;
+            if (!ImGui::Selectable(kGradientMethods[i].data(), is_selected))
+            {
+                continue;
+            }
+
+            selected_gradient_method_ = i;
+            opt_info_.gradient_method = i == 0 ? fdn_optimization::GradientMethod::CentralDifferences
+                                               : fdn_optimization::GradientMethod::ForwardDifferences;
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::PopItemWidth();
+}
+
+void OptimizationGUI::StartOptimization(const sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir)
+{
+    opt_info_.initial_fdn_config = fdn_config;
+    utils::NormalizeAttenuationFilterBank(opt_info_.initial_fdn_config);
+    opt_info_.ir_size = Settings::Instance().SampleRate();
+    if (!target_rir.empty())
+    {
+        opt_info_.target_rir.assign(target_rir.begin(), target_rir.end());
+    }
+
+    LossFunctions loss_functions = CreateLossFunctions(target_rir);
+    fdn_optimizer_.SetLossFunctions(loss_functions);
+    fdn_optimizer_.StartOptimization(opt_info_);
+    ImGui::OpenPopup("Optimization Progress");
+}
+
+OptimizationGUI::LossFunctions OptimizationGUI::CreateLossFunctions(std::span<const float> target_rir) const
+{
+    LossFunctions loss_functions;
+    if (optimize_gains_checkbox_ || optimize_matrix_checkbox_)
+    {
+        AppendColorlessLossFunctions(loss_functions);
+    }
+    else if (optimize_filters_checkbox_)
+    {
+        AppendRIRMatchLossFunctions(loss_functions, target_rir);
+    }
+    return loss_functions;
+}
+
+void OptimizationGUI::AppendColorlessLossFunctions(LossFunctions& loss_functions) const
+{
+    if (spectral_flatness_weight_ > 0.0)
+    {
+        constexpr float kTargetSpectralFlatness = 0.5575f;
+        loss_functions.push_back(std::make_shared<fdn_optimization::SpectralFlatnessLoss>(kTargetSpectralFlatness,
+                                                                                          spectral_flatness_weight_));
+    }
+
+    if (sparsity_weight_ > 0.0)
+    {
+        loss_functions.push_back(std::make_shared<fdn_optimization::TimeDomainSparsityLoss>(sparsity_weight_));
+    }
+}
+
+void OptimizationGUI::AppendRIRMatchLossFunctions(LossFunctions& loss_functions,
+                                                  std::span<const float> target_rir) const
+{
+    if (edc_weight_ > 0.0)
+    {
+        loss_functions.push_back(std::make_shared<fdn_optimization::EnergyDecayCurveLoss>(target_rir, edc_weight_));
+    }
+
+    if (mel_edr_weight_ <= 0.0)
+    {
+        return;
+    }
+
+    const audio_utils::analysis::EnergyDecayReliefOptions edr_options{
+        .fft_length = mel_edr_fft_length_,
+        .hop_size = mel_edr_hop_size_,
+        .window_size = mel_edr_window_size_,
+        .window_type = audio_utils::FFTWindowType::Hann,
+        .n_mels = mel_edr_num_bands_,
+        .to_db = true,
+    };
+    loss_functions.push_back(
+        std::make_shared<fdn_optimization::WeightedEDRLoss>(target_rir, edr_options, -20.0f, mel_edr_weight_));
+}
+
+void OptimizationGUI::DrawOptimizationProgressPopup()
+{
+    ImGui::SetNextWindowSize(ImVec2(600, -1), ImGuiCond_Always);
+    if (!ImGui::BeginPopupModal("Optimization Progress", nullptr, ImGuiWindowFlags_None))
+    {
+        return;
+    }
+
+    const fdn_optimization::OptimizationProgressInfo progress = fdn_optimizer_.GetProgress();
+    const std::chrono::duration<double, std::chrono::seconds::period> elapsed_seconds = progress.elapsed_time;
+    ImGui::Text("Elapsed Time: %.2f seconds", elapsed_seconds.count());
+    ImGui::Text("Evaluations: %u", progress.evaluation_count);
+    DrawProgressLossPlot(progress);
+
+    const auto status = fdn_optimizer_.GetStatus();
+    const char* progress_label = "Optimizing...";
+    if (status == fdn_optimization::OptimizationStatus::StartRequested)
+    {
+        progress_label = "Starting...";
+    }
+    else if (status == fdn_optimization::OptimizationStatus::CancelRequested)
+    {
+        progress_label = "Canceling...";
+    }
+
+    ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), progress_label);
+    ImGui::BeginDisabled(status == fdn_optimization::OptimizationStatus::CancelRequested);
+    if (ImGui::Button("Cancel"))
+    {
+        fdn_optimizer_.CancelOptimization();
+    }
+    ImGui::EndDisabled();
+
+    if (!IsOptimizationActive(fdn_optimizer_.GetStatus()))
+    {
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+void OptimizationGUI::DrawProgressLossPlot(const fdn_optimization::OptimizationProgressInfo& progress)
+{
+    if (progress.loss_history.empty())
+    {
+        return;
+    }
+
+    ImPlot::SetNextAxisToFit(ImAxis_Y1);
+    if (!ImPlot::BeginPlot("Loss Progress", ImVec2(-1, 250), ImPlotAxisFlags_None))
+    {
+        return;
+    }
+
+    const std::vector<double>& total_loss_history = progress.loss_history.front();
+    ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+    ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(total_loss_history.size()) * 1.25, ImPlotCond_Always);
+    ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+    ImPlot::PlotLine("Total Loss", total_loss_history.data(), static_cast<int>(total_loss_history.size()), 1.0, 0.0,
+                     fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Optimization, 1.8f));
+
+    for (size_t i = 1; i < progress.loss_history.size(); ++i)
+    {
+        const std::vector<double>& component_history = progress.loss_history[i];
+        ImPlotSpec component_spec{};
+        component_spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
+        component_spec.LineWeight = 1.1f;
+        ImPlot::PlotLine(("Component " + std::to_string(i)).c_str(), component_history.data(),
+                         static_cast<int>(component_history.size()), 1.0, 0.0, component_spec);
+    }
+
+    if (!total_loss_history.empty())
+    {
+        const double best_loss = *std::ranges::min_element(total_loss_history);
+        const ImVec4 status_color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk);
+        fdn_sandbox::plot_ui::DrawHorizontalGuide("Best Loss", best_loss, status_color, 1.0f);
+        ImPlot::Annotation(static_cast<double>(total_loss_history.size() - 1), best_loss, status_color,
+                           ImVec2(6.0f, -6.0f), true, "Best %.4g", best_loss);
+    }
+
+    ImPlot::EndPlot();
+}
+
+bool OptimizationGUI::HandleOptimizationResult(sfFDN::FDNConfig& fdn_config)
+{
+    const auto status = fdn_optimizer_.GetStatus();
+    if (status != fdn_optimization::OptimizationStatus::Completed &&
+        status != fdn_optimization::OptimizationStatus::Canceled)
+    {
+        return false;
+    }
+
+    const fdn_optimization::OptimizationResult result = fdn_optimizer_.GetResult();
+    result_summary_.elapsed_time_sec =
+        std::chrono::duration<double, std::chrono::seconds::period>(result.total_time).count();
+    result_summary_.evaluation_count = result.total_evaluations;
+
+    if (!result.loss_history.empty())
+    {
+        result_summary_.initial_loss = result.loss_history.front().front();
+        result_summary_.final_loss = result.loss_history.front().back();
+        loss_history_.losses = result.loss_history;
+        loss_history_.loss_names = result.loss_names;
+        loss_history_.loss_names.insert(loss_history_.loss_names.begin(), "Total Loss");
+    }
+
+    fdn_config = result.optimized_fdn_config;
+    fdn_optimizer_.ResetStatus();
+    return true;
+}
+
+void OptimizationGUI::DrawResultSummary() const
+{
+    ImGui::Text("Elapsed Time: %.2f seconds", result_summary_.elapsed_time_sec);
+    ImGui::Text("Evaluations: %u", result_summary_.evaluation_count);
+    ImGui::Text("Initial Loss: %.6f", result_summary_.initial_loss);
+    ImGui::Text("Final Loss: %.6f", result_summary_.final_loss);
+}
+
 void OptimizationGUI::PlotLossHistory()
 {
     const size_t loss_count = loss_history_.losses.size();
     assert(loss_count == loss_history_.loss_names.size());
-    size_t total_point_count = 0;
-    size_t max_history_size = 0;
-    double min_loss = std::numeric_limits<double>::infinity();
-    double max_loss = -std::numeric_limits<double>::infinity();
+    const LossPlotStatistics statistics = CalculateLossPlotStatistics();
+    const bool history_bounds_changed = HaveLossPlotBoundsChanged(statistics);
+
+    if (!ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
+    {
+        return;
+    }
+
+    ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
+    ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+    ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
+
+    if (loss_count == 0)
+    {
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, 1.0, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 1.0, ImPlotCond_Always);
+        fdn_sandbox::plot_ui::DrawEmptyState("No optimization history available");
+    }
+    else
+    {
+        DrawPopulatedLossPlot(statistics, history_bounds_changed);
+    }
+
+    ImPlot::EndPlot();
+    previous_loss_plot_statistics_ = statistics;
+}
+
+OptimizationGUI::LossPlotStatistics OptimizationGUI::CalculateLossPlotStatistics() const
+{
+    LossPlotStatistics statistics{
+        .min_loss = std::numeric_limits<double>::infinity(),
+        .max_loss = -std::numeric_limits<double>::infinity(),
+    };
     for (const auto& losses : loss_history_.losses)
     {
-        total_point_count += losses.size();
-        max_history_size = std::max(max_history_size, losses.size());
+        statistics.total_point_count += losses.size();
+        statistics.max_history_size = std::max(statistics.max_history_size, losses.size());
         for (double loss : losses)
         {
             if (std::isfinite(loss))
             {
-                min_loss = std::min(min_loss, loss);
-                max_loss = std::max(max_loss, loss);
+                statistics.min_loss = std::min(statistics.min_loss, loss);
+                statistics.max_loss = std::max(statistics.max_loss, loss);
             }
         }
     }
+    return statistics;
+}
 
-    static size_t previous_total_point_count = 0;
-    static size_t previous_max_history_size = 0;
-    static double previous_min_loss = std::numeric_limits<double>::quiet_NaN();
-    static double previous_max_loss = std::numeric_limits<double>::quiet_NaN();
-    const bool history_bounds_changed = total_point_count != previous_total_point_count ||
-                                        max_history_size != previous_max_history_size ||
-                                        min_loss != previous_min_loss || max_loss != previous_max_loss;
+bool OptimizationGUI::HaveLossPlotBoundsChanged(const LossPlotStatistics& statistics) const
+{
+    return statistics.total_point_count != previous_loss_plot_statistics_.total_point_count ||
+           statistics.max_history_size != previous_loss_plot_statistics_.max_history_size ||
+           statistics.min_loss != previous_loss_plot_statistics_.min_loss ||
+           statistics.max_loss != previous_loss_plot_statistics_.max_loss;
+}
 
-    if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
+void OptimizationGUI::DrawPopulatedLossPlot(const LossPlotStatistics& statistics, bool history_bounds_changed) const
+{
+    const double x_max =
+        statistics.max_history_size > 1 ? static_cast<double>(statistics.max_history_size - 1) * 1.05 : 1.0;
+    ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, x_max, ImPlotCond_Always);
+
+    if (history_bounds_changed && std::isfinite(statistics.min_loss) && std::isfinite(statistics.max_loss))
     {
-        ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
-        ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+        const double range = statistics.max_loss - statistics.min_loss;
+        const double padding = std::max({range * 0.1, std::abs(statistics.max_loss) * 0.05, 1e-9});
+        ImPlot::SetupAxisLimits(ImAxis_Y1, statistics.min_loss - padding, statistics.max_loss + padding,
+                                ImPlotCond_Always);
+    }
 
-        if (loss_count == 0)
+    DrawLossSeries();
+    DrawBestLossGuide();
+}
+
+void OptimizationGUI::DrawLossSeries() const
+{
+    for (size_t i = 0; i < loss_history_.losses.size(); ++i)
+    {
+        ImPlotSpec spec{};
+        if (i == 0)
         {
-            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, 1.0, ImPlotCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 1.0, ImPlotCond_Always);
-            fdn_sandbox::plot_ui::DrawEmptyState("No optimization history available");
+            spec = fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Optimization, 1.8f);
         }
         else
         {
-            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
-            const double x_max = max_history_size > 1 ? static_cast<double>(max_history_size - 1) * 1.05 : 1.0;
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, x_max, ImPlotCond_Always);
-
-            if (history_bounds_changed && std::isfinite(min_loss) && std::isfinite(max_loss))
-            {
-                const double range = max_loss - min_loss;
-                const double padding = std::max({range * 0.1, std::abs(max_loss) * 0.05, 1e-9});
-                const double y_min = min_loss - padding;
-                const double y_max = max_loss + padding;
-
-                ImPlot::SetupAxisLimits(ImAxis_Y1, y_min, y_max, ImPlotCond_Always);
-            }
-
-            for (size_t i = 0; i < loss_count; ++i)
-            {
-                ImPlotSpec spec =
-                    i == 0 ? fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Optimization, 1.8f)
-                           : ImPlotSpec{};
-                if (i > 0)
-                {
-                    spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
-                    spec.LineWeight = 1.1f;
-                }
-                ImPlot::PlotLine(loss_history_.loss_names[i].c_str(), loss_history_.losses[i].data(),
-                                 static_cast<int>(loss_history_.losses[i].size()), 1.0, 0.0, spec);
-            }
-
-            if (!loss_history_.losses.front().empty())
-            {
-                const double best_loss = *std::ranges::min_element(loss_history_.losses.front());
-                fdn_sandbox::plot_ui::DrawHorizontalGuide(
-                    "Best Loss", best_loss, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk), 1.0f);
-            }
+            spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
+            spec.LineWeight = 1.1f;
         }
-        ImPlot::EndPlot();
-        previous_total_point_count = total_point_count;
-        previous_max_history_size = max_history_size;
-        previous_min_loss = min_loss;
-        previous_max_loss = max_loss;
+        ImPlot::PlotLine(loss_history_.loss_names[i].c_str(), loss_history_.losses[i].data(),
+                         static_cast<int>(loss_history_.losses[i].size()), 1.0, 0.0, spec);
     }
+}
+
+void OptimizationGUI::DrawBestLossGuide() const
+{
+    if (loss_history_.losses.front().empty())
+    {
+        return;
+    }
+
+    const double best_loss = *std::ranges::min_element(loss_history_.losses.front());
+    fdn_sandbox::plot_ui::DrawHorizontalGuide("Best Loss", best_loss,
+                                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk), 1.0f);
 }
 
 void OptimizationGUI::DrawColorlessSettings()
@@ -574,22 +639,21 @@ void OptimizationGUI::DrawColorlessSettings()
     ImGui::Checkbox("Optimize Matrix", &optimize_matrix_checkbox_);
     if (optimize_matrix_checkbox_)
     {
-        static int matrix_type = 0;
-        ImGui::RadioButton("Random", &matrix_type, 0);
+        ImGui::RadioButton("Random", &matrix_type_, 0);
         ImGui::SameLine();
-        ImGui::RadioButton("Householder", &matrix_type, 1);
+        ImGui::RadioButton("Householder", &matrix_type_, 1);
         ImGui::SameLine();
-        ImGui::RadioButton("Circulant", &matrix_type, 2);
+        ImGui::RadioButton("Circulant", &matrix_type_, 2);
 
-        if (matrix_type == 0)
+        if (matrix_type_ == 0)
         {
             opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix);
         }
-        else if (matrix_type == 1)
+        else if (matrix_type_ == 1)
         {
             opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Householder);
         }
-        else if (matrix_type == 2)
+        else if (matrix_type_ == 2)
         {
             opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Matrix_Circulant);
         }
@@ -606,23 +670,22 @@ void OptimizationGUI::DrawColorlessSettings()
     ImGui::PopItemWidth();
 }
 
-void OptimizationGUI::DrawRIRMatchSettings(bool has_target_rir)
+void OptimizationGUI::DrawRIRMatchSettings()
 {
     optimize_gains_checkbox_ = false;
     optimize_matrix_checkbox_ = false;
     optimize_filters_checkbox_ = true;
     opt_info_.parameters_to_optimize.clear();
 
-    static int filter_type = 0;
-    ImGui::RadioButton("10 band", &filter_type, 0);
+    ImGui::RadioButton("10 band", &filter_type_, 0);
     ImGui::SameLine();
-    ImGui::RadioButton("3 band", &filter_type, 1);
+    ImGui::RadioButton("3 band", &filter_type_, 1);
 
-    if (filter_type == 0)
+    if (filter_type_ == 0)
     {
         opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters);
     }
-    else if (filter_type == 1)
+    else if (filter_type_ == 1)
     {
         opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters_3Band);
     }
@@ -636,18 +699,16 @@ void OptimizationGUI::DrawRIRMatchSettings(bool has_target_rir)
 
     ImGui::SliderScalar("EDC Weight", ImGuiDataType_Double, &edc_weight_, &kMinWeight, &kMaxWeight, "%.2f");
     ImGui::SliderScalar("Mel EDR Weight", ImGuiDataType_Double, &mel_edr_weight_, &kMinWeight, &kMaxWeight, "%.2f");
-
     constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};
-    static int selected_fft_size_index = 3; // Default to 4096
-    if (ImGui::BeginCombo("Mel EDR FFT Size", kFFTSizeOptions[selected_fft_size_index]))
+    if (ImGui::BeginCombo("Mel EDR FFT Size", kFFTSizeOptions[selected_fft_size_index_]))
     {
         for (int i = 0; i < static_cast<int>(kFFTSizeOptions.size()); ++i)
         {
-            bool is_selected = (selected_fft_size_index == i);
+            const bool is_selected = selected_fft_size_index_ == i;
             if (ImGui::Selectable(kFFTSizeOptions[i], is_selected))
             {
-                selected_fft_size_index = i;
-                mel_edr_fft_length_ = 512 * static_cast<uint32_t>(1 << i);
+                selected_fft_size_index_ = i;
+                mel_edr_fft_length_ = 512u << i;
             }
         }
         ImGui::EndCombo();

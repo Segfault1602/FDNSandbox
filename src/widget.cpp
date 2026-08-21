@@ -21,6 +21,9 @@
 namespace
 {
 constexpr size_t kNBands = 10;
+constexpr float kGainSliderSpacing = 5.0f;
+constexpr ImVec2 kGainSliderSize(24.0f, 68.0f);
+constexpr uint32_t kMaxGainSlidersPerRow = 8;
 
 std::vector<float> GetMatrixFromClipboard(uint32_t N)
 {
@@ -58,6 +61,124 @@ std::vector<float> GetMatrixFromClipboard(uint32_t N)
     }
 
     return feedback_matrix;
+}
+
+bool DrawSetAllGainsPopup(std::span<float> gains)
+{
+    if (!ImGui::BeginPopupContextItem("Gains Popup"))
+    {
+        return false;
+    }
+
+    static float value = 0.0f;
+    bool config_changed = false;
+    if (ImGui::Selectable("Set to 0.5"))
+    {
+        value = 0.5f;
+        config_changed = true;
+    }
+    if (ImGui::Selectable("Set to -0.5"))
+    {
+        value = -0.5f;
+        config_changed = true;
+    }
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    config_changed |= ImGui::DragFloat("##Value", &value, 0.01f, -1.0f, 1.0f);
+
+    std::ranges::fill(gains, value);
+    ImGui::EndPopup();
+    return config_changed;
+}
+
+bool DrawGainActions(std::span<float> gains, float min_gain, float max_gain)
+{
+    bool config_changed = false;
+    if (ImGui::Button("Distribute"))
+    {
+        std::ranges::fill(gains, 1.0f / static_cast<float>(gains.size()));
+        config_changed = true;
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Randomize"))
+    {
+        std::random_device random_device;
+        std::mt19937 engine(random_device());
+        std::uniform_real_distribution distribution(min_gain, max_gain);
+        std::ranges::generate(gains, [&] { return distribution(engine); });
+        config_changed = true;
+    }
+
+    ImGui::SameLine();
+    config_changed |= DrawSetAllGainsPopup(gains);
+    if (ImGui::Button("Set all to..."))
+    {
+        ImGui::OpenPopup("Gains Popup");
+        config_changed = true;
+    }
+
+    return config_changed;
+}
+
+bool DrawGainSlider(float& gain, size_t index)
+{
+    ImGui::PushID(static_cast<int>(index));
+    ImGui::BeginGroup();
+    const bool config_changed =
+        ImGui::VSliderFloat("##v", kGainSliderSize, &gain, -1.f, 1.0f, "", ImGuiSliderFlags_None);
+    if (ImGui::IsItemActive() || ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("%.3f", gain);
+    }
+
+    const std::string channel_label = std::to_string(index + 1);
+    const float label_width = ImGui::CalcTextSize(channel_label.c_str()).x;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (kGainSliderSize.x - label_width) * 0.5f));
+    fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Metadata, fdn_sandbox::theme::ColorRole::TextSecondary,
+                             channel_label);
+    ImGui::EndGroup();
+    ImGui::PopID();
+    return config_changed;
+}
+
+bool DrawGainSliders(std::span<float> gains)
+{
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kGainSliderSpacing, kGainSliderSpacing));
+
+    bool config_changed = false;
+    const size_t sliders_per_row = std::min(gains.size(), static_cast<size_t>(kMaxGainSlidersPerRow));
+    for (size_t index = 0; index < gains.size(); ++index)
+    {
+        if (index % sliders_per_row != 0)
+        {
+            ImGui::SameLine();
+        }
+        config_changed |= DrawGainSlider(gains[index], index);
+    }
+
+    ImGui::PopStyleVar();
+    return config_changed;
+}
+
+bool DrawAdjustAllGains(std::span<float> gains)
+{
+    bool config_changed = false;
+    ImGui::Text("Adjust all:");
+    ImGui::SameLine();
+    if (ImGui::Button("-", ImVec2(30, 0)))
+    {
+        std::ranges::transform(gains, gains.begin(), [](float gain) { return gain * 0.9f; });
+        config_changed = true;
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("+", ImVec2(30, 0)))
+    {
+        std::ranges::transform(gains, gains.begin(), [](float gain) { return gain * 1.1f; });
+        config_changed = true;
+    }
+
+    return config_changed;
 }
 
 // void PlotCascadedFeedbackMatrix(const sfFDN::CascadedFeedbackMatrixInfo& info)
@@ -125,8 +246,6 @@ std::vector<float> GetMatrixFromClipboard(uint32_t N)
 
 bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 {
-    bool config_changed = false;
-    const size_t N = gains.size();
     if (gains.empty())
     {
         fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Metadata, fdn_sandbox::theme::ColorRole::TextSecondary,
@@ -134,126 +253,11 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
         return false;
     }
 
-    if (ImGui::Button("Distribute"))
-    {
-        config_changed = true;
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] = 1.0f / N; // Distribute gains evenly
-        }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Randomize"))
-    {
-        config_changed = true;
-        std::random_device rd;                                           // Obtain a random number from hardware
-        std::mt19937 eng(rd());                                          // Seed the generator
-        std::uniform_real_distribution<float> distr(min_gain, max_gain); // Define the range
-
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] = distr(eng); // Generate random gains
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::BeginPopupContextItem("Gains Popup"))
-    {
-        static float value = 0.0f; // Default value
-        if (ImGui::Selectable("Set to 0.5"))
-        {
-            value = 0.5f;
-            config_changed = true;
-        }
-        if (ImGui::Selectable("Set to -0.5"))
-        {
-            value = -0.5f;
-            config_changed = true;
-        }
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::DragFloat("##Value", &value, 0.01f, -1.0f, 1.0f))
-        {
-            config_changed = true;
-        }
-
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] = value; // Set all gains to the specified value
-        }
-
-        ImGui::EndPopup();
-    }
-
-    if (ImGui::Button("Set all to..."))
-    {
-        config_changed = true;
-        ImGui::OpenPopup("Gains Popup");
-    }
+    bool config_changed = DrawGainActions(gains, min_gain, max_gain);
 
     ImGui::DragFloatRange2("Gain Range", &min_gain, &max_gain, 0.01f, -1.0f, 1.0f, "%.2f");
-
-    constexpr float spacing = 5.0f;
-    constexpr ImVec2 slider_size(24.0f, 68.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
-
-    constexpr uint32_t max_sliders_per_row = 8;
-    const uint32_t sliders_per_row = std::min(static_cast<uint32_t>(N), max_sliders_per_row);
-    const uint32_t num_rows = (N + sliders_per_row - 1) / sliders_per_row;
-
-    for (uint32_t row = 0; row < num_rows; ++row)
-    {
-        for (uint32_t i = 0; i < sliders_per_row; ++i)
-        {
-            size_t index = row * sliders_per_row + i;
-            if (index >= N)
-            {
-                break;
-            }
-            if (i > 0)
-            {
-                ImGui::SameLine();
-            }
-
-            ImGui::PushID(static_cast<int>(index));
-            ImGui::BeginGroup();
-            config_changed |=
-                ImGui::VSliderFloat("##v", slider_size, &gains[index], -1.f, 1.0f, "", ImGuiSliderFlags_None);
-            if (ImGui::IsItemActive() || ImGui::IsItemHovered())
-            {
-                ImGui::SetTooltip("%.3f", gains[index]);
-            }
-
-            const std::string channel_label = std::to_string(index + 1);
-            const float label_width = ImGui::CalcTextSize(channel_label.c_str()).x;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (slider_size.x - label_width) * 0.5f));
-            fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Metadata,
-                                     fdn_sandbox::theme::ColorRole::TextSecondary, channel_label);
-            ImGui::EndGroup();
-            ImGui::PopID();
-        }
-    }
-    ImGui::PopStyleVar();
-
-    ImGui::Text("Adjust all:");
-    ImGui::SameLine();
-    if (ImGui::Button("-", ImVec2(30, 0)))
-    {
-        config_changed = true;
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] *= 0.9f;
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("+", ImVec2(30, 0)))
-    {
-        config_changed = true;
-        for (uint32_t i = 0; i < N; ++i)
-        {
-            gains[i] *= 1.1f;
-        }
-    }
+    config_changed |= DrawGainSliders(gains);
+    config_changed |= DrawAdjustAllGains(gains);
     return config_changed;
 }
 

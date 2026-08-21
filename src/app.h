@@ -14,7 +14,10 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
+#include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 class FDNToolboxApp
@@ -54,6 +57,50 @@ class FDNToolboxApp
     void UpdateFDN();
 
     void AudioCallback(std::span<float> output_buffer, size_t frame_size, size_t num_channels);
+    void ApplyPendingFDNUpdates();
+    void AdoptPendingConvolutionReverb(size_t frame_size);
+
+    struct AudioProcessingTimes
+    {
+        int64_t convolution_ns = 0;
+        int64_t fdn_ns = 0;
+    };
+
+    AudioProcessingTimes ProcessAudioEngines(std::span<float> input, std::span<float> fdn_output,
+                                             std::span<float> convolution_output);
+    void ClearUnstableFDN(std::span<const float> fdn_output);
+    std::pair<float, float> PrepareMix(int reverb_type, std::span<float> input);
+    void MixAndMeter(std::span<float> output, std::span<const float> input, float gain, float wet_mix, float dry_mix);
+    static void WriteOutput(std::span<float> output_buffer, std::span<const float> output, size_t num_channels);
+    void UpdateCpuUsage(int64_t duration_ns, size_t frame_size);
+
+    void DrawTransportControls(int selected_audio_file);
+    void PlaySelectedAudioFile(int selected_audio_file);
+    void DrawAudioFileSelector(int& selected_audio_file);
+    void DrawAudioMixControls();
+    void DrawConvolutionControls();
+    void DrawOutputMeter();
+    void DrawAudioStreamControl();
+
+    void DrawFileMenu();
+    void DrawOptionsMenu(bool& show_audio_config_window);
+    void DrawConfigurationSwitcher();
+    void DrawFrameRateStatus() const;
+    void DrawAudioConfigurationWindow(bool& show_audio_config_window);
+    void ProcessFileBrowserSelections();
+    void SaveSelectedImpulseResponse();
+    void LoadSelectedConfiguration();
+    void SaveSelectedConfiguration();
+    void LoadSelectedRIR();
+
+    bool DrawStructureSection(uint32_t& random_seed, bool& fdn_size_changed);
+    void DrawVisualOverviewSection(bool fdn_size_changed, int max_delay);
+    bool DrawInputStageSection();
+    bool DrawDelayNetworkSection();
+    bool DrawFeedbackMatrixSection();
+    bool DrawLoopFiltersSection();
+    bool DrawOutputStageSection();
+    bool DrawToneCorrectionSection();
 
     // Member variables
     std::unique_ptr<audio_manager> audio_manager_;
@@ -128,4 +175,7 @@ class FDNToolboxApp
     fdn_analysis::IRAnalyzer rir_analyzer_;
 
     std::unique_ptr<sfFDN::PartitionedConvolver> convolution_reverb_;
+    std::unique_ptr<sfFDN::PartitionedConvolver> active_convolution_reverb_;
+    int last_reverb_type_ = kFDN_REVERB;
+    size_t cpu_highwater_mark_ns_ = 0;
 };

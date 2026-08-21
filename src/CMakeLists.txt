@@ -5,6 +5,10 @@ target_sources(
     PRIVATE utils.cpp
             widget.cpp
             app.cpp
+            app_menu.cpp
+            app_config.cpp
+            app_audio.cpp
+            app_analysis.cpp
             fdn_analyzer.cpp
             ir_analyzer.cpp
             fdn_info.cpp

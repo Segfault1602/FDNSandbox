@@ -12,6 +12,7 @@
 #include "widget.h"
 
 #include <algorithm>
+#include <map>
 #include <random>
 #include <ranges>
 #include <vector>
@@ -56,6 +57,175 @@ bool DrawScalarMatrixTypeComboBox(int& selected_matrix_type, uint32_t fdn_size)
     }
 
     return config_changed;
+}
+
+struct DelayRange
+{
+    int minimum = 256;
+    int maximum = 4000;
+};
+
+struct DelayWidgetState
+{
+    std::map<const sfFDN::DelayBankOptions*, DelayRange> ranges;
+    bool make_prime = false;
+};
+
+DelayWidgetState& GetDelayWidgetState()
+{
+    static DelayWidgetState state;
+    return state;
+}
+
+DelayRange& GetDelayRange(const sfFDN::DelayBankOptions& config)
+{
+    auto& ranges = GetDelayWidgetState().ranges;
+    if (ranges.size() > 100)
+    {
+        ranges.clear();
+    }
+
+    return ranges.try_emplace(&config).first->second;
+}
+
+bool EnsureDelayCount(sfFDN::DelayBankOptions& config, uint32_t fdn_size)
+{
+    if (config.delays.size() == fdn_size)
+    {
+        return false;
+    }
+
+    config.delays.resize(fdn_size, 512.f);
+    return true;
+}
+
+bool DrawDelayInterpolationType(sfFDN::DelayBankOptions& config)
+{
+    int interpolation_type = static_cast<int>(config.interpolation_type);
+    const std::string preview_value = utils::GetDelayInterpolationTypeName(interpolation_type);
+    if (!ImGui::BeginCombo("Interpolation Type", preview_value.c_str()))
+    {
+        return false;
+    }
+
+    bool config_changed = false;
+    for (int index = 0; index < static_cast<int>(sfFDN::DelayInterpolationType::Count); ++index)
+    {
+        const bool is_selected = interpolation_type == index;
+        if (ImGui::Selectable(utils::GetDelayInterpolationTypeName(index).c_str(), is_selected))
+        {
+            interpolation_type = index;
+            config.interpolation_type = static_cast<sfFDN::DelayInterpolationType>(interpolation_type);
+            config_changed = true;
+        }
+    }
+    ImGui::EndCombo();
+    return config_changed;
+}
+
+void DrawDelayRange(DelayRange& range, uint32_t block_size)
+{
+    ImGui::DragIntRange2("Delay Range", &range.minimum, &range.maximum, 1, block_size, 0, "%d samples", "%d samples",
+                         ImGuiSliderFlags_AlwaysClamp);
+    range.minimum = std::max(range.minimum, 0);
+    range.maximum = std::max(range.maximum, range.minimum + 1);
+}
+
+bool DrawDelayToolbar(bool& make_prime)
+{
+    if (ImGui::Button("Presets"))
+    {
+        ImGui::OpenPopup("Delay Presets");
+    }
+
+    ImGui::SameLine();
+    const bool config_changed = ImGui::Checkbox("Make Prime", &make_prime);
+
+    ImGui::SameLine();
+    if (ImGui::Button("Ordering"))
+    {
+        ImGui::OpenPopup("Delay Ordering");
+    }
+
+    return config_changed;
+}
+
+bool DrawDelayPresetsPopup(sfFDN::DelayBankOptions& config, const sfFDN::FDNConfig& fdn_config, const DelayRange& range)
+{
+    if (!ImGui::BeginPopup("Delay Presets"))
+    {
+        return false;
+    }
+
+    bool config_changed = false;
+    for (int index = 0; index < static_cast<int>(sfFDN::DelayLengthType::Count); ++index)
+    {
+        if (ImGui::Selectable(utils::GetDelayLengthTypeName(index).c_str()))
+        {
+            config.delays = sfFDN::GetDelayLengths(fdn_config.fdn_size, range.minimum, range.maximum,
+                                                   static_cast<sfFDN::DelayLengthType>(index));
+            config_changed = true;
+        }
+    }
+    ImGui::EndPopup();
+    return config_changed;
+}
+
+bool DrawDelayOrderingPopup(std::span<float> delays)
+{
+    if (!ImGui::BeginPopup("Delay Ordering"))
+    {
+        return false;
+    }
+
+    bool config_changed = false;
+    if (ImGui::Selectable("Randomize"))
+    {
+        std::random_device random_device;
+        std::mt19937 engine(random_device());
+        std::ranges::shuffle(delays, engine);
+        config_changed = true;
+    }
+    if (ImGui::Selectable("Sort Ascending"))
+    {
+        std::ranges::sort(delays);
+        config_changed = true;
+    }
+    if (ImGui::Selectable("Sort Descending"))
+    {
+        std::ranges::sort(delays, std::greater<>());
+        config_changed = true;
+    }
+    ImGui::EndPopup();
+    return config_changed;
+}
+
+bool DrawDelaySliders(sfFDN::DelayBankOptions& config, const DelayRange& range)
+{
+    bool config_changed = false;
+    for (const size_t index : std::views::iota(size_t{0}, config.delays.size()))
+    {
+        float& delay = config.delays[index];
+        const std::string label = "Delay " + std::to_string(index);
+        if (config.interpolation_type == sfFDN::DelayInterpolationType::None)
+        {
+            int delay_samples = static_cast<int>(delay);
+            config_changed |= ImGui::SliderInt(label.c_str(), &delay_samples, range.minimum, range.maximum);
+            delay = static_cast<float>(delay_samples);
+            continue;
+        }
+
+        config_changed |= ImGui::SliderFloat(label.c_str(), &delay, static_cast<float>(range.minimum),
+                                             static_cast<float>(range.maximum));
+    }
+    return config_changed;
+}
+
+void MakeDelaysPrime(std::span<float> delays)
+{
+    std::ranges::transform(delays, delays.begin(), [](float delay) {
+        return static_cast<float>(utils::GetClosestPrime(static_cast<uint32_t>(delay)));
+    });
 }
 } // namespace
 
@@ -246,129 +416,21 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config) const
 
 bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config) const
 {
-    bool config_changed = false;
+    bool config_changed = EnsureDelayCount(config, fdn_config.fdn_size);
+    config_changed |= DrawDelayInterpolationType(config);
 
-    if (config.delays.size() != fdn_config.fdn_size)
+    DelayRange& range = GetDelayRange(config);
+    DrawDelayRange(range, fdn_config.block_size);
+
+    auto& state = GetDelayWidgetState();
+    config_changed |= DrawDelayToolbar(state.make_prime);
+    config_changed |= DrawDelayPresetsPopup(config, fdn_config, range);
+    config_changed |= DrawDelayOrderingPopup(config.delays);
+    config_changed |= DrawDelaySliders(config, range);
+
+    if (config_changed && state.make_prime)
     {
-        config.delays.resize(fdn_config.fdn_size, 512.f);
-        config_changed = true;
-    }
-
-    int delay_interpolation_type = static_cast<int>(config.interpolation_type);
-    const std::string combo_preview_value = utils::GetDelayInterpolationTypeName(delay_interpolation_type);
-    if (ImGui::BeginCombo("Interpolation Type", combo_preview_value.c_str()))
-    {
-        for (int i = 0; i < static_cast<int>(sfFDN::DelayInterpolationType::Count); i++)
-        {
-            bool is_selected = (delay_interpolation_type == i);
-            if (ImGui::Selectable(utils::GetDelayInterpolationTypeName(i).c_str(), is_selected))
-            {
-                delay_interpolation_type = i;
-                config.interpolation_type = static_cast<sfFDN::DelayInterpolationType>(delay_interpolation_type);
-                config_changed = true;
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    // This is so dumb...
-    static std::map<std::ptrdiff_t, std::array<int, 2>> delay_ranges;
-    if (delay_ranges.size() > 100)
-    {
-        delay_ranges.clear();
-    }
-
-    auto it = delay_ranges.find(reinterpret_cast<std::ptrdiff_t>(&config));
-    if (it == delay_ranges.end())
-    {
-        delay_ranges[reinterpret_cast<std::ptrdiff_t>(&config)] = {256, 4000};
-        it = delay_ranges.find(reinterpret_cast<std::ptrdiff_t>(&config));
-    }
-
-    int min_delay = it->second[0];
-    int max_delay = it->second[1];
-    ImGui::DragIntRange2("Delay Range", &min_delay, &max_delay, 1, fdn_config.block_size, 0, "%d samples", "%d samples",
-                         ImGuiSliderFlags_AlwaysClamp);
-    min_delay = std::max(min_delay, 0);
-    max_delay = std::max(max_delay, min_delay + 1);
-
-    it->second[0] = min_delay;
-    it->second[1] = max_delay;
-
-    if (ImGui::Button("Presets"))
-    {
-        ImGui::OpenPopup("Delay Presets");
-    }
-
-    static bool make_prime = false;
-    ImGui::SameLine();
-    config_changed |= ImGui::Checkbox("Make Prime", &make_prime);
-
-    ImGui::SameLine();
-    if (ImGui::Button("Ordering"))
-    {
-        ImGui::OpenPopup("Delay Ordering");
-    }
-
-    if (ImGui::BeginPopup("Delay Presets"))
-    {
-        for (int i = 0; i < static_cast<int>(sfFDN::DelayLengthType::Count); ++i)
-        {
-            if (ImGui::Selectable(utils::GetDelayLengthTypeName(i).c_str()))
-            {
-                config.delays = sfFDN::GetDelayLengths(fdn_config.fdn_size, min_delay, max_delay,
-                                                       static_cast<sfFDN::DelayLengthType>(i));
-                config_changed = true;
-            }
-        }
-        ImGui::EndPopup();
-    }
-
-    if (ImGui::BeginPopup("Delay Ordering"))
-    {
-        if (ImGui::Selectable("Randomize"))
-        {
-            std::random_device rd;
-            std::mt19937 eng(rd());
-            std::shuffle(config.delays.begin(), config.delays.end(), eng);
-            config_changed = true;
-        }
-        if (ImGui::Selectable("Sort Ascending"))
-        {
-            std::ranges::sort(config.delays);
-            config_changed = true;
-        }
-        if (ImGui::Selectable("Sort Descending"))
-        {
-            std::ranges::sort(config.delays, std::greater<>());
-
-            config_changed = true;
-        }
-        ImGui::EndPopup();
-    }
-
-    for (size_t i = 0; i < config.delays.size(); ++i)
-    {
-        std::string label = "Delay " + std::to_string(i);
-        if (config.interpolation_type == sfFDN::DelayInterpolationType::None)
-        {
-            int delay_samples = static_cast<int>(config.delays[i]);
-            config_changed |= ImGui::SliderInt(label.c_str(), &delay_samples, min_delay, max_delay);
-            config.delays[i] = static_cast<float>(delay_samples);
-        }
-        else
-        {
-            config_changed |= ImGui::SliderFloat(label.c_str(), &config.delays[i], static_cast<float>(min_delay),
-                                                 static_cast<float>(max_delay));
-        }
-    }
-
-    if (config_changed && make_prime)
-    {
-        for (auto& delay : config.delays)
-        {
-            delay = utils::GetClosestPrime(static_cast<uint32_t>(delay));
-        }
+        MakeDelaysPrime(config.delays);
     }
 
     config.block_size = fdn_config.block_size;

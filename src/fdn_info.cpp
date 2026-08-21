@@ -76,6 +76,84 @@ bool GetOutputGains(sfFDN::AudioProcessor* proc, std::vector<float>& output_gain
 
     return false;
 }
+
+enum class GainProcessorRole
+{
+    Input,
+    Output,
+};
+
+bool HasExpectedChannelCounts(const sfFDN::AudioProcessor& processor, uint32_t fdn_size, GainProcessorRole role)
+{
+    if (role == GainProcessorRole::Input)
+    {
+        return processor.InputChannelCount() == 1 && processor.OutputChannelCount() == fdn_size;
+    }
+
+    return processor.InputChannelCount() == fdn_size && processor.OutputChannelCount() == 1;
+}
+
+bool GetGains(sfFDN::AudioProcessor* processor, std::vector<float>& gains, GainProcessorRole role)
+{
+    return role == GainProcessorRole::Input ? GetInputGains(processor, gains) : GetOutputGains(processor, gains);
+}
+
+void LogEmptyProcessorChain(GainProcessorRole role)
+{
+    if (role == GainProcessorRole::Input)
+    {
+        std::cerr << "[fdn_info::GetInputAndOutputGains]: Input gains processor chain is empty.\n";
+        return;
+    }
+
+    std::cerr << "[fdn_info::GetInputAndOutputGains]: Output gains processor chain is empty.\n";
+}
+
+void LogUnexpectedProcessor(GainProcessorRole role)
+{
+    if (role == GainProcessorRole::Input)
+    {
+        std::cerr << "[fdn_info::GetInputAndOutputGains]: Input gains processor is not a ParallelGains instance.\n";
+        return;
+    }
+
+    std::cerr << "[fdn_info::GetInputAndOutputGains]: Outupt gains processor is not a ParallelGains instance.\n";
+}
+
+bool GetGainsFromProcessor(sfFDN::AudioProcessor* processor, std::vector<float>& gains, uint32_t fdn_size,
+                           GainProcessorRole role)
+{
+    if (GetGains(processor, gains, role))
+    {
+        return true;
+    }
+
+    auto* processor_chain = dynamic_cast<sfFDN::AudioProcessorChain*>(processor);
+    if (processor_chain == nullptr)
+    {
+        LogUnexpectedProcessor(role);
+        return false;
+    }
+
+    const uint32_t processor_count = processor_chain->GetProcessorCount();
+    if (processor_count == 0)
+    {
+        LogEmptyProcessorChain(role);
+        return false;
+    }
+
+    for (uint32_t index = 0; index < processor_count; ++index)
+    {
+        auto* candidate = processor_chain->GetProcessor(index);
+        assert(candidate != nullptr);
+        if (HasExpectedChannelCounts(*candidate, fdn_size, role) && GetGains(candidate, gains, role))
+        {
+            break;
+        }
+    }
+
+    return true;
+}
 } // namespace
 
 namespace fdn_info
@@ -94,68 +172,12 @@ bool GetInputAndOutputGains(const sfFDN::FDN* fdn, std::vector<float>& input_gai
         output_gains.resize(N, 0.0f);
     }
 
-    if (!GetInputGains(input_gains_processor, input_gains))
+    if (!GetGainsFromProcessor(input_gains_processor, input_gains, N, GainProcessorRole::Input))
     {
-        if (auto* processor_chain = dynamic_cast<sfFDN::AudioProcessorChain*>(input_gains_processor))
-        {
-            uint32_t processor_count = processor_chain->GetProcessorCount();
-            if (processor_count == 0)
-            {
-                std::cerr << "[fdn_info::GetInputAndOutputGains]: Input gains processor chain is empty.\n";
-                return false;
-            }
-            for (uint32_t i = 0; i < processor_count; ++i)
-            {
-                auto* proc = processor_chain->GetProcessor(i);
-                assert(proc != nullptr);
-                if (proc->InputChannelCount() == 1 && proc->OutputChannelCount() == N)
-                {
-                    if (GetInputGains(proc, input_gains))
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-        else
-        {
-            std::cerr << "[fdn_info::GetInputAndOutputGains]: Input gains processor is not a ParallelGains instance.\n";
-            return false;
-        }
+        return false;
     }
 
-    if (!GetOutputGains(output_gains_processor, output_gains))
-    {
-        if (auto* processor_chain = dynamic_cast<sfFDN::AudioProcessorChain*>(output_gains_processor))
-        {
-            uint32_t processor_count = processor_chain->GetProcessorCount();
-            if (processor_count == 0)
-            {
-                std::cerr << "[fdn_info::GetInputAndOutputGains]: Output gains processor chain is empty.\n";
-                return false;
-            }
-            for (uint32_t i = 0; i < processor_count; ++i)
-            {
-                auto* proc = processor_chain->GetProcessor(i);
-                assert(proc != nullptr);
-                if (proc->InputChannelCount() == N && proc->OutputChannelCount() == 1)
-                {
-                    if (GetOutputGains(proc, output_gains))
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-        else
-        {
-            std::cerr
-                << "[fdn_info::GetInputAndOutputGains]: Outupt gains processor is not a ParallelGains instance.\n";
-            return false;
-        }
-    }
-
-    return true;
+    return GetGainsFromProcessor(output_gains_processor, output_gains, N, GainProcessorRole::Output);
 }
 
 bool GetDelays(const sfFDN::FDN* fdn, std::vector<uint32_t>& delays)
