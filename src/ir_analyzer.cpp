@@ -288,10 +288,12 @@ EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
     {
         Stopwatch stopwatch;
 
-        auto edr_data = audio_utils::analysis::EnergyDecayRelief(GetImpulseResponse());
+        const audio_utils::analysis::EnergyDecayReliefOptions options{};
+        auto edr_data = audio_utils::analysis::EnergyDecayRelief(GetImpulseResponse(), options);
         edr_data_ = std::move(edr_data.data);
         edr_bin_count_ = edr_data.num_bins;
         edr_frame_count_ = edr_data.num_frames;
+        edr_hop_size_ = options.hop_size;
 
         analysis_flags_.reset(static_cast<size_t>(AnalysisType::EnergyDecayRelief));
         LOG_INFO(logger_, "Analyzing energy decay relief took {} ms", stopwatch.ElapsedMs());
@@ -301,6 +303,7 @@ EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
         .energy_decay_relief = std::span<const float>(edr_data_),
         .bin_count = edr_bin_count_,
         .frame_count = edr_frame_count_,
+        .hop_size = edr_hop_size_,
     };
 }
 

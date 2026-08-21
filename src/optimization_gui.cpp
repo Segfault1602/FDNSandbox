@@ -9,10 +9,14 @@
 #include <sffdn/sffdn.h>
 
 #include "optimizer.h"
+#include "plot_ui.h"
 #include "settings.h"
+#include "theme.h"
 #include "utils.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <span>
 
 namespace
@@ -349,26 +353,44 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
         uint32_t eval_count = progress.evaluation_count;
         ImGui::Text("Evaluations: %u", eval_count);
 
-        if (!progress.loss_history.empty() && ImPlot::BeginPlot("Loss Progress", ImVec2(-1, 250), ImPlotAxisFlags_None))
+        if (!progress.loss_history.empty())
         {
-            const std::vector<double>& loss_history_vec = progress.loss_history[0];
-            ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history_vec.size() * 1.25),
-                                    ImPlotCond_Always);
-
-            double max_loss = loss_history_vec.empty() ? 1.0 : *std::ranges::max_element(loss_history_vec);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Always);
-
-            ImPlot::PlotLine("Loss", loss_history_vec.data(), static_cast<int>(loss_history_vec.size()));
-
-            for (auto i = 1u; i < progress.loss_history.size(); ++i)
+            ImPlot::SetNextAxisToFit(ImAxis_Y1);
+            if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, 250), ImPlotAxisFlags_None))
             {
-                const std::vector<double>& other_loss_history = progress.loss_history[i];
-                ImPlot::PlotLine(("Loss " + std::to_string(i)).c_str(), other_loss_history.data(),
-                                 static_cast<int>(other_loss_history.size()));
-            }
+                const std::vector<double>& loss_history_vec = progress.loss_history[0];
+                ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+                ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history_vec.size() * 1.25),
+                                        ImPlotCond_Always);
+                ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
 
-            ImPlot::EndPlot();
+                ImPlot::PlotLine("Total Loss", loss_history_vec.data(), static_cast<int>(loss_history_vec.size()), 1.0,
+                                 0.0,
+                                 fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Optimization, 1.8f));
+
+                for (auto i = 1u; i < progress.loss_history.size(); ++i)
+                {
+                    const std::vector<double>& other_loss_history = progress.loss_history[i];
+                    ImPlotSpec component_spec{};
+                    component_spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
+                    component_spec.LineWeight = 1.1f;
+                    ImPlot::PlotLine(("Component " + std::to_string(i)).c_str(), other_loss_history.data(),
+                                     static_cast<int>(other_loss_history.size()), 1.0, 0.0, component_spec);
+                }
+
+                if (!loss_history_vec.empty())
+                {
+                    const double best_loss = *std::ranges::min_element(loss_history_vec);
+                    fdn_sandbox::plot_ui::DrawHorizontalGuide(
+                        "Best Loss", best_loss, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk),
+                        1.0f);
+                    ImPlot::Annotation(static_cast<double>(loss_history_vec.size() - 1), best_loss,
+                                       fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk),
+                                       ImVec2(6.0f, -6.0f), true, "Best %.4g", best_loss);
+                }
+
+                ImPlot::EndPlot();
+            }
         }
 
         const auto status = fdn_optimizer_.GetStatus();
@@ -404,9 +426,6 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
     static uint32_t evaluation_count = 0;
     static double initial_loss = 0.0;
     static double final_loss = 0.0;
-    static std::vector<double> loss_history;
-    static std::vector<std::vector<double>> all_loss_histories;
-    static std::vector<std::string> loss_names;
 
     if (fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Completed ||
         fdn_optimizer_.GetStatus() == fdn_optimization::OptimizationStatus::Canceled)
@@ -419,9 +438,6 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
         {
             initial_loss = result.loss_history[0].front();
             final_loss = result.loss_history[0].back();
-            loss_history = result.loss_history[0];
-            all_loss_histories = result.loss_history;
-            loss_names = result.loss_names;
 
             loss_history_.losses = result.loss_history;
             loss_history_.loss_names = result.loss_names;
@@ -451,25 +467,6 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
     ImGui::BeginChild("Loss Plot", ImVec2(-1, -1), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
 
     PlotLossHistory();
-    // if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
-    // {
-    //     ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
-    //     ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-    //     ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
-
-    //     double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
-    //     ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
-
-    //     ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
-
-    //     for (auto i = 1u; i < all_loss_histories.size(); ++i)
-    //     {
-    //         const std::vector<double>& other_loss_history = all_loss_histories[i];
-    //         ImPlot::PlotLine((loss_names[i - 1]).c_str(), other_loss_history.data(),
-    //                          static_cast<int>(other_loss_history.size()));
-    //     }
-    //     ImPlot::EndPlot();
-    // }
     ImGui::EndChild();
 
     ImGui::PopStyleVar();
@@ -479,25 +476,88 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
 
 void OptimizationGUI::PlotLossHistory()
 {
+    const size_t loss_count = loss_history_.losses.size();
+    assert(loss_count == loss_history_.loss_names.size());
+    size_t total_point_count = 0;
+    size_t max_history_size = 0;
+    double min_loss = std::numeric_limits<double>::infinity();
+    double max_loss = -std::numeric_limits<double>::infinity();
+    for (const auto& losses : loss_history_.losses)
+    {
+        total_point_count += losses.size();
+        max_history_size = std::max(max_history_size, losses.size());
+        for (double loss : losses)
+        {
+            if (std::isfinite(loss))
+            {
+                min_loss = std::min(min_loss, loss);
+                max_loss = std::max(max_loss, loss);
+            }
+        }
+    }
+
+    static size_t previous_total_point_count = 0;
+    static size_t previous_max_history_size = 0;
+    static double previous_min_loss = std::numeric_limits<double>::quiet_NaN();
+    static double previous_max_loss = std::numeric_limits<double>::quiet_NaN();
+    const bool history_bounds_changed = total_point_count != previous_total_point_count ||
+                                        max_history_size != previous_max_history_size ||
+                                        min_loss != previous_min_loss || max_loss != previous_max_loss;
+
     if (ImPlot::BeginPlot("Loss Progress", ImVec2(-1, -1), ImPlotAxisFlags_None))
     {
         ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
-        ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-        // ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(loss_history.size() * 1.25), ImPlotCond_Once);
+        ImPlot::SetupAxes("Evaluation", "Loss", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
 
-        // double max_loss = loss_history.empty() ? 1.0 : *std::max_element(loss_history.begin(), loss_history.end());
-        // ImPlot::SetupAxisLimits(ImAxis_Y1, 0, max_loss * 1.25, ImPlotCond_Once);
-
-        // ImPlot::PlotLine("Total Loss", loss_history.data(), static_cast<int>(loss_history.size()));
-
-        auto loss_count = loss_history_.losses.size();
-        assert(loss_count == loss_history_.loss_names.size());
-        for (auto i = 0u; i < loss_count; ++i)
+        if (loss_count == 0)
         {
-            ImPlot::PlotLine(loss_history_.loss_names[i].c_str(), loss_history_.losses[i].data(),
-                             static_cast<int>(loss_history_.losses[i].size()));
+            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
+            ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, 1.0, ImPlotCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 1.0, ImPlotCond_Always);
+            fdn_sandbox::plot_ui::DrawEmptyState("No optimization history available");
+        }
+        else
+        {
+            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
+            const double x_max = max_history_size > 1 ? static_cast<double>(max_history_size - 1) * 1.05 : 1.0;
+            ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, x_max, ImPlotCond_Always);
+
+            if (history_bounds_changed && std::isfinite(min_loss) && std::isfinite(max_loss))
+            {
+                const double range = max_loss - min_loss;
+                const double padding = std::max({range * 0.1, std::abs(max_loss) * 0.05, 1e-9});
+                const double y_min = min_loss - padding;
+                const double y_max = max_loss + padding;
+
+                ImPlot::SetupAxisLimits(ImAxis_Y1, y_min, y_max, ImPlotCond_Always);
+            }
+
+            for (size_t i = 0; i < loss_count; ++i)
+            {
+                ImPlotSpec spec =
+                    i == 0 ? fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Optimization, 1.8f)
+                           : ImPlotSpec{};
+                if (i > 0)
+                {
+                    spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
+                    spec.LineWeight = 1.1f;
+                }
+                ImPlot::PlotLine(loss_history_.loss_names[i].c_str(), loss_history_.losses[i].data(),
+                                 static_cast<int>(loss_history_.losses[i].size()), 1.0, 0.0, spec);
+            }
+
+            if (!loss_history_.losses.front().empty())
+            {
+                const double best_loss = *std::ranges::min_element(loss_history_.losses.front());
+                fdn_sandbox::plot_ui::DrawHorizontalGuide(
+                    "Best Loss", best_loss, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk), 1.0f);
+            }
         }
         ImPlot::EndPlot();
+        previous_total_point_count = total_point_count;
+        previous_max_history_size = max_history_size;
+        previous_min_loss = min_loss;
+        previous_max_loss = max_loss;
     }
 }
 

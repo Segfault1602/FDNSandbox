@@ -1758,7 +1758,7 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
 {
     bool duration_changed = false;
 
-    ImPlot::SetupAxes("Sample", nullptr, ImPlotAxisFlags_None);
+    ImPlot::SetupAxes("Time (s)", nullptr, ImPlotAxisFlags_None);
     ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0f, 1.0f, ImPlotCond_Once);
     ImPlot::SetupAxisLimits(ImAxis_X1, 0, time_data.back(), ImPlotCond_Always);
 

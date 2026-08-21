@@ -51,6 +51,7 @@ struct EnergyDecayReliefData
     std::span<const float> energy_decay_relief;
     uint32_t bin_count;
     uint32_t frame_count;
+    uint32_t hop_size;
 };
 
 struct T60Data
@@ -145,8 +146,9 @@ class IRAnalyzer
     std::vector<float> octave_band_frequencies_;
 
     std::vector<float> edr_data_;
-    uint32_t edr_bin_count_;
-    uint32_t edr_frame_count_;
+    uint32_t edr_bin_count_ = 0;
+    uint32_t edr_frame_count_ = 0;
+    uint32_t edr_hop_size_ = 512;
 
     audio_utils::analysis::EstimateT60Results overall_t60_;
     std::vector<float> t60_octaves_;

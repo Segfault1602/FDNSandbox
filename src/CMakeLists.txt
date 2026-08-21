@@ -11,6 +11,8 @@ target_sources(
             fdn_widget.cpp
             presets.cpp
             app_imconfig.h
+            plot_ui.cpp
+            plot_ui.h
             theme.cpp
             theme.h
             optimization_gui.cpp
