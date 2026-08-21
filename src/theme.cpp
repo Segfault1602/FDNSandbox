@@ -22,12 +22,18 @@ const ColorArray kColors = {
     ImVec4(0.090f, 0.102f, 0.118f, 1.000f), // PanelBackground
     ImVec4(0.075f, 0.086f, 0.102f, 1.000f), // InsetBackground
     ImVec4(0.125f, 0.141f, 0.165f, 0.980f), // OverlayBackground
+    ImVec4(0.133f, 0.165f, 0.192f, 1.000f), // FieldBackground
+    ImVec4(0.165f, 0.216f, 0.251f, 1.000f), // FieldHovered
+    ImVec4(0.192f, 0.286f, 0.333f, 1.000f), // FieldActive
+    ImVec4(0.161f, 0.196f, 0.231f, 1.000f), // ButtonBackground
+    ImVec4(0.200f, 0.263f, 0.306f, 1.000f), // ButtonHovered
+    ImVec4(0.200f, 0.384f, 0.451f, 1.000f), // ButtonActive
     ImVec4(0.906f, 0.918f, 0.929f, 1.000f), // TextPrimary
     ImVec4(0.553f, 0.588f, 0.620f, 1.000f), // TextSecondary
     ImVec4(0.243f, 0.624f, 0.757f, 1.000f), // Accent
     ImVec4(0.345f, 0.706f, 0.824f, 1.000f), // AccentHovered
     ImVec4(0.176f, 0.471f, 0.576f, 1.000f), // AccentActive
-    ImVec4(0.204f, 0.231f, 0.263f, 1.000f), // Border
+    ImVec4(0.267f, 0.318f, 0.365f, 1.000f), // Border
     ImVec4(0.169f, 0.192f, 0.220f, 1.000f), // Separator
     ImVec4(0.349f, 0.663f, 0.416f, 1.000f), // StatusOk
     ImVec4(0.835f, 0.655f, 0.227f, 1.000f), // StatusWarning
@@ -192,7 +198,7 @@ void Apply(float dpi_scale)
     style.PopupBorderSize = 1.0f;
     style.FramePadding = ImVec2(7.0f, 4.0f);
     style.FrameRounding = 4.0f;
-    style.FrameBorderSize = 0.0f;
+    style.FrameBorderSize = 1.0f;
     style.ItemSpacing = ImVec2(8.0f, 5.0f);
     style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
     style.CellPadding = ImVec2(7.0f, 4.0f);
@@ -206,7 +212,7 @@ void Apply(float dpi_scale)
     style.TabBarBorderSize = 1.0f;
     style.TabBarOverlineSize = 2.0f;
     style.SeparatorSize = 1.0f;
-    style.DisabledAlpha = 0.55f;
+    style.DisabledAlpha = 0.65f;
 
     ImVec4* colors = style.Colors;
     colors[ImGuiCol_Text] = Color(ColorRole::TextPrimary);
@@ -216,9 +222,9 @@ void Apply(float dpi_scale)
     colors[ImGuiCol_PopupBg] = Color(ColorRole::OverlayBackground);
     colors[ImGuiCol_Border] = Color(ColorRole::Border);
     colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-    colors[ImGuiCol_FrameBg] = Color(ColorRole::InsetBackground);
-    colors[ImGuiCol_FrameBgHovered] = WithAlpha(Color(ColorRole::Accent), 0.32f);
-    colors[ImGuiCol_FrameBgActive] = WithAlpha(Color(ColorRole::Accent), 0.46f);
+    colors[ImGuiCol_FrameBg] = Color(ColorRole::FieldBackground);
+    colors[ImGuiCol_FrameBgHovered] = Color(ColorRole::FieldHovered);
+    colors[ImGuiCol_FrameBgActive] = Color(ColorRole::FieldActive);
     colors[ImGuiCol_TitleBg] = Color(ColorRole::PanelBackground);
     colors[ImGuiCol_TitleBgActive] = Color(ColorRole::InsetBackground);
     colors[ImGuiCol_TitleBgCollapsed] = Color(ColorRole::PanelBackground);
@@ -230,9 +236,9 @@ void Apply(float dpi_scale)
     colors[ImGuiCol_CheckMark] = Color(ColorRole::Accent);
     colors[ImGuiCol_SliderGrab] = Color(ColorRole::Accent);
     colors[ImGuiCol_SliderGrabActive] = Color(ColorRole::AccentHovered);
-    colors[ImGuiCol_Button] = Color(ColorRole::InsetBackground);
-    colors[ImGuiCol_ButtonHovered] = WithAlpha(Color(ColorRole::Accent), 0.58f);
-    colors[ImGuiCol_ButtonActive] = Color(ColorRole::AccentActive);
+    colors[ImGuiCol_Button] = Color(ColorRole::ButtonBackground);
+    colors[ImGuiCol_ButtonHovered] = Color(ColorRole::ButtonHovered);
+    colors[ImGuiCol_ButtonActive] = Color(ColorRole::ButtonActive);
     colors[ImGuiCol_Header] = WithAlpha(Color(ColorRole::Accent), 0.24f);
     colors[ImGuiCol_HeaderHovered] = WithAlpha(Color(ColorRole::Accent), 0.42f);
     colors[ImGuiCol_HeaderActive] = WithAlpha(Color(ColorRole::Accent), 0.58f);
