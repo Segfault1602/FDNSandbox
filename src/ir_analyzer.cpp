@@ -86,9 +86,9 @@ bool IRAnalyzer::IsClipping() const
 
 SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale)
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrogram)) && GetImpulseResponse().size() > 0)
+    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrogram)) && !GetImpulseResponse().empty())
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         constexpr size_t kNMels = 128;
         audio_utils::analysis::STFTResult result;
         if (mel_scale)
@@ -129,7 +129,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
 {
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrum)) || early_rir_time != spectrum_early_rir_time_)
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         spectrum_early_rir_time_ = early_rir_time;
 
         uint32_t early_rir_sample_count = static_cast<uint32_t>(early_rir_time * samplerate_);
@@ -196,7 +196,7 @@ CepstrumData IRAnalyzer::GetCepstrum(float early_rir_time)
 {
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Cepstrum)) || early_rir_time != cepstrum_early_rir_time_)
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         cepstrum_early_rir_time_ = early_rir_time;
 
         uint32_t early_rir_sample_count = static_cast<uint32_t>(early_rir_time * samplerate_);
@@ -224,7 +224,7 @@ AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Autocorrelation)) ||
         early_rir_time != autocorrelation_early_rir_time_)
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         autocorrelation_early_rir_time_ = early_rir_time;
 
         uint32_t early_rir_sample_count = static_cast<uint32_t>(early_rir_time * samplerate_);
@@ -256,7 +256,7 @@ EnergyDecayCurveData IRAnalyzer::GetEnergyDecayCurveData()
 {
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EnergyDecayCurve)))
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         energy_decay_curve_ = audio_utils::analysis::EnergyDecayCurve(GetImpulseResponse(), true);
         edc_octaves_ = audio_utils::analysis::EnergyDecayCurve_FilterBank(GetImpulseResponse(), true, samplerate_);
         auto octave_band_frequencies = audio_utils::analysis::GetOctaveBandFrequencies();
@@ -286,7 +286,7 @@ EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
 {
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EnergyDecayRelief)))
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
 
         const audio_utils::analysis::EnergyDecayReliefOptions options{};
         auto edr_data = audio_utils::analysis::EnergyDecayRelief(GetImpulseResponse(), options);
@@ -316,7 +316,7 @@ T60Data IRAnalyzer::GetT60Data(float decay_db_start, float decay_db_end)
 
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::T60s)))
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         auto edc_data = GetEnergyDecayCurveData();
         auto time_data = GetTimeData();
 
@@ -348,7 +348,7 @@ EchoDensityData IRAnalyzer::GetEchoDensityData(uint32_t window_size_ms, uint32_t
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EchoDensity)) ||
         (echo_density_window_size_ms_ != window_size_ms || echo_density_hop_size_ms_ != hop_size_ms))
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         echo_density_window_size_ms_ = window_size_ms;
         echo_density_hop_size_ms_ = hop_size_ms;
 

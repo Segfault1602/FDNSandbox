@@ -19,11 +19,11 @@ bool GetInputGains(sfFDN::AudioProcessor* proc, std::vector<float>& input_gains)
     }
     else if (auto* input_tv_gains = dynamic_cast<sfFDN::TimeVaryingParallelGains*>(proc))
     {
-        uint32_t samples_elapsed = ImGui::GetIO().DeltaTime * Settings::Instance().SampleRate();
+        const uint32_t samples_elapsed = ImGui::GetIO().DeltaTime * Settings::Instance().SampleRate();
         std::vector<float> input(samples_elapsed, 1.f);
         std::vector<float> output(samples_elapsed * input_tv_gains->OutputChannelCount(), 0.f);
 
-        sfFDN::AudioBuffer input_buffer(samples_elapsed, 1, input);
+        const sfFDN::AudioBuffer input_buffer(samples_elapsed, 1, input);
         sfFDN::AudioBuffer output_buffer(samples_elapsed, input_tv_gains->OutputChannelCount(), output);
 
         input_tv_gains->Process(input_buffer, output_buffer);
@@ -67,7 +67,7 @@ bool GetOutputGains(sfFDN::AudioProcessor* proc, std::vector<float>& output_gain
 
         output_tv_gains->Process(input_buffer, output_buffer);
 
-        for (auto i = 0; i < N; ++i)
+        for (uint32_t i = 0; i < N; ++i)
         {
             output_gains[i] = output_buffer.GetChannelSpan(0).last(N)[i];
         }

@@ -3,6 +3,7 @@
 #include "optimizer.h"
 
 #include "quill/Logger.h"
+#include <audio_loss.h>
 #include <sffdn/sffdn.h>
 
 #include <cstddef>

@@ -19,6 +19,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -92,7 +93,7 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
     }
 
     const auto [wet_mix, dry_mix] = PrepareMix(reverb_type, input_data);
-    std::span<float> output_data =
+    const std::span<float> output_data =
         reverb_type == kFDN_REVERB ? std::span<float>(fdn_output_data) : std::span<float>(convolution_output_data);
     MixAndMeter(output_data, input_data, audio_gain_.load(), wet_mix, dry_mix);
     WriteOutput(output_buffer, output_data, num_channels);
@@ -140,7 +141,7 @@ FDNToolboxApp::AudioProcessingTimes FDNToolboxApp::ProcessAudioEngines(std::span
                                                                        std::span<float> fdn_output,
                                                                        std::span<float> convolution_output)
 {
-    sfFDN::AudioBuffer input_buffer(kSystemBlockSize, 1, input);
+    const sfFDN::AudioBuffer input_buffer(kSystemBlockSize, 1, input);
     sfFDN::AudioBuffer fdn_output_buffer(kSystemBlockSize, 1, fdn_output);
     sfFDN::AudioBuffer convolution_output_buffer(kSystemBlockSize, 1, convolution_output);
 
@@ -246,7 +247,7 @@ void FDNToolboxApp::UpdateCpuUsage(int64_t duration_ns, size_t frame_size)
     cpu_usage_sample_count_ = std::min(cpu_usage_sample_count_ + 1, kCpuUsageWindowSize);
     fdn_cpu_usage_.store(cpu_usage_sum_ / static_cast<float>(cpu_usage_sample_count_), std::memory_order_relaxed);
 
-    if (static_cast<size_t>(duration_ns) <= cpu_highwater_mark_ns_)
+    if (std::cmp_less_equal(duration_ns, cpu_highwater_mark_ns_))
     {
         return;
     }

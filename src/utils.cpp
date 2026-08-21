@@ -11,6 +11,8 @@
 #include <numbers>
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -35,7 +37,7 @@ Eigen::ArrayXcf Polyval(const Eigen::ArrayXf& p, const Eigen::ArrayXcf& x)
     Eigen::ArrayXcf result = Eigen::ArrayXcf::Zero(x.size());
     result += p[0];
 
-    for (size_t i = 1; i < p.size(); ++i)
+    for (Eigen::Index i = 1; i < p.size(); ++i)
     {
         result = x * result + p[i];
     }
@@ -62,8 +64,8 @@ bool isPrime(uint32_t n)
 
 float ComputeRMSImpl(std::span<const float> buffer)
 {
-    Eigen::Map<const Eigen::ArrayXf> buffer_map(buffer.data(), buffer.size());
-    float rms = std::sqrt(buffer_map.square().mean());
+    const Eigen::Map<const Eigen::ArrayXf> buffer_map(buffer.data(), buffer.size());
+    const float rms = std::sqrt(buffer_map.square().mean());
     return rms;
 }
 
@@ -117,7 +119,7 @@ std::vector<float> pchip(std::span<const float> x, std::span<const float> y, std
 
     std::vector<float> yq;
     yq.reserve(xq.size());
-    for (float i : xq)
+    for (const float i : xq)
     {
         yq.push_back(spline(i));
     }
@@ -129,7 +131,7 @@ std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std:
 {
     const size_t K = sos.size();
 
-    Eigen::Map<const Eigen::ArrayXf> w_map(w.data(), w.size());
+    const Eigen::Map<const Eigen::ArrayXf> w_map(w.data(), w.size());
     Eigen::ArrayXcf dig_w(w.size());
     // if sample rate is specified, convert to rad/sample
     if (sr != 0.0f)
@@ -141,18 +143,18 @@ std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std:
         dig_w = Eigen::exp(std::complex(0.0f, 1.0f) * w_map);
     }
 
-    Eigen::Array3f b_coeffs = {sos[0].b0, sos[0].b1, sos[0].b2};
-    Eigen::Array3f a_coeffs = {sos[0].a0, sos[0].a1, sos[0].a2};
+    const Eigen::Array3f b_coeffs = {sos[0].b0, sos[0].b1, sos[0].b2};
+    const Eigen::Array3f a_coeffs = {sos[0].a0, sos[0].a1, sos[0].a2};
 
     Eigen::ArrayXcf h_complex = Polyval(b_coeffs, dig_w) / Polyval(a_coeffs, dig_w);
 
     for (size_t i = 1; i < K; ++i)
     {
-        Eigen::Array3f b_coeffs = {sos[i].b0, sos[i].b1, sos[i].b2};
-        Eigen::Array3f a_coeffs = {sos[i].a0, sos[i].a1, sos[i].a2};
+        const Eigen::Array3f b_coeffs = {sos[i].b0, sos[i].b1, sos[i].b2};
+        const Eigen::Array3f a_coeffs = {sos[i].a0, sos[i].a1, sos[i].a2};
         // Eigen::Map<const Eigen::ArrayXf> b_map(sos.data() + (i * 6), 3);
         // Eigen::Map<const Eigen::ArrayXf> a_map(sos.data() + (i * 6) + 3, 3);
-        Eigen::ArrayXcf h = Polyval(b_coeffs, dig_w) / Polyval(a_coeffs, dig_w);
+        const Eigen::ArrayXcf h = Polyval(b_coeffs, dig_w) / Polyval(a_coeffs, dig_w);
 
         h_complex = h_complex * h;
     }
@@ -178,8 +180,8 @@ void WriteAudioFile(const std::string& filename, std::span<const float> audio_da
         return;
     }
 
-    sf_count_t write_count = sf_writef_float(sndfile, audio_data.data(), audio_data.size());
-    if (write_count != static_cast<sf_count_t>(audio_data.size()))
+    const sf_count_t write_count = sf_writef_float(sndfile, audio_data.data(), audio_data.size());
+    if (!std::cmp_equal(write_count, audio_data.size()))
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Failed to write audio file: {}", sf_strerror(sndfile));
     }
@@ -189,20 +191,25 @@ void WriteAudioFile(const std::string& filename, std::span<const float> audio_da
 
 uint32_t GetChannelCountFromAudioFile(const std::string_view filename)
 {
+    const std::string filename_string(filename);
     SF_INFO sf_info{};
-    SNDFILE* sndfile = sf_open(filename.data(), SFM_READ, &sf_info);
+    SNDFILE* sndfile = sf_open(filename_string.c_str(), SFM_READ, &sf_info);
     if (sndfile == nullptr)
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file for reading: {}", sf_strerror(nullptr));
         return {};
     }
+
+    sf_close(sndfile);
+
     return sf_info.channels;
 }
 
 std::vector<float> ReadAudioFile(const std::string_view filename, uint32_t channel)
 {
+    const std::string filename_string(filename);
     SF_INFO sf_info{};
-    SNDFILE* sndfile = sf_open(filename.data(), SFM_READ, &sf_info);
+    SNDFILE* sndfile = sf_open(filename_string.c_str(), SFM_READ, &sf_info);
     if (sndfile == nullptr)
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file for reading: {}", sf_strerror(nullptr));
@@ -214,10 +221,10 @@ std::vector<float> ReadAudioFile(const std::string_view filename, uint32_t chann
     std::vector<float> frame(sf_info.channels, 0.0f);
 
     std::vector<float> audio_data(sf_info.frames, 0.0f);
-    for (size_t i = 0; i < static_cast<size_t>(sf_info.frames); ++i)
+    for (sf_count_t i = 0; i < sf_info.frames; ++i)
     {
         sf_readf_float(sndfile, frame.data(), 1);
-        audio_data[i] = frame[channel];
+        audio_data[static_cast<size_t>(i)] = frame[channel];
     }
 
     sf_close(sndfile);
@@ -315,7 +322,7 @@ std::string GetDelayLengthTypeName(int type)
 
 std::string GetDelayInterpolationTypeName(int type)
 {
-    sfFDN::DelayInterpolationType interp_type = static_cast<sfFDN::DelayInterpolationType>(type);
+    const sfFDN::DelayInterpolationType interp_type = static_cast<sfFDN::DelayInterpolationType>(type);
     switch (interp_type)
     {
     case sfFDN::DelayInterpolationType::None:
@@ -344,10 +351,10 @@ sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNC
     assert(false);
     // Create a default one if not found
     sfFDN::AttenuationFilterBankOptions default_config;
-    for (auto i = 0; i < config.fdn_size; ++i)
+    for (uint32_t i = 0; i < config.fdn_size; ++i)
     {
-        default_config.filter_configs.emplace_back(sfFDN::HomogenousFilterOptions{
-            .t60 = 1.f, .delay = -1.f, .sample_rate = static_cast<float>(config.sample_rate)});
+        default_config.filter_configs.emplace_back(
+            sfFDN::HomogenousFilterOptions{.t60 = 1.f, .delay = -1.f, .sample_rate = config.sample_rate});
     }
 
     config.loop_filter_configs.emplace_back(default_config);
@@ -388,7 +395,7 @@ std::vector<float> ComputeRMS(std::span<const float> buffer, uint32_t block_size
     for (size_t i = 0; i + block_size <= buffer.size(); i += hop_size)
     {
         auto block = buffer.subspan(i, block_size);
-        float rms = ComputeRMSImpl(block);
+        const float rms = ComputeRMSImpl(block);
         rms_values.push_back(rms);
     }
     return rms_values;
@@ -442,7 +449,7 @@ bool NormalizeAttenuationFilterBank(sfFDN::FDNConfig& config)
     }
 
     auto& filter_configs = config.attenuation_filter_bank_config->filter_configs;
-    bool changed = filter_configs.size() != config.fdn_size;
+    const bool changed = filter_configs.size() != config.fdn_size;
 
     if (filter_configs.empty())
     {
@@ -458,7 +465,7 @@ bool NormalizeAttenuationFilterBank(sfFDN::FDNConfig& config)
         std::visit(
             [delay, sample_rate = config.sample_rate](auto& filter) {
                 filter.delay = delay;
-                filter.sample_rate = static_cast<float>(sample_rate);
+                filter.sample_rate = sample_rate;
             },
             filter_configs[i]);
     }

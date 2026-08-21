@@ -34,7 +34,7 @@ sfFDN::FDNConfig GetDefaultFDNConfig()
     for (auto delay : config.delay_bank_config.delays)
     {
         sfFDN::HomogenousFilterOptions attenuation_options{
-            .t60 = 1.f, .delay = delay, .sample_rate = static_cast<float>(config.sample_rate)};
+            .t60 = 1.f, .delay = delay, .sample_rate = config.sample_rate};
         attenuation_filter_bank_options.filter_configs.emplace_back(attenuation_options);
     }
     config.attenuation_filter_bank_config = attenuation_filter_bank_options;

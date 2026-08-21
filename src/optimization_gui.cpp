@@ -18,6 +18,7 @@
 #include <cmath>
 #include <limits>
 #include <span>
+#include <utility>
 
 namespace
 {
@@ -45,9 +46,9 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
                            ImGuiSliderFlags_Logarithmic);
         ImGui::InputFloat("Tolerance", &params.tolerance, 1e-6f, 1e-3f, "%.1e", ImGuiSliderFlags_Logarithmic);
 
-        params.decay_step_size = std::max(1, static_cast<int>(params.decay_step_size));
-        params.epoch_restarts = std::max(0, static_cast<int>(params.epoch_restarts));
-        params.max_restarts = std::max(0, static_cast<int>(params.max_restarts));
+        params.decay_step_size = std::max(1, params.decay_step_size);
+        params.epoch_restarts = std::max(0, params.epoch_restarts);
+        params.max_restarts = std::max(0, params.max_restarts);
 
         return params;
     }
@@ -70,20 +71,20 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
 
         constexpr std::array kInitialTempMinMax = {100.0, 20000.0};
         ImGui::InputScalar("Initial Temperature", ImGuiDataType_Double, &sa_params.initial_temperature,
-                           &kInitialTempMinMax[0], &kInitialTempMinMax[1], "%.1f", ImGuiSliderFlags_Logarithmic);
+                           kInitialTempMinMax.data(), &kInitialTempMinMax[1], "%.1f", ImGuiSliderFlags_Logarithmic);
         ImGui::InputScalar("Initial Moves", ImGuiDataType_U64, &sa_params.init_moves);
         ImGui::InputScalar("Move Control Sweep", ImGuiDataType_U64, &sa_params.move_ctrl_sweep);
         ImGui::InputScalar("Max Tolerance Sweep", ImGuiDataType_U64, &sa_params.max_tolerance_sweep);
 
         constexpr std::array kMaxMoveCoefMinMax = {1.0, 50.0};
         ImGui::InputScalar("Max Move Coefficient", ImGuiDataType_Double, &sa_params.max_move_coef,
-                           &kMaxMoveCoefMinMax[0], &kMaxMoveCoefMinMax[1], "%.2f");
+                           kMaxMoveCoefMinMax.data(), &kMaxMoveCoefMinMax[1], "%.2f");
 
         constexpr std::array kInitMoveCoefMinMax = {0.1, 10.0};
         ImGui::InputScalar("Initial Move Coefficient", ImGuiDataType_Double, &sa_params.init_move_coef,
-                           &kInitMoveCoefMinMax[0], &kInitMoveCoefMinMax[1], "%.2f");
+                           kInitMoveCoefMinMax.data(), &kInitMoveCoefMinMax[1], "%.2f");
         constexpr std::array kGainMinMax = {0.1, 1.0};
-        ImGui::InputScalar("Gain", ImGuiDataType_Double, &sa_params.gain, &kGainMinMax[0], &kGainMinMax[1], "%.2f");
+        ImGui::InputScalar("Gain", ImGuiDataType_Double, &sa_params.gain, kGainMinMax.data(), &kGainMinMax[1], "%.2f");
 
         return sa_params;
     }
@@ -93,11 +94,11 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
         ImGui::InputScalar("Population Size", ImGuiDataType_U64, &de_params.population_size);
         ImGui::InputScalar("Max Generations", ImGuiDataType_U64, &de_params.max_generation);
         constexpr std::array kCrossoverRateMinMax = {0.0, 1.0};
-        ImGui::InputScalar("Crossover Rate", ImGuiDataType_Double, &de_params.crossover_rate, &kCrossoverRateMinMax[0],
-                           &kCrossoverRateMinMax[1], "%.2f");
+        ImGui::InputScalar("Crossover Rate", ImGuiDataType_Double, &de_params.crossover_rate,
+                           kCrossoverRateMinMax.data(), &kCrossoverRateMinMax[1], "%.2f");
         constexpr std::array kDifferentialWeightMinMax = {0.0, 2.0};
         ImGui::InputScalar("Differential Weight", ImGuiDataType_Double, &de_params.differential_weight,
-                           &kDifferentialWeightMinMax[0], &kDifferentialWeightMinMax[1], "%.2f");
+                           kDifferentialWeightMinMax.data(), &kDifferentialWeightMinMax[1], "%.2f");
 
         return de_params;
     }
@@ -110,10 +111,10 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
 
         constexpr std::array kExploitationFactorMinMax = {0.1, 5.0};
         ImGui::InputScalar("Exploitation Factor", ImGuiDataType_Double, &pso_params.exploitation_factor,
-                           &kExploitationFactorMinMax[0], &kExploitationFactorMinMax[1], "%.2f");
+                           kExploitationFactorMinMax.data(), &kExploitationFactorMinMax[1], "%.2f");
         constexpr std::array kExplorationFactorMinMax = {0.1, 5.0};
         ImGui::InputScalar("Exploration Factor", ImGuiDataType_Double, &pso_params.exploration_factor,
-                           &kExplorationFactorMinMax[0], &kExplorationFactorMinMax[1], "%.2f");
+                           kExplorationFactorMinMax.data(), &kExplorationFactorMinMax[1], "%.2f");
 
         return pso_params;
     }
@@ -130,8 +131,8 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
         ImGui::InputScalar("Number of Basis", ImGuiDataType_U64, &lbfgs_params.num_basis);
 
         constexpr std::array<size_t, 2> kMaxIterationsSteps = {100, 10000};
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &lbfgs_params.max_iterations, &kMaxIterationsSteps[0],
-                           &kMaxIterationsSteps[1]);
+        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &lbfgs_params.max_iterations,
+                           kMaxIterationsSteps.data(), &kMaxIterationsSteps[1]);
 
         ImGui::InputScalar("Wolfe Parameter", ImGuiDataType_Double, &lbfgs_params.wolfe, nullptr, nullptr, "%.2f");
         ImGui::InputScalar("Min Gradient Norm", ImGuiDataType_Double, &lbfgs_params.min_gradient_norm, nullptr, nullptr,
@@ -307,13 +308,13 @@ void OptimizationGUI::DrawGradientSettings()
 {
     ImGui::PushItemWidth(200);
     ImGui::SeparatorText("Gradient Settings");
-    constexpr std::array<std::string_view, 2> kGradientMethods = {"Central Difference", "Forward Difference"};
-    if (ImGui::BeginCombo("Gradient Method", kGradientMethods[selected_gradient_method_].data()))
+    constexpr std::array<const char*, 2> kGradientMethods = {"Central Difference", "Forward Difference"};
+    if (ImGui::BeginCombo("Gradient Method", kGradientMethods[selected_gradient_method_]))
     {
-        for (int i = 0; i < static_cast<int>(kGradientMethods.size()); ++i)
+        for (int i = 0; std::cmp_less(i, kGradientMethods.size()); ++i)
         {
             const bool is_selected = selected_gradient_method_ == i;
-            if (!ImGui::Selectable(kGradientMethods[i].data(), is_selected))
+            if (!ImGui::Selectable(kGradientMethods[i], is_selected))
             {
                 continue;
             }
@@ -557,7 +558,7 @@ OptimizationGUI::LossPlotStatistics OptimizationGUI::CalculateLossPlotStatistics
     {
         statistics.total_point_count += losses.size();
         statistics.max_history_size = std::max(statistics.max_history_size, losses.size());
-        for (double loss : losses)
+        for (const double loss : losses)
         {
             if (std::isfinite(loss))
             {
@@ -702,7 +703,7 @@ void OptimizationGUI::DrawRIRMatchSettings()
     constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};
     if (ImGui::BeginCombo("Mel EDR FFT Size", kFFTSizeOptions[selected_fft_size_index_]))
     {
-        for (int i = 0; i < static_cast<int>(kFFTSizeOptions.size()); ++i)
+        for (int i = 0; std::cmp_less(i, kFFTSizeOptions.size()); ++i)
         {
             const bool is_selected = selected_fft_size_index_ == i;
             if (ImGui::Selectable(kFFTSizeOptions[i], is_selected))

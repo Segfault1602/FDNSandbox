@@ -109,7 +109,7 @@ sfFDN::feedback_matrix_variant_t ConvertFeedbackMatrix(const sfFDN::feedback_mat
 bool FDNToolboxApp::DrawFDNConfigurator()
 {
     static uint32_t random_seed = 0;
-    static int max_delay = 6000;
+    static const int max_delay = 6000;
 
     if (!ImGui::Begin("FDN Configurator"))
     {

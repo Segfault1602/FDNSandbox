@@ -25,7 +25,7 @@ namespace
 {
 constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
 
-bool FancyButtons(const std::string_view label1, const std::string_view label2, uint32_t& selected)
+bool FancyButtons(const char* label1, const char* label2, uint32_t& selected)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
 
@@ -39,7 +39,7 @@ bool FancyButtons(const std::string_view label1, const std::string_view label2, 
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                               fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::AccentActive));
     }
-    if (ImGui::Button(label1.data(), ImVec2(50, 0)))
+    if (ImGui::Button(label1, ImVec2(50, 0)))
     {
         new_selected = 0;
     }
@@ -59,7 +59,7 @@ bool FancyButtons(const std::string_view label1, const std::string_view label2, 
                               fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::AccentActive));
     }
 
-    if (ImGui::Button(label2.data(), ImVec2(50, 0)))
+    if (ImGui::Button(label2, ImVec2(50, 0)))
     {
         new_selected = 1;
     }
@@ -69,7 +69,7 @@ bool FancyButtons(const std::string_view label1, const std::string_view label2, 
         ImGui::PopStyleColor(3);
     }
 
-    bool changed = (selected != new_selected);
+    const bool changed = (selected != new_selected);
     selected = new_selected;
     return changed;
 }
@@ -416,9 +416,9 @@ void FDNToolboxApp::DrawFDNInfoWindow()
 
     ImGui::Text("FDN Size: %u", fdn_config_.fdn_size);
 
-    nlohmann::json json_config = fdn_config_;
+    const nlohmann::json json_config = fdn_config_;
     std::string json_str = json_config.dump(4); // Pretty print with 4
-    ImGui::InputTextMultiline("##FDNConfig", &json_str[0], json_str.size(), ImVec2(-1, -1),
+    ImGui::InputTextMultiline("##FDNConfig", json_str.data(), json_str.size(), ImVec2(-1, -1),
                               ImGuiInputTextFlags_ReadOnly);
 
     ImGui::End();

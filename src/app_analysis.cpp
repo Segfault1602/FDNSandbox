@@ -37,14 +37,14 @@ struct MelFormatterContext
 
 int MelFormatter(double value, char* buff, int size, void* data)
 {
-    MelFormatterContext context = *reinterpret_cast<MelFormatterContext*>(data);
+    const MelFormatterContext context = *reinterpret_cast<MelFormatterContext*>(data);
     auto mel_index = static_cast<size_t>(value);
     if (mel_index >= context.mel_frequencies.size())
     {
         mel_index = context.mel_frequencies.size() - 1; // Clamp to the last index if out of bounds
     }
     auto mel = static_cast<uint32_t>(context.mel_frequencies[mel_index]);
-    std::span<char> out_string(buff, size);
+    const std::span<char> out_string(buff, size);
     const std::format_to_n_result result = std::format_to_n(out_string.begin(), size, "{}", mel);
     *result.out = '\0';
     return std::strlen(buff);
@@ -246,8 +246,8 @@ void FDNToolboxApp::DrawImpulseResponse()
     {
         if (ImGui::Button("Match RIR Length"))
         {
-            float rir_duration = static_cast<float>(rir_analyzer_.GetImpulseResponse().size()) /
-                                 static_cast<float>(Settings::Instance().SampleRate());
+            const float rir_duration = static_cast<float>(rir_analyzer_.GetImpulseResponse().size()) /
+                                       static_cast<float>(Settings::Instance().SampleRate());
             ir_duration = rir_duration;
             Settings::Instance().SetIRDuration(ir_duration);
             fdn_analyzer_.SetImpulseResponseSize(ir_duration * Settings::Instance().SampleRate());

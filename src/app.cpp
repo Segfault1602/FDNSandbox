@@ -115,7 +115,7 @@ void FDNToolboxApp::loop()
     // We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
     // because it would be confusing to have two docking targets within each others.
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
-    bool opt_fullscreen = true; // Set to true to use the entire viewport, false to use a smaller window
+    const bool opt_fullscreen = true; // Set to true to use the entire viewport, false to use a smaller window
     if (opt_fullscreen)
     {
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -147,7 +147,7 @@ void FDNToolboxApp::loop()
 
     ImGui::Begin("FDNToolbox", nullptr, window_flags);
 
-    ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+    const ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
     ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
 
     if (first_time)
@@ -158,8 +158,10 @@ void FDNToolboxApp::loop()
 
         ImGuiID dock_main_id = dockspace_id;
 
-        ImGuiID dock_id_fdn = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.25f, nullptr, &dock_main_id);
-        ImGuiID dock_id_ir = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.33f, nullptr, &dock_main_id);
+        const ImGuiID dock_id_fdn =
+            ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.25f, nullptr, &dock_main_id);
+        const ImGuiID dock_id_ir =
+            ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.33f, nullptr, &dock_main_id);
 
         ImGui::DockBuilderDockWindow("Impulse Response", dock_id_ir);
         ImGui::DockBuilderDockWindow("Audio Player", dock_id_ir);

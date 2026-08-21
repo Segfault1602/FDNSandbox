@@ -15,7 +15,6 @@
 #include <cstdint>
 #include <iostream>
 #include <random>
-#include <sstream>
 #include <string>
 
 namespace
@@ -24,44 +23,6 @@ constexpr size_t kNBands = 10;
 constexpr float kGainSliderSpacing = 5.0f;
 constexpr ImVec2 kGainSliderSize(24.0f, 68.0f);
 constexpr uint32_t kMaxGainSlidersPerRow = 8;
-
-std::vector<float> GetMatrixFromClipboard(uint32_t N)
-{
-    std::vector<float> feedback_matrix(N * N, 0.0f);
-    const char* clipboard_text = ImGui::GetClipboardText();
-    std::string clipboard_string(clipboard_text);
-
-    // split by newline
-    std::vector<std::string> lines;
-    std::istringstream stream(clipboard_string);
-    std::string line;
-    while (std::getline(stream, line))
-    {
-        lines.push_back(line);
-    }
-
-    size_t line_count = std::min(lines.size(), static_cast<size_t>(N));
-
-    for (size_t i = 0; i < line_count; ++i)
-    {
-        // Each line should have N values separated by spaces or tabs
-        std::istringstream line_stream(lines[i]);
-        std::vector<float> values;
-        float value = 0;
-        while (line_stream >> value)
-        {
-            values.push_back(value);
-        }
-
-        // Only keep the first N values for each row
-        for (size_t j = 0; j < N && j < values.size(); ++j)
-        {
-            feedback_matrix[i * N + j] = values[j];
-        }
-    }
-
-    return feedback_matrix;
-}
 
 bool DrawSetAllGainsPopup(std::span<float> gains)
 {
@@ -278,13 +239,11 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
     static std::array<double, 3> t60s_draggable = {1.5, 1.0, 0.5};
 
     // Oversampled vectors for plotting
-    static std::vector<float> gains_plot;
-    static std::vector<float> t60s_plot;
     static std::vector<float> filter_freqs_plot;
     static std::vector<float> H;
     bool point_changed = false;
 
-    if (filter_freqs_plot.size() == 0) // Only runs on first call
+    if (filter_freqs_plot.empty()) // Only runs on first call
     {
         filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 512);
         point_changed = true; // Force initial plot update
@@ -300,22 +259,23 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
         ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, 20000.0f, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, t60_range[0], t60_range[1], ImPlotCond_Once);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, Settings::Instance().SampleRate() / 2);
+        const double nyquist_frequency = static_cast<double>(Settings::Instance().SampleRate()) / 2.0;
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, nyquist_frequency);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0.f, 15.f);
 
         const ImPlotDragToolFlags flags = ImPlotDragToolFlags_None;
         // 2 vertical drag line to set the cutoff frequencies
-        point_changed |= ImPlot::DragLineX(0, &frequencies_draggable[0], ImVec4(1, 1, 1, 1), 1.0f, flags);
-        point_changed |= ImPlot::DragLineX(1, &frequencies_draggable[1], ImVec4(1, 1, 1, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineX(0, frequencies_draggable.data(), ImVec4(1, 1, 1, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineX(1, frequencies_draggable.data() + 1, ImVec4(1, 1, 1, 1), 1.0f, flags);
 
         // Clamp frequencies to prevent them from crossing each other or going out of bounds
         frequencies_draggable[0] = std::clamp(frequencies_draggable[0], 32.0, frequencies_draggable[1] - 100.0);
         frequencies_draggable[1] = std::clamp(frequencies_draggable[1], frequencies_draggable[0] + 100.0, 20000.0);
 
         // 3 points to set the T60 values of the low, mid and high bands
-        point_changed |= ImPlot::DragLineY(2, &t60s_draggable[0], ImVec4(1, 0, 0, 1), 1.0f, flags);
-        point_changed |= ImPlot::DragLineY(3, &t60s_draggable[1], ImVec4(0, 1, 0, 1), 1.0f, flags);
-        point_changed |= ImPlot::DragLineY(4, &t60s_draggable[2], ImVec4(0, 0, 1, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineY(2, t60s_draggable.data(), ImVec4(1, 0, 0, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineY(3, t60s_draggable.data() + 1, ImVec4(0, 1, 0, 1), 1.0f, flags);
+        point_changed |= ImPlot::DragLineY(4, t60s_draggable.data() + 2, ImVec4(0, 0, 1, 1), 1.0f, flags);
 
         // Clamp T60 values to a reasonable range
         for (auto& t60 : t60s_draggable)
@@ -355,7 +315,7 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
             }
         }
 
-        if (H.size() > 0)
+        if (!H.empty())
         {
             ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), H.size());
         }
@@ -406,7 +366,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
     bool point_changed = false;
 
-    if (frequencies.size() == 0)
+    if (frequencies.empty())
     {
         frequencies.resize(kNBands);
         constexpr float kUpperLimit = 16000.0f;
@@ -416,7 +376,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         }
     }
 
-    if (frequencies_plot.size() == 0) // Only runs on first call
+    if (frequencies_plot.empty()) // Only runs on first call
     {
         frequencies_plot = frequencies; // utils::LogSpace(std::log10(frequencies[0] + 1e-6f),
                                         // std::log10(frequencies.back() - 1.f), 256);
@@ -429,8 +389,8 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
     }
 
     static bool show_filter_response = false;
-    float designer_height = (show_filter_response ? ImGui::GetWindowHeight() * 0.65f : ImGui::GetWindowHeight()) -
-                            ImGui::GetFrameHeightWithSpacing() * 4;
+    const float designer_height = (show_filter_response ? ImGui::GetWindowHeight() * 0.65f : ImGui::GetWindowHeight()) -
+                                  ImGui::GetFrameHeightWithSpacing() * 4;
 
     if (ImPlot::BeginPlot("Filter Designer", ImVec2(-1, designer_height), ImPlotFlags_NoLegend))
     {
@@ -439,7 +399,8 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.01f, 5.0f, ImPlotCond_Once);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
 
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, Settings::Instance().SampleRate() / 2);
+        const double nyquist_frequency = static_cast<double>(Settings::Instance().SampleRate()) / 2.0;
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, nyquist_frequency);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0.f, 10.f);
 
         static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
@@ -529,7 +490,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         spec.MarkerSize = 7.0f;
         ImPlot::PlotLine("Target Gain", frequencies_plot.data(), gains_plot.data(), frequencies_plot.size(), spec);
 
-        if (H.size() > 0)
+        if (!H.empty())
         {
             ImPlotSpec line_spec{};
             line_spec.LineColor = ImVec4(0.70f, 0.20f, 0.20f, 1.0f);
@@ -630,7 +591,7 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 
     ImPlot::PushColormap(feedback_matrix_colormap);
 
-    float win_width = ImGui::GetContentRegionAvail().x;
+    const float win_width = ImGui::GetContentRegionAvail().x;
 
     if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(win_width, 300), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
@@ -1338,12 +1299,6 @@ bool DrawScalarMatrixWidget(sfFDN::FDNConfig& config, uint32_t random_seed)
                 config_changed = true;
                 manual_edit = true;
                 should_update_feedback_matrix = true;
-            }
-
-            ImGui::SameLine();
-            if (ImGui::Button("Read from clipboard"))
-            {
-                feedback_matrix = GetMatrixFromClipboard(N);
             }
 
             ImGui::PushItemWidth(50);

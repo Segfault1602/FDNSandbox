@@ -13,8 +13,11 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <random>
 #include <ranges>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace
@@ -28,7 +31,7 @@ bool DrawScalarMatrixTypeComboBox(int& selected_matrix_type, uint32_t fdn_size)
     {
         for (int i = 0; i < static_cast<int>(sfFDN::ScalarMatrixType::Count); i++)
         {
-            bool is_selected = (selected_matrix_type == i);
+            const bool is_selected = (selected_matrix_type == i);
             ImGuiSelectableFlags flags = ImGuiSelectableFlags_None;
 
             if (!utils::IsPowerOfTwo(fdn_size) &&
@@ -57,6 +60,34 @@ bool DrawScalarMatrixTypeComboBox(int& selected_matrix_type, uint32_t fdn_size)
     }
 
     return config_changed;
+}
+
+std::optional<std::vector<float>> ReadMatrixFromClipboard(uint32_t matrix_size)
+{
+    const char* clipboard_text = ImGui::GetClipboardText();
+    if (clipboard_text == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    std::vector<float> matrix(matrix_size * matrix_size, 0.0f);
+    std::istringstream clipboard_stream{std::string{clipboard_text}};
+    std::string line;
+    for (size_t row = 0; row < matrix_size && std::getline(clipboard_stream, line); ++row)
+    {
+        std::istringstream line_stream{line};
+        for (size_t column = 0; column < matrix_size; ++column)
+        {
+            float value = 0.0f;
+            if (!(line_stream >> value))
+            {
+                break;
+            }
+            matrix[row * matrix_size + column] = value;
+        }
+    }
+
+    return matrix;
 }
 
 struct DelayRange
@@ -247,6 +278,15 @@ bool FDNWidgetVisitor::operator()(sfFDN::ScalarFeedbackMatrixOptions& config) co
         config.custom_matrix = sfFDN::GenerateMatrix(config.matrix_size, config.type, config.rng_seed, config.arg);
     }
 
+    if (ImGui::Button("Read from clipboard"))
+    {
+        if (auto matrix = ReadMatrixFromClipboard(config.matrix_size))
+        {
+            config.custom_matrix = std::move(*matrix);
+            config_changed = true;
+        }
+    }
+
     return config_changed;
 }
 
@@ -355,7 +395,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config) const
     {
         for (int i = 0; i < static_cast<int>(sfFDN::DelayInterpolationType::Count); i++)
         {
-            bool is_selected = (delay_interpolation_type == i);
+            const bool is_selected = (delay_interpolation_type == i);
             if (ImGui::Selectable(utils::GetDelayInterpolationTypeName(i).c_str(), is_selected))
             {
                 delay_interpolation_type = i;
@@ -393,7 +433,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config) const
 
     if (is_time_varying)
     {
-        FDNWidgetVisitor modulation_visitor{fdn_config};
+        const FDNWidgetVisitor modulation_visitor{fdn_config};
         config_changed |= modulation_visitor(*config.lfo_config);
 
         // Need to make sure that the modulation amplitude is not greater than the delay time
@@ -456,7 +496,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
     bool config_changed = false;
 
     int num_sections = static_cast<int>(config.delays.size());
-    if (config.gains.size() != num_sections)
+    if (config.gains.size() != config.delays.size())
     {
         assert(false); // These should always be in sync, so this is unexpected
         config.gains.resize(num_sections, 0.5f);
@@ -477,7 +517,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
         std::mt19937 eng(rd());
         std::uniform_int_distribution<uint32_t> distr(delay_min, delay_max);
 
-        for (uint32_t i = 0; i < num_sections; ++i)
+        for (int i = 0; i < num_sections; ++i)
         {
             config.delays[i] = distr(eng); // Generate random delays
             config.delays[i] = utils::GetClosestPrime(static_cast<uint32_t>(config.delays[i]));
@@ -574,24 +614,24 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
     {
         for (int col = 0; col < section_count; ++col)
         {
-            std::string column_name = "Delay " + std::to_string(col + 1);
+            const std::string column_name = "Delay " + std::to_string(col + 1);
             ImGui::TableSetupColumn(column_name.c_str(), ImGuiTableColumnFlags_WidthFixed, 120.0f);
         }
         ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 120.0f);
 
         ImGui::TableHeadersRow();
 
-        for (int row = 0; row < config.sections.size(); ++row)
+        for (size_t row = 0; row < config.sections.size(); ++row)
         {
             ImGui::TableNextRow();
 
             auto& section = config.sections[row];
 
-            for (int col = 0; col < section.delays.size(); ++col)
+            for (size_t col = 0; col < section.delays.size(); ++col)
             {
-                ImGui::TableSetColumnIndex(col);
+                ImGui::TableSetColumnIndex(static_cast<int>(col));
                 int delay = static_cast<int>(section.delays[col]);
-                ImGui::PushID((row * section_count) + col);
+                ImGui::PushID(static_cast<int>((row * static_cast<size_t>(section_count)) + col));
 
                 config_changed |= ImGui::DragInt("##delay", &delay, 1, 1, 9999);
                 delay = std::clamp(delay, 1, 9999);
@@ -600,8 +640,8 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
             }
 
             ImGui::TableSetColumnIndex(section_count);
-            ImGui::PushID(row + 1000);
-            config_changed |= ImGui::DragFloat("##gain", &section.gains[0], 0.01f, -1.0f, 1.0f);
+            ImGui::PushID(static_cast<int>(row) + 1000);
+            config_changed |= ImGui::DragFloat("##gain", section.gains.data(), 0.01f, -1.0f, 1.0f);
             section.gains[0] = std::clamp(section.gains[0], -1.0f, 1.0f);
 
             // For multichannel Schroeder, all gains in the section are the same
@@ -778,7 +818,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::FirOptions& config) const
         file_dialog.Display();
         if (file_dialog.HasSelected())
         {
-            std::string filename = file_dialog.GetSelected().string();
+            const std::string filename = file_dialog.GetSelected().string();
             config.coeffs = utils::ReadAudioFile(filename, 0);
             config_changed = true;
             file_dialog.ClearSelected();
@@ -815,12 +855,12 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelFirOptions& config) const
     // Only support velvet noise decorrelator for now
     constexpr const std::array<const char*, 2> kOvnSequences = {"decorrelator32_oVND15.wav",
                                                                 "decorrelator32_oVND30.wav"};
-    static uint32_t selected_file = 0;
+    static size_t selected_file = 0;
     if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_file]))
     {
-        for (int i = 0; i < kOvnSequences.size(); i++)
+        for (size_t i = 0; i < kOvnSequences.size(); ++i)
         {
-            bool is_selected = (selected_file == i);
+            const bool is_selected = (selected_file == i);
             if (ImGui::Selectable(kOvnSequences[i], is_selected))
             {
                 selected_file = i;
@@ -830,8 +870,8 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelFirOptions& config) const
         ImGui::EndCombo();
     }
 
-    std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
-    uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
+    const std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
+    const uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
 
     static uint32_t channel = 0;
     config_changed |= ImGui::InputInt("Channel", reinterpret_cast<int*>(&channel), 1, 1);
@@ -855,13 +895,13 @@ bool FDNWidgetVisitor::operator()(sfFDN::AttenuationFilterBankOptions&) const
 
 bool DrawFDNOptions(sfFDN::DelayBankOptions& config, const sfFDN::FDNConfig& fdn_config)
 {
-    FDNWidgetVisitor widget{fdn_config};
+    const FDNWidgetVisitor widget{fdn_config};
     return widget(config);
 }
 
 bool DrawFDNOptions(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig& fdn_config)
 {
-    FDNWidgetVisitor widget{fdn_config};
+    const FDNWidgetVisitor widget{fdn_config};
     return widget(config);
 }
 
@@ -990,17 +1030,15 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
     auto id = reinterpret_cast<std::ptrdiff_t>(&processors);
     ImGui::PushID(static_cast<int>(id));
 
-    int index_offset = 0;
-
     ImGui::SeparatorText("Multi-Channel Processors");
-    if (processors.size() <= static_cast<size_t>(index_offset))
+    if (processors.empty())
     {
         ImGui::Text("Empty");
     }
     else
     {
         std::vector<size_t> processors_to_remove;
-        for (size_t i = index_offset; i < processors.size(); ++i)
+        for (size_t i = 0; i < processors.size(); ++i)
         {
             auto& processor = processors[i];
             auto processor_id = reinterpret_cast<std::ptrdiff_t>(&processor);
@@ -1103,12 +1141,12 @@ bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::F
 {
     bool config_changed = false;
     constexpr const char* kOvnSequences[] = {"decorrelator32_oVND15.wav", "decorrelator32_oVND30.wav"};
-    static uint32_t selected_file = 0;
+    static size_t selected_file = 0;
     if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_file]))
     {
-        for (int i = 0; i < IM_ARRAYSIZE(kOvnSequences); i++)
+        for (size_t i = 0; i < std::size(kOvnSequences); ++i)
         {
-            bool is_selected = (selected_file == i);
+            const bool is_selected = (selected_file == i);
             if (ImGui::Selectable(kOvnSequences[i], is_selected))
             {
                 selected_file = i;
@@ -1118,8 +1156,8 @@ bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::F
         ImGui::EndCombo();
     }
 
-    std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
-    uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
+    const std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
+    const uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
 
     static uint32_t channel = 0;
     config_changed |= ImGui::InputInt("Channel", reinterpret_cast<int*>(&channel), 1, 1);

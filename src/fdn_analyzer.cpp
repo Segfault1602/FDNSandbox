@@ -33,7 +33,7 @@ struct Stopwatch
 void GetFilterResponse(std::span<const float> input, std::vector<float>& mag_response,
                        std::vector<float>& phase_response)
 {
-    uint32_t nfft = audio_utils::FFT::NextSupportedFFTSize(kFilterNFFT);
+    const uint32_t nfft = audio_utils::FFT::NextSupportedFFTSize(kFilterNFFT);
     audio_utils::FFT fft(nfft);
     std::vector<std::complex<float>> filter_spectrum((nfft / 2) + 1, 0.f);
 
@@ -95,14 +95,14 @@ std::span<const float> FDNAnalyzer::GetImpulseResponse()
 {
     if (analysis_flags_.test(static_cast<size_t>(AnalysisType::ImpulseResponse)))
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
 
         std::vector<float> ir(impulse_response_size_samples_, 0.0f);
         ir[0] = 1.f;
 
         std::vector<float> impulse_response;
         impulse_response.resize(impulse_response_size_samples_, 0.0f);
-        sfFDN::AudioBuffer input_buffer(ir);
+        const sfFDN::AudioBuffer input_buffer(ir);
         sfFDN::AudioBuffer output_buffer(impulse_response);
 
         fdn_->Clear();
@@ -159,7 +159,7 @@ FilterData FDNAnalyzer::GetFilterData()
     assert(fdn_ != nullptr);
     if (analysis_flags_.test(static_cast<size_t>(FDNAnalysisType::FilterResponse)))
     {
-        Stopwatch stopwatch;
+        const Stopwatch stopwatch;
         filter_freq_bins_.resize(kFilterNFFT / 2 + 1);
         for (size_t i = 0; i < filter_freq_bins_.size(); ++i)
         {
@@ -185,7 +185,7 @@ FilterData FDNAnalyzer::GetFilterData()
 
             std::vector<float> output(kFilterNFFT * kFilterCount, 0.0f);
 
-            sfFDN::AudioBuffer input_buffer(kFilterNFFT, kFilterCount, impulse);
+            const sfFDN::AudioBuffer input_buffer(kFilterNFFT, kFilterCount, impulse);
             sfFDN::AudioBuffer output_buffer(kFilterNFFT, kFilterCount, output);
             filter_bank->Process(input_buffer, output_buffer);
 
@@ -210,7 +210,7 @@ FilterData FDNAnalyzer::GetFilterData()
 
             std::vector<float> output(kFilterNFFT, 0.0f);
 
-            sfFDN::AudioBuffer input_buffer(kFilterNFFT, 1, impulse);
+            const sfFDN::AudioBuffer input_buffer(kFilterNFFT, 1, impulse);
             sfFDN::AudioBuffer output_buffer(kFilterNFFT, 1, output);
             tc_filter->Process(input_buffer, output_buffer);
             GetFilterResponse(output_buffer.GetChannelSpan(0), tc_filter_mag_response_, tc_filter_phase_response_);
