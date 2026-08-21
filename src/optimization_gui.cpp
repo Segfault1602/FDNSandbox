@@ -10,6 +10,7 @@
 
 #include "optimizer.h"
 #include "settings.h"
+#include "utils.h"
 
 #include <algorithm>
 #include <span>
@@ -285,6 +286,7 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
         if (!IsOptimizationActive(fdn_optimizer_.GetStatus()))
         {
             opt_info_.initial_fdn_config = fdn_config;
+            utils::NormalizeAttenuationFilterBank(opt_info_.initial_fdn_config);
             opt_info_.ir_size = Settings::Instance().SampleRate();
             if (!target_rir.empty())
             {

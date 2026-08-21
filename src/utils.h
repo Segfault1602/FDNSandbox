@@ -112,6 +112,7 @@ struct Span2D
 };
 
 void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size);
+bool NormalizeAttenuationFilterBank(sfFDN::FDNConfig& config);
 
 std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& processor_variant);
 std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& processor_variant);

@@ -160,7 +160,6 @@ bool FDNWidgetVisitor::operator()(sfFDN::ModulationOptions& config) const
 
 bool FDNWidgetVisitor::operator()(sfFDN::ParallelGainsOptions& config) const
 {
-    // TODO: should find a way to make this not static...
     static float min_gain = -1.f;
     static float max_gain = 1.f;
 
@@ -171,116 +170,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ParallelGainsOptions& config) const
         config_changed = true;
     }
 
-    if (ImGui::Button("Distribute"))
-    {
-        config_changed = true;
-        for (auto& gain : config.gains)
-        {
-            gain = 1.0f / fdn_config.fdn_size; // Distribute gains evenly
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("Randomize"))
-    {
-        config_changed = true;
-        std::random_device rd;
-        std::mt19937 eng(rd());
-        std::uniform_real_distribution<float> distr(min_gain, max_gain);
-
-        for (auto& gain : config.gains)
-        {
-            gain = distr(eng); // Generate random gains
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::BeginPopupContextItem("Gains Popup"))
-    {
-        static float value = 0.0f; // Default value
-        if (ImGui::Selectable("Set to 0.5"))
-        {
-            value = 0.5f;
-            config_changed = true;
-        }
-        if (ImGui::Selectable("Set to -0.5"))
-        {
-            value = -0.5f;
-            config_changed = true;
-        }
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::DragFloat("##Value", &value, 0.01f, -1.0f, 1.0f))
-        {
-            config_changed = true;
-        }
-
-        for (auto& gain : config.gains)
-        {
-            gain = value; // Set all gains to the specified value
-        }
-
-        ImGui::EndPopup();
-    }
-
-    if (ImGui::Button("Set all to..."))
-    {
-        config_changed = true;
-        ImGui::OpenPopup("Gains Popup");
-    }
-
-    ImGui::DragFloatRange2("Gain Range", &min_gain, &max_gain, 0.01f, -1.0f, 1.0f, "%.2f");
-
-    const float spacing = 4;
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
-
-    constexpr uint32_t max_sliders_per_row = 8;
-    const uint32_t sliders_per_row = std::min(static_cast<uint32_t>(fdn_config.fdn_size), max_sliders_per_row);
-    const uint32_t num_rows = (fdn_config.fdn_size + sliders_per_row - 1) / sliders_per_row;
-
-    for (uint32_t row = 0; row < num_rows; ++row)
-    {
-        for (uint32_t i = 0; i < sliders_per_row; ++i)
-        {
-            size_t index = row * sliders_per_row + i;
-            if (index >= fdn_config.fdn_size)
-            {
-                break;
-            }
-            if (i > 0)
-            {
-                ImGui::SameLine();
-            }
-
-            ImGui::PushID(static_cast<int>(index));
-            config_changed |=
-                ImGui::VSliderFloat("##v", ImVec2(18, 50), &config.gains[index], -1.f, 1.0f, "", ImGuiSliderFlags_None);
-            if (ImGui::IsItemActive() || ImGui::IsItemHovered())
-                ImGui::SetTooltip("%.3f", config.gains[index]);
-            ImGui::PopID();
-        }
-    }
-    ImGui::PopStyleVar();
-
-    ImGui::Text("Adjust all:");
-    ImGui::SameLine();
-    if (ImGui::Button("-", ImVec2(30, 0)))
-    {
-        config_changed = true;
-        for (auto& gain : config.gains)
-        {
-            gain *= 0.9f;
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("+", ImVec2(30, 0)))
-    {
-        config_changed = true;
-        for (auto& gain : config.gains)
-        {
-            gain *= 1.1f;
-        }
-    }
+    config_changed |= DrawGainsWidget(config.gains, min_gain, max_gain);
 
     return config_changed;
 }

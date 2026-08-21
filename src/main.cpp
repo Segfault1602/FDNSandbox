@@ -57,11 +57,6 @@ int main()
 
     const ImVec4& clear_color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
 
-    io.Fonts->AddFontDefault();
-    auto medium_font = io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Medium.ttf");
-
-    io.FontDefault = medium_font;
-
     FDNToolboxApp app(main_scale);
 
     while (!glfwWindowShouldClose(window))

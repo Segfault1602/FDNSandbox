@@ -434,6 +434,38 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
         config_variant);
 }
 
+bool NormalizeAttenuationFilterBank(sfFDN::FDNConfig& config)
+{
+    if (!config.attenuation_filter_bank_config.has_value())
+    {
+        return false;
+    }
+
+    auto& filter_configs = config.attenuation_filter_bank_config->filter_configs;
+    bool changed = filter_configs.size() != config.fdn_size;
+
+    if (filter_configs.empty())
+    {
+        filter_configs.emplace_back(sfFDN::HomogenousFilterOptions{});
+    }
+
+    const auto fill_filter = filter_configs.back();
+    filter_configs.resize(config.fdn_size, fill_filter);
+
+    for (size_t i = 0; i < filter_configs.size(); ++i)
+    {
+        const float delay = i < config.delay_bank_config.delays.size() ? config.delay_bank_config.delays[i] : -1.0f;
+        std::visit(
+            [delay, sample_rate = config.sample_rate](auto& filter) {
+                filter.delay = delay;
+                filter.sample_rate = static_cast<float>(sample_rate);
+            },
+            filter_configs[i]);
+    }
+
+    return changed;
+}
+
 void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size)
 {
     config.fdn_size = new_size;

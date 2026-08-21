@@ -121,10 +121,19 @@ std::vector<float> GetMatrixFromClipboard(uint32_t N)
 //     }
 // }
 
+} // namespace
+
 bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 {
     bool config_changed = false;
     const size_t N = gains.size();
+    if (gains.empty())
+    {
+        fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Metadata, fdn_sandbox::theme::ColorRole::TextSecondary,
+                                 "No gain channels");
+        return false;
+    }
+
     if (ImGui::Button("Distribute"))
     {
         config_changed = true;
@@ -183,7 +192,8 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
 
     ImGui::DragFloatRange2("Gain Range", &min_gain, &max_gain, 0.01f, -1.0f, 1.0f, "%.2f");
 
-    const float spacing = 4;
+    constexpr float spacing = 5.0f;
+    constexpr ImVec2 slider_size(24.0f, 68.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
 
     constexpr uint32_t max_sliders_per_row = 8;
@@ -205,10 +215,20 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
             }
 
             ImGui::PushID(static_cast<int>(index));
+            ImGui::BeginGroup();
             config_changed |=
-                ImGui::VSliderFloat("##v", ImVec2(18, 50), &gains[index], -1.f, 1.0f, "", ImGuiSliderFlags_None);
+                ImGui::VSliderFloat("##v", slider_size, &gains[index], -1.f, 1.0f, "", ImGuiSliderFlags_None);
             if (ImGui::IsItemActive() || ImGui::IsItemHovered())
+            {
                 ImGui::SetTooltip("%.3f", gains[index]);
+            }
+
+            const std::string channel_label = std::to_string(index + 1);
+            const float label_width = ImGui::CalcTextSize(channel_label.c_str()).x;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (slider_size.x - label_width) * 0.5f));
+            fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Metadata,
+                                     fdn_sandbox::theme::ColorRole::TextSecondary, channel_label);
+            ImGui::EndGroup();
             ImGui::PopID();
         }
     }
@@ -234,10 +254,8 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
             gains[i] *= 1.1f;
         }
     }
-
     return config_changed;
 }
-} // namespace
 
 bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool& show_3band_designer)
 {

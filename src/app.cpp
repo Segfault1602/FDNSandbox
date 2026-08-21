@@ -128,6 +128,12 @@ void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, 
     }
 }
 
+void FillAttenuationFilterBank(sfFDN::AttenuationFilterBankOptions& filter_bank,
+                               const sfFDN::attenuation_filter_variant_t& filter, uint32_t fdn_size)
+{
+    filter_bank.filter_configs.assign(fdn_size, filter);
+}
+
 } // namespace
 
 FDNToolboxApp::FDNToolboxApp(float ui_scale)
@@ -145,6 +151,7 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
     LOG_INFO(Settings::Instance().GetLogger(), "Starting FDN Toolbox");
 
     fdn_sandbox::theme::Apply(ui_scale);
+    fdn_sandbox::theme::InitializeFonts();
 
     audio_manager_ = audio_manager::create_audio_manager();
     if (!audio_manager_)
@@ -542,6 +549,8 @@ void FDNToolboxApp::DrawMainMenuBar()
     static bool show_audio_config_window = false;
     if (ImGui::BeginMainMenuBar())
     {
+        fdn_sandbox::theme::DrawWordmark();
+
         if (ImGui::BeginMenu("File"))
         {
             if (ImGui::MenuItem("Save IR"))
@@ -727,10 +736,8 @@ void FDNToolboxApp::DrawMainMenuBar()
 bool FDNToolboxApp::DrawFDNConfigurator()
 {
     static uint32_t random_seed = 0;
-
     static int max_delay = 6000;
 
-    // Limit FDN size between 4 and 32 channels
     constexpr uint32_t kNMin = 4;
     constexpr uint32_t kNMax = 32;
 
@@ -741,58 +748,99 @@ bool FDNToolboxApp::DrawFDNConfigurator()
     }
 
     bool config_changed = false;
-
-    static bool random_seed_checkbox = false;
-    ImGui::Checkbox("Random Seed", &random_seed_checkbox);
-
-    if (random_seed_checkbox)
-    {
-        ImGui::SameLine();
-        if (ImGui::InputScalar("Seed", ImGuiDataType_U32, &random_seed, nullptr, nullptr, "%u"))
-        {
-            config_changed = true; // Mark as changed if the seed is modified
-        }
-    }
-    else
-    {
-        random_seed = 0; // Reset to zero when unchecked
-    }
-
-    DrawInputOutputGainsPlot(fdn_config_, gui_fdn_.get());
-    DrawDelaysPlot(fdn_config_, max_delay);
-    DrawFeedbackMatrixPlot(fdn_config_, gui_fdn_.get());
-
     uint32_t N = fdn_config_.fdn_size;
     bool fdn_size_changed = false;
-    fdn_size_changed =
-        ImGui::SliderScalar("N", ImGuiDataType_U32, (&N), &kNMin, &kNMax, nullptr, ImGuiSliderFlags_AlwaysClamp);
 
-    if (fdn_size_changed)
+    if (fdn_sandbox::theme::BeginSection("Structure", true))
     {
-        utils::ResizeFDNConfig(fdn_config_, N);
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Configure the network size, deterministic seed, and matrix orientation.");
+
+        static bool random_seed_checkbox = false;
+        ImGui::Checkbox("Random Seed", &random_seed_checkbox);
+        if (random_seed_checkbox)
+        {
+            ImGui::SameLine();
+            if (ImGui::InputScalar("Seed", ImGuiDataType_U32, &random_seed, nullptr, nullptr, "%u"))
+            {
+                config_changed = true;
+            }
+        }
+        else
+        {
+            random_seed = 0;
+        }
+
+        fdn_size_changed =
+            ImGui::SliderScalar("N", ImGuiDataType_U32, (&N), &kNMin, &kNMax, nullptr, ImGuiSliderFlags_AlwaysClamp);
+        if (fdn_size_changed)
+        {
+            utils::ResizeFDNConfig(fdn_config_, N);
+        }
+        config_changed |= fdn_size_changed;
+        fdn_config_.fdn_size = N;
+
+        static bool transpose = false;
+        if (ImGui::Checkbox("Transpose", &transpose))
+        {
+            fdn_config_.transposed = transpose;
+            config_changed = true;
+        }
+
+        fdn_sandbox::theme::EndSection();
     }
 
-    config_changed |= fdn_size_changed;
-    fdn_config_.fdn_size = N;
-
-    static bool transpose = false;
-    if (ImGui::Checkbox("Transpose", &transpose))
+    if (fdn_sandbox::theme::BeginSection("Visual Overview", true))
     {
-        fdn_config_.transposed = transpose;
-        config_changed = true;
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Inspect gain distribution, delay lengths, and the active feedback matrix.");
+        if (fdn_size_changed)
+        {
+            fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Metadata,
+                                     fdn_sandbox::theme::ColorRole::StatusWarning,
+                                     "Overview will refresh after the resized FDN is rebuilt.");
+        }
+        else
+        {
+            DrawInputOutputGainsPlot(fdn_config_, gui_fdn_.get());
+            DrawDelaysPlot(fdn_config_, max_delay);
+            DrawFeedbackMatrixPlot(fdn_config_, gui_fdn_.get());
+        }
+        fdn_sandbox::theme::EndSection();
     }
 
-    if (ImGui::TreeNode("Edit delays"))
+    if (fdn_sandbox::theme::BeginSection("Input Stage", true))
     {
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Set input gains and processors applied before the feedback loop.");
+        config_changed |= DrawFDNOptions(fdn_config_.input_block_config.parallel_gains_config, fdn_config_);
+        config_changed |=
+            DrawSingleChannelProcessorList(fdn_config_.input_block_config.single_channel_processors, fdn_config_);
+        config_changed |=
+            DrawMultiChannelProcessorList(fdn_config_.input_block_config.multichannel_processors, fdn_config_);
+        fdn_sandbox::theme::EndSection();
+    }
+
+    if (fdn_sandbox::theme::BeginSection("Delay Network", true))
+    {
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Configure delay lengths and interpolation for each feedback path.");
         config_changed |= DrawFDNOptions(fdn_config_.delay_bank_config, fdn_config_);
-        ImGui::TreePop();
+        fdn_sandbox::theme::EndSection();
     }
 
-    if (ImGui::TreeNode("Edit feedback matrix"))
+    if (fdn_sandbox::theme::BeginSection("Feedback Matrix"))
     {
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Choose the matrix topology and whether it is implemented as cascaded stages.");
+
         bool is_cascaded =
             std::holds_alternative<sfFDN::CascadedFeedbackMatrixOptions>(fdn_config_.feedback_matrix_config);
-
         if (ImGui::Checkbox("Cascaded", &is_cascaded))
         {
             config_changed = true;
@@ -820,160 +868,125 @@ bool FDNToolboxApp::DrawFDNConfigurator()
             }
         }
         config_changed |= DrawFDNOptions(fdn_config_.feedback_matrix_config, fdn_config_);
-        ImGui::TreePop();
+        fdn_sandbox::theme::EndSection();
     }
 
-    if (ImGui::BeginTabBar("FDN Config Tabs"))
+    if (fdn_sandbox::theme::BeginSection("Loop Filters"))
     {
-        if (ImGui::BeginTabItem("Input Gains"))
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Shape decay independently or apply a shared attenuation profile.");
+
+        assert(fdn_config_.attenuation_filter_bank_config.has_value());
+        bool filter_bank_changed = utils::NormalizeAttenuationFilterBank(fdn_config_);
+        auto att_filterbank_options = fdn_config_.attenuation_filter_bank_config.value();
+        const std::array<const char*, 4> filter_types = {"Homogenous", "2 Bands", "3 Bands", "10 Bands"};
+
+        static bool independent_t60s = false;
+        const bool independent_t60s_changed = ImGui::Checkbox("Independent T60s", &independent_t60s);
+
+        bool loop_filters_changed = false;
+        int selected_filter_type = 0;
+        auto att_filter_options = att_filterbank_options.filter_configs.front();
+        std::visit(
+            [&selected_filter_type](auto&& options) {
+                using T = std::decay_t<decltype(options)>;
+                if constexpr (std::is_same_v<T, sfFDN::HomogenousFilterOptions>)
+                {
+                    selected_filter_type = 0;
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::TwoBandFilterOptions>)
+                {
+                    selected_filter_type = 1;
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::ThreeBandFilterOptions>)
+                {
+                    selected_filter_type = 2;
+                }
+                else if constexpr (std::is_same_v<T, sfFDN::TenBandFilterOptions>)
+                {
+                    selected_filter_type = 3;
+                }
+            },
+            att_filter_options);
+
+        const int previously_selected_filter_type = selected_filter_type;
+        if (ImGui::Combo("Filter Type", &selected_filter_type, filter_types.data(), filter_types.size()) &&
+            previously_selected_filter_type != selected_filter_type)
         {
-            if (ImGui::TreeNode("Edit Input Gains"))
+            loop_filters_changed = true;
+            switch (selected_filter_type)
             {
-                config_changed |= DrawFDNOptions(fdn_config_.input_block_config.parallel_gains_config, fdn_config_);
-                ImGui::TreePop();
+            case 0:
+                att_filter_options = sfFDN::HomogenousFilterOptions{};
+                break;
+            case 1:
+                att_filter_options = sfFDN::TwoBandFilterOptions{};
+                break;
+            case 2:
+                att_filter_options = sfFDN::ThreeBandFilterOptions{};
+                break;
+            case 3:
+                att_filter_options = sfFDN::TenBandFilterOptions{};
+                break;
             }
-
-            config_changed |=
-                DrawSingleChannelProcessorList(fdn_config_.input_block_config.single_channel_processors, fdn_config_);
-
-            config_changed |=
-                DrawMultiChannelProcessorList(fdn_config_.input_block_config.multichannel_processors, fdn_config_);
-
-            ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Loop Filters"))
+        if (!independent_t60s)
         {
-            assert(fdn_config_.attenuation_filter_bank_config.has_value());
-            auto att_filterbank_options = fdn_config_.attenuation_filter_bank_config.value();
-
-            const std::array<const char*, 4> filter_types = {"Homogenous", "2 Bands", "3 Bands", "10 Bands"};
-
-            bool indepedent_t60s = att_filterbank_options.filter_configs.size() > 1;
-            ImGui::Checkbox("Independent T60s", &indepedent_t60s);
-
-            int selected_filter_type = 0;
-
-            if (!indepedent_t60s)
+            const bool shared_filter_changed = DrawFDNOptions(att_filter_options, fdn_config_);
+            if (shared_filter_changed || loop_filters_changed || independent_t60s_changed)
             {
-                att_filterbank_options.filter_configs.resize(1);
+                FillAttenuationFilterBank(att_filterbank_options, att_filter_options, fdn_config_.fdn_size);
+                filter_bank_changed = true;
             }
-            else
+        }
+        else
+        {
+            if (loop_filters_changed)
             {
-                att_filterbank_options.filter_configs.resize(fdn_config_.fdn_size);
+                FillAttenuationFilterBank(att_filterbank_options, att_filter_options, fdn_config_.fdn_size);
+                filter_bank_changed = true;
             }
 
-            // Right now every delay will have the same filter type
-            auto att_filter_options = att_filterbank_options.filter_configs.front();
-            std::visit(
-                [&selected_filter_type](auto&& options) {
-                    using T = std::decay_t<decltype(options)>;
-                    if constexpr (std::is_same_v<T, sfFDN::HomogenousFilterOptions>)
-                    {
-                        selected_filter_type = 0;
-                    }
-                    else if constexpr (std::is_same_v<T, sfFDN::TwoBandFilterOptions>)
-                    {
-                        selected_filter_type = 1;
-                    }
-                    else if constexpr (std::is_same_v<T, sfFDN::ThreeBandFilterOptions>)
-                    {
-                        selected_filter_type = 2;
-                    }
-                    else if constexpr (std::is_same_v<T, sfFDN::TenBandFilterOptions>)
-                    {
-                        selected_filter_type = 3;
-                    }
-                },
-                att_filter_options);
-
-            int previously_selected_filter_type = selected_filter_type;
-            if (ImGui::Combo("Filter Type", &selected_filter_type, filter_types.data(), filter_types.size()))
+            for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
             {
-                if (previously_selected_filter_type != selected_filter_type)
-                {
-                    config_changed = true;
-                    switch (selected_filter_type)
-                    {
-                    case 0:
-                        att_filter_options = sfFDN::HomogenousFilterOptions{};
-                        break;
-                    case 1:
-                        att_filter_options = sfFDN::TwoBandFilterOptions{};
-                        break;
-                    case 2:
-                        att_filter_options = sfFDN::ThreeBandFilterOptions{};
-                        break;
-                    case 3:
-                        att_filter_options = sfFDN::TenBandFilterOptions{};
-                        break;
-                    }
-                }
+                ImGui::PushID(i);
+                filter_bank_changed |= DrawFDNOptions(att_filterbank_options.filter_configs[i], fdn_config_);
+                ImGui::PopID();
             }
-
-            if (!indepedent_t60s)
-            {
-                config_changed |= DrawFDNOptions(att_filter_options, fdn_config_);
-
-                if (config_changed)
-                {
-                    att_filterbank_options.filter_configs.clear();
-                    // for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
-                    {
-                        att_filterbank_options.filter_configs.emplace_back(att_filter_options);
-                    }
-                    fdn_config_.attenuation_filter_bank_config = att_filterbank_options;
-                }
-            }
-            else
-            {
-                if (att_filterbank_options.filter_configs.size() != fdn_config_.fdn_size || config_changed)
-                {
-                    att_filterbank_options.filter_configs.clear();
-                    for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
-                    {
-                        att_filterbank_options.filter_configs.emplace_back(att_filter_options);
-                    }
-                }
-
-                for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
-                {
-                    ImGui::PushID(i);
-                    config_changed |= DrawFDNOptions(att_filterbank_options.filter_configs[i], fdn_config_);
-                    ImGui::PopID();
-                }
-                fdn_config_.attenuation_filter_bank_config = att_filterbank_options;
-            }
-
-            config_changed |= DrawMultiChannelProcessorList(fdn_config_.loop_filter_configs, fdn_config_);
-
-            ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Output Gains"))
+        if (filter_bank_changed)
         {
-            if (ImGui::TreeNode("Edit Output Gains"))
-            {
-                config_changed |= DrawFDNOptions(fdn_config_.output_block_config.parallel_gains_config, fdn_config_);
-                ImGui::TreePop();
-            }
-
-            config_changed |=
-                DrawSingleChannelProcessorList(fdn_config_.output_block_config.single_channel_processors, fdn_config_);
-
-            config_changed |=
-                DrawMultiChannelProcessorList(fdn_config_.output_block_config.multichannel_processors, fdn_config_);
-
-            ImGui::EndTabItem();
+            fdn_config_.attenuation_filter_bank_config = att_filterbank_options;
+            config_changed = true;
         }
 
-        if (ImGui::BeginTabItem("Tone Correction Filter"))
-        {
-            config_changed |= DrawSingleChannelProcessorList(fdn_config_.tone_correction_filters, fdn_config_);
-            ImGui::EndTabItem();
-        }
+        config_changed |= DrawMultiChannelProcessorList(fdn_config_.loop_filter_configs, fdn_config_);
+        fdn_sandbox::theme::EndSection();
+    }
 
-        ImGui::EndTabBar();
+    if (fdn_sandbox::theme::BeginSection("Output Stage"))
+    {
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Set output gains and processors applied after the feedback loop.");
+        config_changed |= DrawFDNOptions(fdn_config_.output_block_config.parallel_gains_config, fdn_config_);
+        config_changed |=
+            DrawSingleChannelProcessorList(fdn_config_.output_block_config.single_channel_processors, fdn_config_);
+        config_changed |=
+            DrawMultiChannelProcessorList(fdn_config_.output_block_config.multichannel_processors, fdn_config_);
+        fdn_sandbox::theme::EndSection();
+    }
+
+    if (fdn_sandbox::theme::BeginSection("Tone Correction"))
+    {
+        fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
+                                        fdn_sandbox::theme::ColorRole::TextSecondary,
+                                        "Apply final single-channel tone-correction processing.");
+        config_changed |= DrawSingleChannelProcessorList(fdn_config_.tone_correction_filters, fdn_config_);
+        fdn_sandbox::theme::EndSection();
     }
 
     ImGui::End();

@@ -1,16 +1,20 @@
 #include "theme.h"
 
+#include <boost/dll/runtime_symbol_info.hpp>
 #include <implot.h>
 
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <stdexcept>
+#include <string>
 
 namespace fdn_sandbox::theme
 {
 namespace
 {
 using ColorArray = std::array<ImVec4, static_cast<size_t>(ColorRole::Count)>;
+using FontArray = std::array<ImFont*, static_cast<size_t>(FontRole::Count)>;
 
 const ColorArray kColors = {
     ImVec4(0.067f, 0.075f, 0.086f, 1.000f), // ApplicationBackground
@@ -41,6 +45,15 @@ const ColorArray kColors = {
     ImVec4(0.655f, 0.773f, 0.349f, 1.000f), // PlotAnalysis5
 };
 
+FontArray fonts{};
+
+constexpr std::array<float, static_cast<size_t>(FontRole::Count)> kFontSizes = {
+    15.0f, // Body
+    18.0f, // Heading
+    14.0f, // Description
+    12.5f, // Metadata
+};
+
 ImVec4 WithAlpha(const ImVec4& color, float alpha)
 {
     return ImVec4(color.x, color.y, color.z, alpha);
@@ -52,6 +65,114 @@ const ImVec4& Color(ColorRole role)
     const size_t index = static_cast<size_t>(role);
     assert(index < kColors.size());
     return kColors[index];
+}
+
+void InitializeFonts()
+{
+    if (fonts[static_cast<size_t>(FontRole::Body)] != nullptr)
+    {
+        return;
+    }
+
+    const auto font_directory = boost::dll::program_location().parent_path() / "fonts";
+    const std::string medium_path = (font_directory / "ClearSans-Medium.ttf").string();
+    const std::string regular_path = (font_directory / "ClearSans-Regular.ttf").string();
+    const std::string light_path = (font_directory / "ClearSans-Light.ttf").string();
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImFont* medium = io.Fonts->AddFontFromFileTTF(medium_path.c_str());
+    ImFont* regular = io.Fonts->AddFontFromFileTTF(regular_path.c_str());
+    ImFont* light = io.Fonts->AddFontFromFileTTF(light_path.c_str());
+
+    if (medium == nullptr || regular == nullptr || light == nullptr)
+    {
+        throw std::runtime_error("Failed to load ClearSans fonts from " + font_directory.string());
+    }
+
+    fonts[static_cast<size_t>(FontRole::Body)] = medium;
+    fonts[static_cast<size_t>(FontRole::Heading)] = medium;
+    fonts[static_cast<size_t>(FontRole::Description)] = regular;
+    fonts[static_cast<size_t>(FontRole::Metadata)] = light;
+    io.FontDefault = medium;
+}
+
+void PushFont(FontRole role)
+{
+    const size_t index = static_cast<size_t>(role);
+    assert(index < fonts.size());
+    assert(fonts[index] != nullptr);
+    ImGui::PushFont(fonts[index], kFontSizes[index]);
+}
+
+void PopFont()
+{
+    ImGui::PopFont();
+}
+
+void Text(FontRole font_role, ColorRole color_role, std::string_view text)
+{
+    PushFont(font_role);
+    ImGui::PushStyleColor(ImGuiCol_Text, Color(color_role));
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
+    ImGui::PopStyleColor();
+    PopFont();
+}
+
+void TextWrapped(FontRole font_role, ColorRole color_role, std::string_view text)
+{
+    PushFont(font_role);
+    ImGui::PushStyleColor(ImGuiCol_Text, Color(color_role));
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+    PopFont();
+}
+
+bool BeginSection(const char* label, bool default_open)
+{
+    ImGuiTreeNodeFlags flags =
+        ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_FramePadding;
+    if (default_open)
+    {
+        flags |= ImGuiTreeNodeFlags_DefaultOpen;
+    }
+
+    PushFont(FontRole::Heading);
+    const bool open = ImGui::TreeNodeEx(label, flags);
+    PopFont();
+    return open;
+}
+
+void EndSection()
+{
+    ImGui::TreePop();
+    ImGui::Spacing();
+}
+
+void DrawWordmark()
+{
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float height = ImGui::GetTextLineHeight();
+    const float mark_width = height * 1.2f;
+    const float center_y = start.y + height * 0.5f;
+    const std::array points = {
+        ImVec2(start.x, center_y),
+        ImVec2(start.x + mark_width * 0.16f, center_y),
+        ImVec2(start.x + mark_width * 0.30f, start.y),
+        ImVec2(start.x + mark_width * 0.46f, start.y + height),
+        ImVec2(start.x + mark_width * 0.63f, center_y),
+        ImVec2(start.x + mark_width * 0.78f, center_y),
+        ImVec2(start.x + mark_width * 0.89f, start.y + height * 0.25f),
+        ImVec2(start.x + mark_width, center_y),
+    };
+
+    ImGui::GetWindowDrawList()->AddPolyline(points.data(), static_cast<int>(points.size()),
+                                            ImGui::ColorConvertFloat4ToU32(Color(ColorRole::Accent)), 0, 1.8f);
+    ImGui::Dummy(ImVec2(mark_width, height));
+    ImGui::SameLine(0.0f, 5.0f);
+    Text(FontRole::Body, ColorRole::TextPrimary, "FDN Sandbox");
+    ImGui::SameLine(0.0f, 14.0f);
 }
 
 void Apply(float dpi_scale)

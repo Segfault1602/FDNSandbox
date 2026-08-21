@@ -81,10 +81,6 @@ int main(int, char**)
     const ImVec4& app_background = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
     float clear_color[4] = {app_background.x, app_background.y, app_background.z, app_background.w};
 
-    io.Fonts->AddFontDefault();
-    auto medium_font = io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Medium.ttf");
-    io.FontDefault = medium_font;
-
     // Set openmp threads to 4 because otherwise it might try to use the economy cores
     omp_set_num_threads(4);
 
