@@ -19,6 +19,13 @@ namespace
 constexpr double kMaxWeight = 2.0;
 constexpr double kMinWeight = 0.0;
 
+bool IsOptimizationActive(fdn_optimization::OptimizationStatus status)
+{
+    return status == fdn_optimization::OptimizationStatus::StartRequested ||
+           status == fdn_optimization::OptimizationStatus::Running ||
+           status == fdn_optimization::OptimizationStatus::CancelRequested;
+}
+
 fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimization::OptimizationAlgoType algo_type)
 {
     ImGui::PushItemWidth(200);
@@ -199,7 +206,9 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
     static int optimize_type = 0;
     ImGui::RadioButton("Colorless Optimization", &optimize_type, 0);
     ImGui::SameLine();
+    ImGui::BeginDisabled(target_rir.empty());
     ImGui::RadioButton("RIR Match Optimization", &optimize_type, 1);
+    ImGui::EndDisabled();
 
     ImGui::Separator();
 
@@ -209,7 +218,9 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
     }
     else if (optimize_type == 1)
     {
+        ImGui::BeginDisabled(target_rir.empty());
         DrawRIRMatchSettings(!target_rir.empty());
+        ImGui::EndDisabled();
     }
 
     else if (optimize_filters_checkbox_)
@@ -271,7 +282,7 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
 
     if (start_optimization)
     {
-        if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
+        if (!IsOptimizationActive(fdn_optimizer_.GetStatus()))
         {
             opt_info_.initial_fdn_config = fdn_config;
             opt_info_.ir_size = Settings::Instance().SampleRate();
@@ -358,13 +369,26 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
             ImPlot::EndPlot();
         }
 
-        ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), "Optimizing...");
+        const auto status = fdn_optimizer_.GetStatus();
+        const char* progress_label = "Optimizing...";
+        if (status == fdn_optimization::OptimizationStatus::StartRequested)
+        {
+            progress_label = "Starting...";
+        }
+        else if (status == fdn_optimization::OptimizationStatus::CancelRequested)
+        {
+            progress_label = "Canceling...";
+        }
+
+        ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), progress_label);
+        ImGui::BeginDisabled(status == fdn_optimization::OptimizationStatus::CancelRequested);
         if (ImGui::Button("Cancel"))
         {
             fdn_optimizer_.CancelOptimization();
         }
+        ImGui::EndDisabled();
 
-        if (fdn_optimizer_.GetStatus() != fdn_optimization::OptimizationStatus::Running)
+        if (!IsOptimizationActive(fdn_optimizer_.GetStatus()))
         {
             ImGui::CloseCurrentPopup();
         }
@@ -481,6 +505,7 @@ void OptimizationGUI::DrawColorlessSettings()
 
     if (optimize_gains_checkbox_)
     {
+        optimize_filters_checkbox_ = false;
         opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::Gains);
     }
 
@@ -521,19 +546,27 @@ void OptimizationGUI::DrawColorlessSettings()
 
 void OptimizationGUI::DrawRIRMatchSettings(bool has_target_rir)
 {
-    ImGui::BeginDisabled(!has_target_rir);
-    ImGui::Checkbox("Optimize Filters", &optimize_filters_checkbox_);
-    ImGui::EndDisabled();
+    optimize_gains_checkbox_ = false;
+    optimize_matrix_checkbox_ = false;
+    optimize_filters_checkbox_ = true;
+    opt_info_.parameters_to_optimize.clear();
 
-    if (optimize_filters_checkbox_)
+    static int filter_type = 0;
+    ImGui::RadioButton("10 band", &filter_type, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("3 band", &filter_type, 1);
+
+    if (filter_type == 0)
     {
-        optimize_gains_checkbox_ = false;
-        optimize_matrix_checkbox_ = false;
-        opt_info_.parameters_to_optimize.clear();
         opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters);
-        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::TonecorrectionFilters);
-        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::OverallGain);
     }
+    else if (filter_type == 1)
+    {
+        opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::AttenuationFilters_3Band);
+    }
+
+    opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::TonecorrectionFilters);
+    opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::OverallGain);
 
     ImGui::SeparatorText("RIR Match Weights");
 
