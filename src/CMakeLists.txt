@@ -11,6 +11,8 @@ target_sources(
             fdn_widget.cpp
             presets.cpp
             app_imconfig.h
+            theme.cpp
+            theme.h
             optimization_gui.cpp
 )
 target_link_libraries(

@@ -7,6 +7,7 @@
 // - Introduction, links and more at the top of imgui.cpp
 
 #include "app.h"
+#include "theme.h"
 
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
@@ -150,17 +151,6 @@ int main(int, char**)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
-    // ImGui::StyleColorsLight();
-
-    // Setup scaling
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.ScaleAllSizes(main_scale); // Bake a fixed style scale. (until we have a solution for dynamic style scaling,
-                                     // changing this requires resetting Style + calling this again)
-    style.FontScaleDpi = main_scale; // Set initial font scale. (using io.ConfigDpiScaleFonts=true makes this
-                                     // unnecessary. We leave both here for documentation purpose)
-
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
 
@@ -200,7 +190,6 @@ int main(int, char**)
     // better, consider using the 'ProggyVector' from the same author!
     // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double
     // backslash \\ !
-    style.FontSizeBase = 18.0f;
     io.Fonts->AddFontDefault();
     io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
     io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Regular.ttf");
@@ -214,8 +203,8 @@ int main(int, char**)
     // io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
 
     // Our state
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-    FDNToolboxApp app;
+    const ImVec4& clear_color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
+    FDNToolboxApp app(main_scale);
 
     // Main loop
     bool done = false;

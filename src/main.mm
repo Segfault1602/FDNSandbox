@@ -23,6 +23,7 @@
 #import <QuartzCore/QuartzCore.h>
 
 #import "app.h"
+#import "theme.h"
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -40,10 +41,6 @@ int main(int, char**)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;   // Enable Gamepad Controls
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-
-    // Setup style
-    ImGui::StyleColorsDark();
-    //ImGui::StyleColorsLight();
 
     //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
     //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
@@ -81,13 +78,9 @@ int main(int, char**)
     MTLRenderPassDescriptor *renderPassDescriptor = [MTLRenderPassDescriptor new];
 
     // Our state
-    float clear_color[4] = {0.45f, 0.55f, 0.60f, 1.00f};
+    const ImVec4& app_background = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
+    float clear_color[4] = {app_background.x, app_background.y, app_background.z, app_background.w};
 
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.ScaleAllSizes(main_scale);
-    style.FontScaleDpi = main_scale;
-
-    style.FontSizeBase = 28.0f;
     io.Fonts->AddFontDefault();
     auto medium_font = io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Medium.ttf");
     io.FontDefault = medium_font;
@@ -95,7 +88,7 @@ int main(int, char**)
     // Set openmp threads to 4 because otherwise it might try to use the economy cores
     omp_set_num_threads(4);
 
-    FDNToolboxApp app;
+    FDNToolboxApp app(main_scale);
 
     // Main loop
     while (!glfwWindowShouldClose(window))

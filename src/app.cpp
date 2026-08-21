@@ -9,6 +9,7 @@
 #include "optimization_gui.h"
 #include "presets.h"
 #include "settings.h"
+#include "theme.h"
 #include "utils.h"
 #include "widget.h"
 
@@ -71,9 +72,11 @@ bool FancyButtons(const std::string_view label1, const std::string_view label2, 
 
     if (selected == 0)
     {
-        ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.3f, 0.6f, 0.6f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.3f, 0.7f, 0.7f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.3f, 0.8f, 0.8f));
+        ImGui::PushStyleColor(ImGuiCol_Button, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::Accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::AccentHovered));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::AccentActive));
     }
     if (ImGui::Button(label1.data(), ImVec2(50, 0)))
     {
@@ -88,9 +91,11 @@ bool FancyButtons(const std::string_view label1, const std::string_view label2, 
 
     if (selected == 1)
     {
-        ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.3f, 0.6f, 0.6f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.3f, 0.7f, 0.7f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.3f, 0.8f, 0.8f));
+        ImGui::PushStyleColor(ImGuiCol_Button, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::Accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::AccentHovered));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::AccentActive));
     }
 
     if (ImGui::Button(label2.data(), ImVec2(50, 0)))
@@ -125,7 +130,7 @@ void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, 
 
 } // namespace
 
-FDNToolboxApp::FDNToolboxApp()
+FDNToolboxApp::FDNToolboxApp(float ui_scale)
     : fdn_update_queue_(16)
     , fdn_cleanup_queue_(16)
     , direct_delay_(0, Settings::Instance().SampleRate())
@@ -139,14 +144,7 @@ FDNToolboxApp::FDNToolboxApp()
 {
     LOG_INFO(Settings::Instance().GetLogger(), "Starting FDN Toolbox");
 
-    // Style setup
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.FrameRounding = 4.0f;
-    style.GrabRounding = style.FrameRounding;
-    style.FontSizeBase = 15.f;
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.138f, 0.142f, 0.149f, 0.865f);
-
-    ImPlot::StyleColorsClassic();
+    fdn_sandbox::theme::Apply(ui_scale);
 
     audio_manager_ = audio_manager::create_audio_manager();
     if (!audio_manager_)
@@ -612,11 +610,12 @@ void FDNToolboxApp::DrawMainMenuBar()
         }
         else if (fps >= 50.f)
         {
-            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "FPS: %.1f", fps);
+            ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusWarning), "FPS: %.1f",
+                               fps);
         }
         else
         {
-            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "FPS: %.1f", fps);
+            ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError), "FPS: %.1f", fps);
         }
 
         ImGui::Separator();
@@ -1019,7 +1018,8 @@ void FDNToolboxApp::DrawImpulseResponse()
 
         if (fdn_analyzer_.IsClipping())
         {
-            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Warning: Impulse response is clipping!");
+            ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError),
+                               "Warning: Impulse response is clipping!");
         }
 
         ImPlot::SetupAxes("Sample", "Amplitude", ImPlotAxisFlags_AutoFit);
@@ -1197,19 +1197,23 @@ void FDNToolboxApp::DrawAudioPlayer()
     ImGui::SameLine();
     if (clipping_warning_displayed)
     {
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError));
     }
     else if (rms_db < -12.0f)
     {
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::MeterSafe));
     }
     else if (rms_db < -3.0f)
     {
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::MeterWarning));
     }
     else
     {
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
+                              fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::MeterHot));
     }
     ImGui::ProgressBar(meter_fraction, ImVec2(200.0f, 0.0f), meter_overlay.c_str());
 
@@ -1218,7 +1222,7 @@ void FDNToolboxApp::DrawAudioPlayer()
     if (clipping_warning_displayed)
     {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "CLIP");
+        ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError), "CLIP");
     }
 
     constexpr float kCpuUsageDisplayInterval = 0.25f;
@@ -2252,11 +2256,11 @@ void FDNToolboxApp::DrawAudioDeviceGUI()
     ImGui::SameLine();
     if (audio_manager_->is_audio_stream_running())
     {
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Running");
+        ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusOk), "Running");
     }
     else
     {
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Stopped");
+        ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError), "Stopped");
     }
 
     auto audio_stream_info = audio_manager_->get_audio_stream_info();

@@ -11,6 +11,7 @@
 #include <cstddef>
 
 #include "app.h"
+#include "theme.h"
 
 void glfw_error_callback(int error, const char* description)
 {
@@ -50,29 +51,18 @@ int main()
     // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
-
-    // Setup scaling
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.ScaleAllSizes(main_scale); // Bake a fixed style scale. (until we have a solution for dynamic style scaling,
-                                     // changing this requires resetting Style + calling this again)
-    style.FontScaleDpi = main_scale; // Set initial font scale. (using io.ConfigDpiScaleFonts=true makes this
-                                     // unnecessary. We leave both here for documentation purpose)
-
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
-    constexpr ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    const ImVec4& clear_color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
 
-    style.FontSizeBase = 18.0f;
     io.Fonts->AddFontDefault();
     auto medium_font = io.Fonts->AddFontFromFileTTF("./fonts/ClearSans-Medium.ttf");
 
     io.FontDefault = medium_font;
 
-    FDNToolboxApp app;
+    FDNToolboxApp app(main_scale);
 
     while (!glfwWindowShouldClose(window))
     {

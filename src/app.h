@@ -20,7 +20,7 @@
 class FDNToolboxApp
 {
   public:
-    FDNToolboxApp();
+    explicit FDNToolboxApp(float ui_scale);
     ~FDNToolboxApp();
 
     FDNToolboxApp(const FDNToolboxApp&) = delete;

@@ -8,6 +8,7 @@
 
 #include "fdn_info.h"
 #include "settings.h"
+#include "theme.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -1289,7 +1290,8 @@ bool DrawScalarMatrixWidget(sfFDN::FDNConfig& config, uint32_t random_seed)
                      static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::VariableDiffusion))
                 {
                     ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), " only supported for N that is a power of 2.");
+                    ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusWarning),
+                                       " only supported for N that is a power of 2.");
                 }
             }
             ImGui::EndCombo();

@@ -7,6 +7,7 @@
 
 #include <sffdn/sffdn.h>
 
+#include "theme.h"
 #include "utils.h"
 #include "widget.h"
 
@@ -47,7 +48,8 @@ bool DrawScalarMatrixTypeComboBox(int& selected_matrix_type, uint32_t fdn_size)
                  static_cast<sfFDN::ScalarMatrixType>(i) == sfFDN::ScalarMatrixType::VariableDiffusion))
             {
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), " only supported for N that is a power of 2.");
+                ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusWarning),
+                                   " only supported for N that is a power of 2.");
             }
         }
         ImGui::EndCombo();
