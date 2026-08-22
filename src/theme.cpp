@@ -98,9 +98,9 @@ void InitializeFonts()
     const std::string fontaudio_path = (font_directory / "fontaudio.ttf").string();
 
     auto& io = ImGui::GetIO();
-    static constexpr ImWchar icon_ranges[] = {ICON_MIN_FAD, ICON_MAX_FAD, 0};
+    static constexpr std::array<ImWchar, 3> icon_ranges = {ICON_MIN_FAD, ICON_MAX_FAD, 0};
     ImFontConfig medium_config;
-    medium_config.GlyphExcludeRanges = icon_ranges;
+    medium_config.GlyphExcludeRanges = icon_ranges.data();
     ImFont* medium = io.Fonts->AddFontFromFileTTF(medium_path.c_str(), kFontSizes[static_cast<size_t>(FontRole::Body)],
                                                   &medium_config);
     ImFontConfig icon_config;

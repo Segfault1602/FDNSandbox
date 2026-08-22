@@ -110,8 +110,7 @@ int main()
     }
 
     // Our state
-    const ImVec4& app_background = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
-    const float clear_color[4] = {app_background.x, app_background.y, app_background.z, app_background.w};
+    const ImVec4 clear_color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
 
     // Set openmp threads to 4 because otherwise it might try to use the economy cores
     omp_set_num_threads(4);
@@ -137,7 +136,9 @@ int main()
             const id<CAMetalDrawable> drawable = [layer nextDrawable];
 
             const id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(clear_color[0] * clear_color[3], clear_color[1] * clear_color[3], clear_color[2] * clear_color[3], clear_color[3]);
+            renderPassDescriptor.colorAttachments[0].clearColor =
+                MTLClearColorMake(clear_color.x * clear_color.w, clear_color.y * clear_color.w,
+                                  clear_color.z * clear_color.w, clear_color.w);
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
             renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
             renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;

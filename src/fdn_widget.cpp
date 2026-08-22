@@ -12,6 +12,7 @@
 #include "widget.h"
 
 #include <algorithm>
+#include <array>
 #include <map>
 #include <optional>
 #include <random>
@@ -877,7 +878,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelFirOptions& config) const
         ImGui::EndCombo();
     }
 
-    const std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences[selected_file];
+    const std::filesystem::path file_path = std::filesystem::current_path() / "data" / kOvnSequences.at(selected_file);
     const uint32_t max_channels = utils::GetChannelCountFromAudioFile(file_path.string());
 
     static uint32_t channel = 0;
@@ -1149,14 +1150,14 @@ bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::F
 {
     bool config_changed = false;
     (void)fdn_config;
-    constexpr const char* kOvnSequences[] = {"decorrelator32_oVND15.wav", "decorrelator32_oVND30.wav"};
+    constexpr std::array<const char*, 2> kOvnSequences = {"decorrelator32_oVND15.wav", "decorrelator32_oVND30.wav"};
     static size_t selected_file = 0;
-    if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_file]))
+    if (ImGui::BeginCombo("OVN Sequence", kOvnSequences.at(selected_file)))
     {
-        for (size_t i = 0; i < std::size(kOvnSequences); ++i)
+        for (size_t i = 0; i < kOvnSequences.size(); ++i)
         {
             const bool is_selected = (selected_file == i);
-            if (ImGui::Selectable(kOvnSequences[i], is_selected))
+            if (ImGui::Selectable(kOvnSequences.at(i), is_selected))
             {
                 selected_file = i;
                 config_changed = true;

@@ -26,6 +26,8 @@
 namespace
 {
 constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
+constexpr std::array<const char*, 4> kAudioFiles = {"drumloop.wav", "guitar.wav", "bleepsandbloops.wav",
+                                                    "saxophone.wav"};
 
 void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, std::span<float> output)
 {
@@ -293,8 +295,8 @@ void FDNToolboxApp::DrawTransportControls(int selected_audio_file)
 
 void FDNToolboxApp::PlaySelectedAudioFile(int selected_audio_file)
 {
-    constexpr const char* kAudioFiles[] = {"drumloop.wav", "guitar.wav", "bleepsandbloops.wav", "saxophone.wav"};
-    const auto audio_path = boost::dll::program_location().parent_path() / "audio" / kAudioFiles[selected_audio_file];
+    const auto audio_path = boost::dll::program_location().parent_path() / "audio" /
+                            kAudioFiles.at(static_cast<size_t>(selected_audio_file));
     LOG_INFO(Settings::Instance().GetLogger(), "Playing audio file: {}", audio_path.string());
     if (audio_file_manager_->open_audio_file(audio_path.string()))
     {
@@ -306,15 +308,14 @@ void FDNToolboxApp::PlaySelectedAudioFile(int selected_audio_file)
 
 void FDNToolboxApp::DrawAudioFileSelector(int& selected_audio_file, const char* label)
 {
-    constexpr const char* kAudioFiles[] = {"drumloop.wav", "guitar.wav", "bleepsandbloops.wav", "saxophone.wav"};
-    if (ImGui::BeginCombo(label, kAudioFiles[selected_audio_file]))
+    if (ImGui::BeginCombo(label, kAudioFiles.at(static_cast<size_t>(selected_audio_file))))
     {
-        for (int i = 0; i < IM_ARRAYSIZE(kAudioFiles); i++)
+        for (size_t index = 0; index < kAudioFiles.size(); ++index)
         {
-            const bool is_selected = selected_audio_file == i;
-            if (ImGui::Selectable(kAudioFiles[i], is_selected))
+            const bool is_selected = std::cmp_equal(selected_audio_file, index);
+            if (ImGui::Selectable(kAudioFiles.at(index), is_selected))
             {
-                selected_audio_file = i;
+                selected_audio_file = static_cast<int>(index);
                 audio_file_manager_->stop(true);
             }
         }
