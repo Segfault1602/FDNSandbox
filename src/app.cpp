@@ -109,81 +109,33 @@ FDNToolboxApp::~FDNToolboxApp()
 }
 void FDNToolboxApp::loop()
 {
-    static bool first_time = true;
-    static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
-    // We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
-    // because it would be confusing to have two docking targets within each others.
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
-    const bool opt_fullscreen = true; // Set to true to use the entire viewport, false to use a smaller window
-    if (opt_fullscreen)
-    {
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
-        ImGui::SetNextWindowSize(viewport->WorkSize, ImGuiCond_Always);
-        ImGui::SetNextWindowViewport(viewport->ID);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove;
-        window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-    }
-    else
-    {
-        dockspace_flags &= ~ImGuiDockNodeFlags_PassthruCentralNode;
-    }
-
-    // // When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background
-    // // and handle the pass-thru hole, so we ask Begin() to not render a background.
-    if ((dockspace_flags & ImGuiDockNodeFlags_PassthruCentralNode) != 0)
-    {
-        window_flags |= ImGuiWindowFlags_NoBackground;
-    }
-
-    if (opt_fullscreen)
-    {
-        ImGui::PopStyleVar(2);
-    }
-
-    ImGui::Begin("FDNToolbox", nullptr, window_flags);
-
-    const ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
-    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
-
-    if (first_time)
-    {
-        ImGui::DockBuilderRemoveNode(dockspace_id);
-        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-        ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
-
-        ImGuiID dock_main_id = dockspace_id;
-
-        const ImGuiID dock_id_fdn =
-            ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.25f, nullptr, &dock_main_id);
-        const ImGuiID dock_id_ir =
-            ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.33f, nullptr, &dock_main_id);
-
-        ImGui::DockBuilderDockWindow("Impulse Response", dock_id_ir);
-        ImGui::DockBuilderDockWindow("Audio Player", dock_id_ir);
-        ImGui::DockBuilderDockWindow("Settings", dock_id_ir);
-        ImGui::DockBuilderDockWindow("Optimization", dock_id_ir);
-        ImGui::DockBuilderDockWindow("FDN Info", dock_id_ir);
-        ImGui::DockBuilderDockWindow("FDN Configurator", dock_id_fdn);
-        ImGui::DockBuilderDockWindow("Extras", dock_id_fdn);
-        ImGui::DockBuilderDockWindow("Visualization", dock_main_id);
-        ImGui::DockBuilderDockWindow("Spectrogram", dock_main_id);
-        ImGui::DockBuilderDockWindow("Spectrum", dock_main_id);
-        ImGui::DockBuilderDockWindow("Autocorrelation", dock_main_id);
-        ImGui::DockBuilderDockWindow("Filter Response", dock_main_id);
-        ImGui::DockBuilderDockWindow("Energy Decay Curve", dock_main_id);
-        ImGui::DockBuilderDockWindow("Energy Decay Relief", dock_main_id);
-        ImGui::DockBuilderDockWindow("RT60s", dock_main_id);
-        ImGui::DockBuilderDockWindow("Cepstrum", dock_main_id);
-        ImGui::DockBuilderDockWindow("Echo Density", dock_main_id);
-        ImGui::DockBuilderDockWindow("Optimization Loss", dock_main_id);
-        ImGui::DockBuilderFinish(dockspace_id);
-    }
-
     DrawMainMenuBar();
+    UpdateUiTelemetry();
+    DrawToolbar();
+    DrawStatusBar();
+
+    static bool first_frame = true;
+    constexpr ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(viewport->WorkSize, ImGuiCond_Always);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    constexpr ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+                                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                              ImGuiWindowFlags_NoNavFocus;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin("FDNToolbox", nullptr, window_flags);
+    ImGui::PopStyleVar(2);
+
+    const ImGuiID dockspace_id = ImGui::GetID("FDNSandboxDockSpace_v2");
+    if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr)
+    {
+        BuildDefaultDockLayout(dockspace_id);
+    }
+    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
 
     bool config_changed = false;
     config_changed = DrawFDNConfigurator();
@@ -206,15 +158,13 @@ void FDNToolboxApp::loop()
 
     DrawVisualization();
 
-    DrawOptimizationLoss();
-
     ImGui::End(); // End the main window
 
-    if (first_time)
+    if (first_frame)
     {
         ImGui::SetWindowFocus("Spectrogram");
     }
-    first_time = false;
+    first_frame = false;
 
     // Clean up old FDN instances that are no longer in use by the audio thread
     while (fdn_cleanup_queue_.pop())

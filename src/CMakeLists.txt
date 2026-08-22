@@ -5,6 +5,7 @@ target_sources(
     PRIVATE utils.cpp
             widget.cpp
             app.cpp
+            app_frame.cpp
             app_menu.cpp
             app_config.cpp
             app_audio.cpp

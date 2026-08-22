@@ -315,18 +315,6 @@ void FDNToolboxApp::DrawVisualization()
     DrawT60s();
     DrawEchoDensity();
 }
-void FDNToolboxApp::DrawOptimizationLoss()
-{
-    if (!ImGui::Begin("Optimization Loss"))
-    {
-        ImGui::End();
-        return;
-    }
-
-    optimization_gui_.PlotLossHistory();
-
-    ImGui::End();
-}
 void FDNToolboxApp::DrawSpectrogram()
 {
     if (!ImGui::Begin("Spectrogram"))

@@ -13,9 +13,12 @@
 #include <nlohmann/json.hpp>
 #include <quill/LogMacros.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <exception>
+#include <format>
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,8 +50,8 @@ bool FancyButtons(const char* label1, const char* label2, uint32_t& selected)
     {
         ImGui::PopStyleColor(3);
     }
-    ImGui::PopStyleVar();
 
+    ImGui::SameLine();
     if (selected == 1)
     {
         ImGui::PushStyleColor(ImGuiCol_Button, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::Accent));
@@ -67,6 +70,7 @@ bool FancyButtons(const char* label1, const char* label2, uint32_t& selected)
     {
         ImGui::PopStyleColor(3);
     }
+    ImGui::PopStyleVar();
 
     const bool changed = (selected != new_selected);
     selected = new_selected;
@@ -82,14 +86,6 @@ void FDNToolboxApp::DrawMainMenuBar()
         fdn_sandbox::theme::DrawWordmark();
         DrawFileMenu();
         DrawOptionsMenu(show_audio_config_window);
-        DrawConfigurationSwitcher();
-        DrawFrameRateStatus();
-        ImGui::Separator();
-        if (!loaded_rir_filename_.empty())
-        {
-            ImGui::SameLine();
-            ImGui::TextWrapped("Loaded RIR: %s", loaded_rir_filename_.c_str());
-        }
         ImGui::EndMainMenuBar();
     }
 
@@ -145,13 +141,12 @@ void FDNToolboxApp::DrawOptionsMenu(bool& show_audio_config_window)
 
 void FDNToolboxApp::DrawConfigurationSwitcher()
 {
-    static uint32_t selected_config = 0;
-    if (!FancyButtons("A", "B", selected_config))
+    if (!FancyButtons("A", "B", selected_config_slot_))
     {
         return;
     }
 
-    if (selected_config == 0)
+    if (selected_config_slot_ == 0)
     {
         fdn_config_B_ = fdn_config_;
         fdn_config_ = fdn_config_A_;
@@ -413,12 +408,64 @@ void FDNToolboxApp::DrawFDNInfoWindow()
         return;
     }
 
-    ImGui::Text("FDN Size: %u", fdn_config_.fdn_size);
+    const std::string matrix_name =
+        std::visit([](const auto& matrix_options) { return utils::GetMatrixName(matrix_options.type); },
+                   fdn_config_.feedback_matrix_config);
+
+    const auto& delays = fdn_config_.delay_bank_config.delays;
+    float min_delay = 0.0f;
+    float max_delay = 0.0f;
+    if (!delays.empty())
+    {
+        const auto [min_it, max_it] = std::ranges::minmax_element(delays);
+        min_delay = *min_it;
+        max_delay = *max_it;
+    }
+
+    const auto t60_data = fdn_analyzer_.GetT60Data(-5.0f, -50.0f);
+    const auto echo_density_data = fdn_analyzer_.GetEchoDensityData(25, 10);
+    const float sample_rate = static_cast<float>(Settings::Instance().SampleRate());
+
+    if (ImGui::BeginTable("##FDNSummary", 2,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp))
+    {
+        const auto draw_row = [](const char* label, const std::string& value) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled("%s", label);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(value.c_str());
+        };
+
+        draw_row("FDN Size", std::to_string(fdn_config_.fdn_size));
+        draw_row("Feedback Matrix", matrix_name);
+        draw_row("Delay Count", std::to_string(delays.size()));
+        draw_row("Delay Range (samples)", delays.empty() ? "--" : std::format("{:.0f} - {:.0f}", min_delay, max_delay));
+        draw_row("Delay Range (ms)", delays.empty() ? "--"
+                                                    : std::format("{:.2f} - {:.2f}", min_delay / sample_rate * 1000.0f,
+                                                                  max_delay / sample_rate * 1000.0f));
+        draw_row("Wideband T60", std::isfinite(t60_data.overall_t60.t60) && t60_data.overall_t60.t60 > 0.0f
+                                     ? std::format("{:.2f} s", t60_data.overall_t60.t60)
+                                     : "--");
+        draw_row("Mixing Time", std::isfinite(echo_density_data.mixing_time) && echo_density_data.mixing_time > 0.0f
+                                    ? std::format("{:.1f} ms", echo_density_data.mixing_time * 1000.0f)
+                                    : "--");
+        draw_row("Sample Rate", std::format("{} Hz", Settings::Instance().SampleRate()));
+        draw_row("CPU", std::format("{:.1f}%", displayed_cpu_usage_ * 100.0f));
+        ImGui::EndTable();
+    }
 
     const nlohmann::json json_config = fdn_config_;
     std::string json_str = json_config.dump(4); // Pretty print with 4
-    ImGui::InputTextMultiline("##FDNConfig", json_str.data(), json_str.size(), ImVec2(-1, -1),
-                              ImGuiInputTextFlags_ReadOnly);
+    if (ImGui::CollapsingHeader("Raw Configuration (JSON)"))
+    {
+        if (ImGui::Button("Copy JSON"))
+        {
+            ImGui::SetClipboardText(json_str.c_str());
+        }
+        ImGui::InputTextMultiline("##FDNConfig", json_str.data(), json_str.size() + 1, ImVec2(-1, -1),
+                                  ImGuiInputTextFlags_ReadOnly);
+    }
 
     ImGui::End();
 }

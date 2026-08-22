@@ -258,9 +258,6 @@ void FDNToolboxApp::DrawAudioPlayer()
 {
     ImGui::Begin("Audio Player");
 
-    static int selected_audio_file = 0;
-    DrawTransportControls(selected_audio_file);
-    DrawAudioFileSelector(selected_audio_file);
     DrawAudioMixControls();
     DrawConvolutionControls();
     DrawOutputMeter();
@@ -305,10 +302,10 @@ void FDNToolboxApp::PlaySelectedAudioFile(int selected_audio_file)
     LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file.");
 }
 
-void FDNToolboxApp::DrawAudioFileSelector(int& selected_audio_file)
+void FDNToolboxApp::DrawAudioFileSelector(int& selected_audio_file, const char* label)
 {
     constexpr const char* kAudioFiles[] = {"drumloop.wav", "guitar.wav", "bleepsandbloops.wav", "saxophone.wav"};
-    if (ImGui::BeginCombo("Audio File", kAudioFiles[selected_audio_file]))
+    if (ImGui::BeginCombo(label, kAudioFiles[selected_audio_file]))
     {
         for (int i = 0; i < IM_ARRAYSIZE(kAudioFiles); i++)
         {
@@ -378,7 +375,7 @@ void FDNToolboxApp::DrawConvolutionControls()
     }
 }
 
-void FDNToolboxApp::DrawOutputMeter()
+void FDNToolboxApp::UpdateUiTelemetry()
 {
     constexpr float kMinMeterDb = -60.0f;
     constexpr float kPeakHoldSeconds = 1.0f;
@@ -387,60 +384,67 @@ void FDNToolboxApp::DrawOutputMeter()
     const float rms_value = meter_rms_.load(std::memory_order_relaxed);
     const float latest_peak = meter_peak_.exchange(0.0f, std::memory_order_relaxed);
 
-    static float displayed_peak = 0.0f;
-    static float peak_hold_timer = 0.0f;
-    static bool clipping_warning_displayed = false;
-    static float clipping_debounce_timer = 0.0f;
-
-    if (latest_peak >= displayed_peak)
+    if (latest_peak >= output_meter_display_.displayed_peak)
     {
-        displayed_peak = latest_peak;
-        peak_hold_timer = kPeakHoldSeconds;
+        output_meter_display_.displayed_peak = latest_peak;
+        output_meter_display_.peak_hold_timer = kPeakHoldSeconds;
     }
-    else if (peak_hold_timer > 0.0f)
+    else if (output_meter_display_.peak_hold_timer > 0.0f)
     {
-        peak_hold_timer = std::max(0.0f, peak_hold_timer - delta_time);
+        output_meter_display_.peak_hold_timer = std::max(0.0f, output_meter_display_.peak_hold_timer - delta_time);
     }
     else
     {
         const float release_gain = std::pow(10.0f, -kPeakReleaseDbPerSecond * delta_time / 20.0f);
-        displayed_peak = std::max(latest_peak, displayed_peak * release_gain);
+        output_meter_display_.displayed_peak =
+            std::max(latest_peak, output_meter_display_.displayed_peak * release_gain);
     }
 
     if (meter_clipped_.exchange(false, std::memory_order_relaxed))
     {
-        clipping_warning_displayed = true;
-        clipping_debounce_timer = 0.0f;
+        output_meter_display_.clipping_warning_displayed = true;
+        output_meter_display_.clipping_debounce_timer = 0.0f;
     }
     else
     {
-        clipping_debounce_timer += delta_time;
+        output_meter_display_.clipping_debounce_timer += delta_time;
     }
 
-    if (clipping_warning_displayed && clipping_debounce_timer >= 1.0f)
+    if (output_meter_display_.clipping_warning_displayed && output_meter_display_.clipping_debounce_timer >= 1.0f)
     {
-        clipping_warning_displayed = false;
+        output_meter_display_.clipping_warning_displayed = false;
     }
 
-    const float rms_db = rms_value > 0.0f ? 20.0f * std::log10(rms_value) : kMinMeterDb;
-    const float peak_db = displayed_peak > 0.0f ? 20.0f * std::log10(displayed_peak) : kMinMeterDb;
-    const float meter_fraction = std::clamp((rms_db - kMinMeterDb) / -kMinMeterDb, 0.0f, 1.0f);
-    const std::string meter_overlay =
-        rms_db <= kMinMeterDb ? std::format("< {:.0f} dBFS", kMinMeterDb) : std::format("{:.1f} dBFS", rms_db);
+    output_meter_display_.rms_db = rms_value > 0.0f ? 20.0f * std::log10(rms_value) : kMinMeterDb;
+    output_meter_display_.peak_db = output_meter_display_.displayed_peak > 0.0f
+                                        ? 20.0f * std::log10(output_meter_display_.displayed_peak)
+                                        : kMinMeterDb;
+    output_meter_display_.meter_fraction =
+        std::clamp((output_meter_display_.rms_db - kMinMeterDb) / -kMinMeterDb, 0.0f, 1.0f);
 
-    ImGui::Text("RMS level:");
-    ImGui::SameLine();
-    if (clipping_warning_displayed)
+    constexpr float kCpuUsageDisplayInterval = 0.25f;
+    cpu_usage_display_timer_ += delta_time;
+    if (cpu_usage_display_timer_ >= kCpuUsageDisplayInterval)
+    {
+        displayed_cpu_usage_ = fdn_cpu_usage_.load(std::memory_order_relaxed);
+        cpu_usage_display_timer_ = 0.0f;
+    }
+}
+
+void FDNToolboxApp::DrawMeterBar(const ImVec2& size)
+{
+    constexpr float kMinMeterDb = -60.0f;
+    if (output_meter_display_.clipping_warning_displayed)
     {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
                               fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError));
     }
-    else if (rms_db < -12.0f)
+    else if (output_meter_display_.rms_db < -12.0f)
     {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
                               fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::MeterSafe));
     }
-    else if (rms_db < -3.0f)
+    else if (output_meter_display_.rms_db < -3.0f)
     {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
                               fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::MeterWarning));
@@ -450,22 +454,31 @@ void FDNToolboxApp::DrawOutputMeter()
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram,
                               fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::MeterHot));
     }
-    ImGui::ProgressBar(meter_fraction, ImVec2(200.0f, 0.0f), meter_overlay.c_str());
 
+    const std::string meter_overlay = output_meter_display_.rms_db <= kMinMeterDb
+                                          ? std::format("< {:.0f} dBFS", kMinMeterDb)
+                                          : std::format("{:.1f} dBFS", output_meter_display_.rms_db);
+    ImGui::ProgressBar(output_meter_display_.meter_fraction, size, meter_overlay.c_str());
     ImGui::PopStyleColor();
-    ImGui::Text("Sample peak hold: %.1f dBFS", peak_db);
-    if (clipping_warning_displayed)
+
+    const float peak_fraction = std::clamp((output_meter_display_.peak_db - kMinMeterDb) / -kMinMeterDb, 0.0f, 1.0f);
+    const ImVec2 bar_min = ImGui::GetItemRectMin();
+    const ImVec2 bar_max = ImGui::GetItemRectMax();
+    const float peak_x = bar_min.x + (bar_max.x - bar_min.x) * peak_fraction;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(peak_x, bar_min.y), ImVec2(peak_x, bar_max.y),
+                                        IM_COL32(235, 238, 242, 210), 1.5f);
+}
+
+void FDNToolboxApp::DrawOutputMeter()
+{
+    ImGui::Text("RMS level:");
+    ImGui::SameLine();
+    DrawMeterBar(ImVec2(200.0f, 0.0f));
+    ImGui::Text("Sample peak hold: %.1f dBFS", output_meter_display_.peak_db);
+    if (output_meter_display_.clipping_warning_displayed)
     {
         ImGui::SameLine();
         ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError), "CLIP");
-    }
-
-    constexpr float kCpuUsageDisplayInterval = 0.25f;
-    cpu_usage_display_timer_ += ImGui::GetIO().DeltaTime;
-    if (cpu_usage_display_timer_ >= kCpuUsageDisplayInterval)
-    {
-        displayed_cpu_usage_ = fdn_cpu_usage_.load(std::memory_order_relaxed);
-        cpu_usage_display_timer_ = 0.0f;
     }
     ImGui::Text("CPU Usage: %.1f%%", displayed_cpu_usage_ * 100.0f);
 }

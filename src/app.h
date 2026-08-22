@@ -34,6 +34,12 @@ class FDNToolboxApp
   private:
     // Functions
     void DrawMainMenuBar();
+    void DrawToolbar();
+    void DrawStatusBar();
+    void DrawQuickFileActions();
+    void DrawCompactOutputMeter();
+    void UpdateUiTelemetry();
+    void BuildDefaultDockLayout(ImGuiID dockspace_id);
     void DrawAudioDeviceGUI();
     bool DrawFDNConfigurator();
     bool DrawFDNExtras(bool force_update);
@@ -52,7 +58,6 @@ class FDNToolboxApp
     void DrawCepstrum();
     void DrawEchoDensity();
     void DrawT60s();
-    void DrawOptimizationLoss();
 
     void UpdateFDN();
 
@@ -66,6 +71,17 @@ class FDNToolboxApp
         int64_t fdn_ns = 0;
     };
 
+    struct OutputMeterDisplayState
+    {
+        float displayed_peak = 0.0f;
+        float peak_hold_timer = 0.0f;
+        float clipping_debounce_timer = 0.0f;
+        float rms_db = -60.0f;
+        float peak_db = -60.0f;
+        float meter_fraction = 0.0f;
+        bool clipping_warning_displayed = false;
+    };
+
     AudioProcessingTimes ProcessAudioEngines(std::span<float> input, std::span<float> fdn_output,
                                              std::span<float> convolution_output);
     void ClearUnstableFDN(std::span<const float> fdn_output);
@@ -76,10 +92,11 @@ class FDNToolboxApp
 
     void DrawTransportControls(int selected_audio_file);
     void PlaySelectedAudioFile(int selected_audio_file);
-    void DrawAudioFileSelector(int& selected_audio_file);
+    void DrawAudioFileSelector(int& selected_audio_file, const char* label);
     void DrawAudioMixControls();
     void DrawConvolutionControls();
     void DrawOutputMeter();
+    void DrawMeterBar(const ImVec2& size);
     void DrawAudioStreamControl();
 
     void DrawFileMenu();
@@ -135,6 +152,7 @@ class FDNToolboxApp
     float cpu_usage_sum_ = 0.0f;
     float displayed_cpu_usage_ = 0.0f;
     float cpu_usage_display_timer_ = 0.0f;
+    OutputMeterDisplayState output_meter_display_{};
 
     std::atomic<float> meter_rms_ = 0.0f;
     std::atomic<float> meter_peak_ = 0.0f;
@@ -155,6 +173,9 @@ class FDNToolboxApp
 
     std::atomic<uint32_t> direct_delay_ms_ = 0;
     sfFDN::Delay direct_delay_;
+
+    int selected_audio_file_ = 0;
+    uint32_t selected_config_slot_ = 0;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
     OptimizationGUI optimization_gui_;
