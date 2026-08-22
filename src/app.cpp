@@ -111,7 +111,9 @@ void FDNToolboxApp::loop()
 {
     DrawMainMenuBar();
     UpdateUiTelemetry();
+    ProcessNotifications();
     DrawToolbar();
+    notification_center_.DrawCriticalBanner();
     DrawStatusBar();
 
     static bool first_frame = true;
@@ -131,6 +133,11 @@ void FDNToolboxApp::loop()
     ImGui::PopStyleVar(2);
 
     const ImGuiID dockspace_id = ImGui::GetID("FDNSandboxDockSpace_v2");
+    const bool reset_layout = std::exchange(reset_layout_requested_, false);
+    if (reset_layout)
+    {
+        ImGui::DockBuilderRemoveNode(dockspace_id);
+    }
     if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr)
     {
         BuildDefaultDockLayout(dockspace_id);
@@ -159,8 +166,9 @@ void FDNToolboxApp::loop()
     DrawVisualization();
 
     ImGui::End(); // End the main window
+    notification_center_.DrawToasts();
 
-    if (first_frame)
+    if (first_frame || reset_layout)
     {
         ImGui::SetWindowFocus("Spectrogram");
     }
@@ -184,7 +192,12 @@ void FDNToolboxApp::UpdateFDN()
     // Need to use CloneFDN() here because CreateFDNFromConfig is not always deterministic (e.g. when using random
     // matrices)
     fdn_analyzer_.SetFDN(gui_fdn_->CloneFDN());
-    fdn_update_queue_.emplace(gui_fdn_->CloneFDN());
+    ++submitted_fdn_generation_;
+    fdn_update_queue_.emplace(PendingFDNUpdate{
+        .generation = submitted_fdn_generation_,
+        .fdn = gui_fdn_->CloneFDN(),
+    });
+    notification_center_.ClearCritical("fdn-instability");
 
     auto end = std::chrono::high_resolution_clock::now();
     const std::chrono::duration<double, std::milli> duration = end - start;

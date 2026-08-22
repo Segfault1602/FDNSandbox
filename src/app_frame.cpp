@@ -1,11 +1,13 @@
 #include "app.h"
 
+#include "icons.h"
 #include "settings.h"
 #include "theme.h"
 
 #include "imgui_internal.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <string>
 
@@ -17,6 +19,15 @@ constexpr ImGuiWindowFlags kSideBarFlags = ImGuiWindowFlags_NoDocking | ImGuiWin
 
 void FDNToolboxApp::DrawToolbar()
 {
+#ifndef NDEBUG
+    static bool fontaudio_verified = false;
+    if (!fontaudio_verified)
+    {
+        IM_ASSERT(ImGui::GetFontBaked()->FindGlyphNoFallback(static_cast<ImWchar>(0xF169)) != nullptr);
+        fontaudio_verified = true;
+    }
+#endif
+
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 side_bar_padding(style.WindowPadding.x, style.FramePadding.y);
@@ -46,27 +57,36 @@ void FDNToolboxApp::DrawToolbar()
     ImGui::SameLine();
     DrawQuickFileActions();
 
+    if (optimization_gui_.IsActive())
+    {
+        const float pulse = 0.55f + 0.45f * std::sin(static_cast<float>(ImGui::GetTime()) * 4.0f);
+        ImVec4 color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::PlotOptimization);
+        color.w = pulse;
+        ImGui::SameLine();
+        ImGui::TextColored(color, "%s Optimizing", fdn_sandbox::icons::StatusOn);
+    }
+
     ImGui::End();
 }
 
 void FDNToolboxApp::DrawQuickFileActions()
 {
-    if (ImGui::Button("Load RIR"))
+    if (ImGui::Button(fdn_sandbox::icons::LoadRir))
     {
         load_rir_browser.Open();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Load Config"))
+    if (ImGui::Button(fdn_sandbox::icons::LoadConfig))
     {
         load_config_browser.Open();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Save Config"))
+    if (ImGui::Button(fdn_sandbox::icons::SaveConfig))
     {
         save_config_browser.Open();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Save IR"))
+    if (ImGui::Button(fdn_sandbox::icons::SaveIr))
     {
         save_ir_browser.Open();
     }
@@ -88,6 +108,11 @@ void FDNToolboxApp::DrawStatusBar()
         return;
     }
 
+    const bool stream_running = audio_manager_->is_audio_stream_running();
+    ImGui::TextColored(fdn_sandbox::theme::Color(stream_running ? fdn_sandbox::theme::ColorRole::StatusOk
+                                                                : fdn_sandbox::theme::ColorRole::StatusError),
+                       "%s", fdn_sandbox::icons::StatusOn);
+    ImGui::SameLine();
     ImGui::Text("%u Hz", Settings::Instance().SampleRate());
     ImGui::SameLine();
     ImGui::TextDisabled("|");
@@ -117,7 +142,7 @@ void FDNToolboxApp::DrawStatusBar()
     ImGui::SameLine();
     DrawFrameRateStatus();
 
-    if (!audio_manager_->is_audio_stream_running())
+    if (!stream_running)
     {
         ImGui::SameLine();
         ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError),

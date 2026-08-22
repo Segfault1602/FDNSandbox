@@ -5,6 +5,7 @@
 #include <imfilebrowser.h>
 
 #include "fdn_analyzer.h"
+#include "notifications.h"
 #include "optimization_gui.h"
 #include <audio_utils/audio_file_manager.h>
 #include <audio_utils/audio_manager.h>
@@ -39,6 +40,7 @@ class FDNToolboxApp
     void DrawQuickFileActions();
     void DrawCompactOutputMeter();
     void UpdateUiTelemetry();
+    void ProcessNotifications();
     void BuildDefaultDockLayout(ImGuiID dockspace_id);
     void DrawAudioDeviceGUI();
     bool DrawFDNConfigurator();
@@ -71,6 +73,12 @@ class FDNToolboxApp
         int64_t fdn_ns = 0;
     };
 
+    struct PendingFDNUpdate
+    {
+        uint64_t generation = 0;
+        std::unique_ptr<sfFDN::FDN> fdn;
+    };
+
     struct OutputMeterDisplayState
     {
         float displayed_peak = 0.0f;
@@ -101,6 +109,7 @@ class FDNToolboxApp
 
     void DrawFileMenu();
     void DrawOptionsMenu(bool& show_audio_config_window);
+    void DrawViewMenu();
     void DrawConfigurationSwitcher();
     void DrawFrameRateStatus() const;
     void DrawAudioConfigurationWindow(bool& show_audio_config_window);
@@ -127,8 +136,10 @@ class FDNToolboxApp
     std::unique_ptr<sfFDN::FDN> audio_fdn_;
     std::unique_ptr<sfFDN::FDN> other_fdn_;
 
-    moodycamel::ReaderWriterQueue<std::unique_ptr<sfFDN::FDN>> fdn_update_queue_;
+    moodycamel::ReaderWriterQueue<PendingFDNUpdate> fdn_update_queue_;
     moodycamel::ReaderWriterQueue<std::unique_ptr<sfFDN::FDN>> fdn_cleanup_queue_;
+    uint64_t submitted_fdn_generation_ = 0;
+    uint64_t active_audio_fdn_generation_ = 0;
 
     sfFDN::FDNConfig fdn_config_;
 
@@ -176,6 +187,10 @@ class FDNToolboxApp
 
     int selected_audio_file_ = 0;
     uint32_t selected_config_slot_ = 0;
+    bool reset_layout_requested_ = false;
+    bool clipping_notification_active_ = false;
+    std::atomic<uint64_t> fdn_instability_generation_ = 0;
+    fdn_sandbox::NotificationCenter notification_center_;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
     OptimizationGUI optimization_gui_;

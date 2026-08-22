@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -22,12 +23,27 @@ struct LossHistory
 class OptimizationGUI
 {
   public:
+    enum class EventType
+    {
+        Completed,
+        Canceled,
+        Failed,
+    };
+
+    struct Event
+    {
+        EventType type;
+        std::string message;
+    };
+
     OptimizationGUI(quill::Logger* logger);
     ~OptimizationGUI() = default;
 
     bool Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir);
 
     void PlotLossHistory();
+    [[nodiscard]] bool IsActive() const;
+    std::optional<Event> ConsumeEvent();
 
   private:
     using LossFunctions = std::vector<std::shared_ptr<fdn_optimization::AudioLoss>>;
@@ -76,6 +92,7 @@ class OptimizationGUI
     LossHistory loss_history_;
     ResultSummary result_summary_;
     LossPlotStatistics previous_loss_plot_statistics_;
+    std::optional<Event> pending_event_;
 
     void DrawSetupPanel(std::span<const float> target_rir);
     bool DrawOptimizationPanel(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir);

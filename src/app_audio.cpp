@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include "icons.h"
 #include "settings.h"
 #include "theme.h"
 
@@ -108,13 +109,14 @@ void FDNToolboxApp::ApplyPendingFDNUpdates()
     const size_t queued_updates = std::min(fdn_update_queue_.size_approx(), kFdnQueueCapacity);
     for (size_t i = 0; i < queued_updates; ++i)
     {
-        std::unique_ptr<sfFDN::FDN> next_fdn;
-        if (!fdn_update_queue_.try_dequeue(next_fdn))
+        PendingFDNUpdate next_update;
+        if (!fdn_update_queue_.try_dequeue(next_update))
         {
             break;
         }
         fdn_cleanup_queue_.emplace(std::move(audio_fdn_));
-        audio_fdn_ = std::move(next_fdn);
+        audio_fdn_ = std::move(next_update.fdn);
+        active_audio_fdn_generation_ = next_update.generation;
     }
 }
 
@@ -171,6 +173,7 @@ void FDNToolboxApp::ClearUnstableFDN(std::span<const float> fdn_output)
     }
 
     LOG_ERROR(Settings::Instance().GetLogger(), "FDN output exceeded |5.0|, likely unstable. Clearing FDN.");
+    fdn_instability_generation_.store(active_audio_fdn_generation_, std::memory_order_release);
     audio_fdn_->Clear();
 }
 
@@ -267,7 +270,7 @@ void FDNToolboxApp::DrawAudioPlayer()
 
 void FDNToolboxApp::DrawTransportControls(int selected_audio_file)
 {
-    if (ImGui::Button("Impulse"))
+    if (ImGui::Button(fdn_sandbox::icons::Impulse))
     {
         audio_state_ = AudioState::ImpulseRequested;
         LOG_INFO(Settings::Instance().GetLogger(), "Playing impulse response...");
@@ -276,14 +279,14 @@ void FDNToolboxApp::DrawTransportControls(int selected_audio_file)
     ImGui::SameLine();
     if (audio_file_manager_->get_state() == audio_file_manager::AudioPlayerState::kPlaying)
     {
-        if (ImGui::Button("Stop"))
+        if (ImGui::Button(fdn_sandbox::icons::Stop))
         {
             audio_file_manager_->stop(true);
         }
         return;
     }
 
-    if (ImGui::Button("Play"))
+    if (ImGui::Button(fdn_sandbox::icons::Play))
     {
         PlaySelectedAudioFile(selected_audio_file);
     }

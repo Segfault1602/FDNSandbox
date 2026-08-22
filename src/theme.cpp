@@ -1,5 +1,7 @@
 #include "theme.h"
 
+#include "icons.h"
+
 #include <boost/dll/runtime_symbol_info.hpp>
 #include <implot.h>
 
@@ -85,15 +87,29 @@ void InitializeFonts()
     const std::string medium_path = (font_directory / "ClearSans-Medium.ttf").string();
     const std::string regular_path = (font_directory / "ClearSans-Regular.ttf").string();
     const std::string light_path = (font_directory / "ClearSans-Light.ttf").string();
+    const std::string fontaudio_path = (font_directory / "fontaudio.ttf").string();
 
     auto& io = ImGui::GetIO();
-    ImFont* medium = io.Fonts->AddFontFromFileTTF(medium_path.c_str());
-    ImFont* regular = io.Fonts->AddFontFromFileTTF(regular_path.c_str());
-    ImFont* light = io.Fonts->AddFontFromFileTTF(light_path.c_str());
+    static constexpr ImWchar icon_ranges[] = {ICON_MIN_FAD, ICON_MAX_FAD, 0};
+    ImFontConfig medium_config;
+    medium_config.GlyphExcludeRanges = icon_ranges;
+    ImFont* medium = io.Fonts->AddFontFromFileTTF(medium_path.c_str(), kFontSizes[static_cast<size_t>(FontRole::Body)],
+                                                  &medium_config);
+    ImFontConfig icon_config;
+    icon_config.MergeMode = true;
+    icon_config.PixelSnapH = true;
+    icon_config.GlyphMinAdvanceX = 15.0f;
+    icon_config.GlyphOffset = ImVec2(0.0f, 4.0f);
+    ImFont* fontaudio = io.Fonts->AddFontFromFileTTF(fontaudio_path.c_str(),
+                                                     kFontSizes[static_cast<size_t>(FontRole::Body)], &icon_config);
+    ImFont* regular =
+        io.Fonts->AddFontFromFileTTF(regular_path.c_str(), kFontSizes[static_cast<size_t>(FontRole::Description)]);
+    ImFont* light =
+        io.Fonts->AddFontFromFileTTF(light_path.c_str(), kFontSizes[static_cast<size_t>(FontRole::Metadata)]);
 
-    if (medium == nullptr || regular == nullptr || light == nullptr)
+    if (medium == nullptr || fontaudio == nullptr || regular == nullptr || light == nullptr)
     {
-        throw std::runtime_error("Failed to load ClearSans fonts from " + font_directory.string());
+        throw std::runtime_error("Failed to load application fonts from " + font_directory.string());
     }
 
     fonts[static_cast<size_t>(FontRole::Body)] = medium;

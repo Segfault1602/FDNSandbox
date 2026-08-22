@@ -76,7 +76,7 @@ std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std:
  * @param audio_data The audio samples to write.
  * @param sample_rate The sample rate of the audio.
  */
-void WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate);
+bool WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate);
 
 uint32_t GetChannelCountFromAudioFile(const std::string_view filename);
 

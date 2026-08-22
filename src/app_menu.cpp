@@ -2,6 +2,7 @@
 
 #include <audio_utils/audio_analysis.h>
 
+#include "icons.h"
 #include "settings.h"
 #include "theme.h"
 #include "utils.h"
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <memory>
 #include <string>
@@ -86,6 +88,7 @@ void FDNToolboxApp::DrawMainMenuBar()
         fdn_sandbox::theme::DrawWordmark();
         DrawFileMenu();
         DrawOptionsMenu(show_audio_config_window);
+        DrawViewMenu();
         ImGui::EndMainMenuBar();
     }
 
@@ -126,7 +129,7 @@ void FDNToolboxApp::DrawOptionsMenu(bool& show_audio_config_window)
         return;
     }
 
-    ImGui::MenuItem("Audio Menu", nullptr, &show_audio_config_window);
+    ImGui::MenuItem(fdn_sandbox::icons::AudioSettings, nullptr, &show_audio_config_window);
     ImGui::Separator();
     if (ImGui::MenuItem("Save current to B"))
     {
@@ -135,6 +138,19 @@ void FDNToolboxApp::DrawOptionsMenu(bool& show_audio_config_window)
     if (ImGui::MenuItem("Save current to A"))
     {
         fdn_config_A_ = fdn_config_;
+    }
+    ImGui::EndMenu();
+}
+
+void FDNToolboxApp::DrawViewMenu()
+{
+    if (!ImGui::BeginMenu("View"))
+    {
+        return;
+    }
+    if (ImGui::MenuItem("Reset Layout"))
+    {
+        reset_layout_requested_ = true;
     }
     ImGui::EndMenu();
 }
@@ -217,20 +233,23 @@ void FDNToolboxApp::SaveSelectedImpulseResponse()
     {
         filename += ".wav";
     }
-    utils::WriteAudioFile(filename, fdn_analyzer_.GetImpulseResponse(), Settings::Instance().SampleRate());
+    if (utils::WriteAudioFile(filename, fdn_analyzer_.GetImpulseResponse(), Settings::Instance().SampleRate()))
+    {
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "ir-saved", "Impulse response saved",
+                                  filename);
+    }
+    else
+    {
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "ir-save-failed",
+                                  "Failed to save impulse response", filename, 6.0);
+    }
     save_ir_browser.ClearSelected();
 }
 
 void FDNToolboxApp::LoadSelectedConfiguration()
 {
-    try
-    {
-        UpdateFDN();
-    }
-    catch (const std::exception& error)
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Error loading configuration: {}", error.what());
-    }
+    notification_center_.Push(fdn_sandbox::NotificationSeverity::Warning, "config-load-not-implemented",
+                              "Configuration loading", "Loading configuration files is not implemented yet.");
     load_config_browser.ClearSelected();
 }
 
@@ -241,6 +260,8 @@ void FDNToolboxApp::SaveSelectedConfiguration()
     {
         filename += ".json";
     }
+    notification_center_.Push(fdn_sandbox::NotificationSeverity::Warning, "config-save-not-implemented",
+                              "Configuration saving", "Saving configuration files is not implemented yet.");
     save_config_browser.ClearSelected();
 }
 
@@ -253,6 +274,8 @@ void FDNToolboxApp::LoadSelectedRIR()
     if (!audio_utils::audio_file::ReadWavFile(filename, buffer, file_sample_rate, file_num_channels))
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Failed to load RIR file: {}", filename);
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-load-failed", "Failed to load RIR",
+                                  filename, 6.0);
         load_rir_browser.ClearSelected();
         return;
     }
@@ -260,6 +283,8 @@ void FDNToolboxApp::LoadSelectedRIR()
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "RIR file must be mono. Loaded file has {} channels.",
                   file_num_channels);
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-invalid-channels", "Invalid RIR",
+                                  std::format("Expected mono audio, found {} channels.", file_num_channels), 6.0);
         load_rir_browser.ClearSelected();
         return;
     }
@@ -272,6 +297,9 @@ void FDNToolboxApp::LoadSelectedRIR()
              convolution_reverb->GetShortInfo());
     rir_analyzer_.SetImpulseResponse(std::move(buffer));
     convolution_reverb_ = std::move(convolution_reverb);
+    notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "rir-loaded", "RIR loaded",
+                              std::format("{} ({} samples)", std::filesystem::path(filename).filename().string(),
+                                          rir_analyzer_.GetImpulseResponseSize()));
     load_rir_browser.ClearSelected();
 }
 void FDNToolboxApp::DrawSettingsWindow()
@@ -459,7 +487,7 @@ void FDNToolboxApp::DrawFDNInfoWindow()
     std::string json_str = json_config.dump(4); // Pretty print with 4
     if (ImGui::CollapsingHeader("Raw Configuration (JSON)"))
     {
-        if (ImGui::Button("Copy JSON"))
+        if (ImGui::Button(fdn_sandbox::icons::CopyJson))
         {
             ImGui::SetClipboardText(json_str.c_str());
         }

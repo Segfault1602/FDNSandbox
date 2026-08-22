@@ -63,6 +63,7 @@ cpmaddpackage(
     "BUILD_PROGRAMS OFF"
     "BUILD_EXAMPLES OFF"
     "BUILD_REGTEST OFF"
+    "BUILD_SHARED_LIBS OFF"
     "ENABLE_EXTERNAL_LIBS OFF"
     "BUILD_TESTING OFF"
     "ENABLE_MPEG OFF"
@@ -81,7 +82,7 @@ cpmaddpackage(
     NAME
     imgui
     GIT_TAG
-    docking
+    b48d1afbe8ee8b238e2961dc363a949dd7304e23
     GITHUB_REPOSITORY
     ocornut/imgui
     DOWNLOAD_ONLY
@@ -117,6 +118,28 @@ cpmaddpackage(
     master
     GITHUB_REPOSITORY
     AirGuanZ/imgui-filebrowser
+    DOWNLOAD_ONLY
+    TRUE
+)
+
+cpmaddpackage(
+    NAME
+    fontaudio
+    GIT_REPOSITORY
+    https://github.com/fefanto/fontaudio.git
+    GIT_TAG
+    320ea19819bf66429fa772d6c04614ae75815895
+    DOWNLOAD_ONLY
+    TRUE
+)
+
+cpmaddpackage(
+    NAME
+    IconFontCppHeaders
+    GIT_REPOSITORY
+    https://github.com/juliettef/IconFontCppHeaders.git
+    GIT_TAG
+    210b5a399a64270674560d633638952d1e8d804d
     DOWNLOAD_ONLY
     TRUE
 )

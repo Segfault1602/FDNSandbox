@@ -6,6 +6,7 @@ target_sources(
             widget.cpp
             app.cpp
             app_frame.cpp
+            app_notifications.cpp
             app_menu.cpp
             app_config.cpp
             app_audio.cpp
@@ -16,6 +17,9 @@ target_sources(
             fdn_widget.cpp
             presets.cpp
             app_imconfig.h
+            icons.h
+            notifications.cpp
+            notifications.h
             plot_ui.cpp
             plot_ui.h
             theme.cpp
@@ -42,6 +46,7 @@ target_link_libraries(
 
 target_compile_features(fdn_sandbox_app PRIVATE cxx_std_23)
 target_compile_definitions(fdn_sandbox_app PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
+target_include_directories(fdn_sandbox_app PUBLIC ${IconFontCppHeaders_SOURCE_DIR})
 
 # ====== Metal implementation ======
 if(APPLE)
@@ -92,4 +97,6 @@ add_custom_command(
             $<TARGET_FILE_DIR:${PROJECT_NAME}>/audio
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/../fonts
             $<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${fontaudio_SOURCE_DIR}/font/fontaudio.ttf
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/fonts/fontaudio.ttf
 )

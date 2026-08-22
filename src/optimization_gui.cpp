@@ -8,6 +8,7 @@
 
 #include <sffdn/sffdn.h>
 
+#include "icons.h"
 #include "optimizer.h"
 #include "plot_ui.h"
 #include "settings.h"
@@ -199,6 +200,18 @@ OptimizationGUI::OptimizationGUI(quill::Logger* logger)
 {
 }
 
+bool OptimizationGUI::IsActive() const
+{
+    return IsOptimizationActive(fdn_optimizer_.GetStatus());
+}
+
+std::optional<OptimizationGUI::Event> OptimizationGUI::ConsumeEvent()
+{
+    std::optional<Event> event = std::move(pending_event_);
+    pending_event_.reset();
+    return event;
+}
+
 bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> target_rir)
 {
     const float content_region_width = ImGui::GetContentRegionAvail().x;
@@ -261,7 +274,7 @@ bool OptimizationGUI::DrawOptimizationPanel(sfFDN::FDNConfig& fdn_config, std::s
     ImGui::SeparatorText("Optimization Parameters");
     DrawAlgorithmSettings();
 
-    if (ImGui::Button("Run Optimization") && !IsOptimizationActive(fdn_optimizer_.GetStatus()))
+    if (ImGui::Button(fdn_sandbox::icons::RunOptimization) && !IsOptimizationActive(fdn_optimizer_.GetStatus()))
     {
         StartOptimization(fdn_config, target_rir);
     }
@@ -425,7 +438,7 @@ void OptimizationGUI::DrawOptimizationProgressPopup()
 
     ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(-1, 0.0f), progress_label);
     ImGui::BeginDisabled(status == fdn_optimization::OptimizationStatus::CancelRequested);
-    if (ImGui::Button("Cancel"))
+    if (ImGui::Button(fdn_sandbox::icons::CancelOptimization))
     {
         fdn_optimizer_.CancelOptimization();
     }
@@ -484,6 +497,12 @@ void OptimizationGUI::DrawProgressLossPlot(const fdn_optimization::OptimizationP
 bool OptimizationGUI::HandleOptimizationResult(sfFDN::FDNConfig& fdn_config)
 {
     const auto status = fdn_optimizer_.GetStatus();
+    if (status == fdn_optimization::OptimizationStatus::Failed)
+    {
+        pending_event_ = Event{EventType::Failed, "Optimization failed. Check the application log for details."};
+        fdn_optimizer_.ResetStatus();
+        return false;
+    }
     if (status != fdn_optimization::OptimizationStatus::Completed &&
         status != fdn_optimization::OptimizationStatus::Canceled)
     {
@@ -505,6 +524,11 @@ bool OptimizationGUI::HandleOptimizationResult(sfFDN::FDNConfig& fdn_config)
     }
 
     fdn_config = result.optimized_fdn_config;
+    pending_event_ = status == fdn_optimization::OptimizationStatus::Completed
+                         ? Event{EventType::Completed,
+                                 std::format("Completed in {:.2f} s after {} evaluations.",
+                                             result_summary_.elapsed_time_sec, result_summary_.evaluation_count)}
+                         : Event{EventType::Canceled, "Optimization was canceled."};
     fdn_optimizer_.ResetStatus();
     return true;
 }
