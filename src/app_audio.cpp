@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -23,27 +22,9 @@
 #include <utility>
 #include <vector>
 
-namespace
-{
 constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
 constexpr std::array<const char*, 4> kAudioFiles = {"drumloop.wav", "guitar.wav", "bleepsandbloops.wav",
                                                     "saxophone.wav"};
-
-void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, std::span<float> output)
-{
-    assert(fade_in.size() == fade_out.size());
-    assert(fade_in.size() == output.size());
-
-    for (size_t i = 0; i < output.size(); ++i)
-    {
-        const float t = static_cast<float>(i) / static_cast<float>(output.size() - 1);
-        const float fadeout_gain =
-            (t * t) * (3.0f - (2.0f * t)); // from https://signalsmith-audio.co.uk/writing/2021/cheap-energy-crossfade/
-        const float fadein_gain = 1.0f - fadeout_gain;
-        output[i] = (fade_in[i] * fadein_gain) + (fade_out[i] * fadeout_gain);
-    }
-}
-} // namespace
 
 void FDNToolboxApp::AudioCallback(AudioCallbackArgs callback_args)
 {
@@ -82,11 +63,11 @@ void FDNToolboxApp::AudioCallback(AudioCallbackArgs callback_args)
     const int reverb_type = reverb_engine_.load();
     if (last_reverb_type_ == kFDN_REVERB && reverb_type == kCONV_REVERB)
     {
-        Crossfade(convolution_output_data, fdn_output_data, convolution_output_data);
+        fdn_sandbox::audio::Crossfade(convolution_output_data, fdn_output_data, convolution_output_data);
     }
     else if (last_reverb_type_ == kCONV_REVERB && reverb_type == kFDN_REVERB)
     {
-        Crossfade(fdn_output_data, convolution_output_data, fdn_output_data);
+        fdn_sandbox::audio::Crossfade(fdn_output_data, convolution_output_data, fdn_output_data);
     }
     last_reverb_type_ = reverb_type;
 
@@ -99,8 +80,7 @@ void FDNToolboxApp::AudioCallback(AudioCallbackArgs callback_args)
     const auto [wet_mix, dry_mix] = PrepareMix(reverb_type, input_data);
     const std::span<float> output_data =
         reverb_type == kFDN_REVERB ? std::span<float>(fdn_output_data) : std::span<float>(convolution_output_data);
-    MixAndMeter(output_data, input_data, audio_gain_.load(), wet_mix, dry_mix);
-    WriteOutput(output_buffer, output_data, num_channels);
+    MixMeterAndWrite(output_buffer, output_data, input_data, num_channels, audio_gain_.load(), wet_mix, dry_mix);
 
     const int64_t duration = reverb_type == kFDN_REVERB ? processing_times.fdn_ns : processing_times.convolution_ns;
     UpdateCpuUsage({.duration_ns = duration, .frame_size = frame_size});
@@ -198,65 +178,38 @@ std::pair<float, float> FDNToolboxApp::PrepareMix(int reverb_type, std::span<flo
     return {fdn_wet_level_.load(), fdn_dry_level_.load()};
 }
 
-void FDNToolboxApp::MixAndMeter(std::span<float> output, std::span<const float> input, float gain, float wet_mix,
-                                float dry_mix)
+void FDNToolboxApp::MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output,
+                                     std::span<const float> input, size_t num_channels, float gain, float wet_mix,
+                                     float dry_mix)
 {
-    float block_peak = 0.0f;
-    for (size_t i = 0; i < output.size(); ++i)
-    {
-        output[i] = gain * ((wet_mix * output[i]) + (dry_mix * input[i]));
-        const float squared_sample = output[i] * output[i];
-        meter_sum_squares_ -= static_cast<double>(meter_squared_samples_[meter_sample_index_]);
-        meter_squared_samples_[meter_sample_index_] = squared_sample;
-        meter_sum_squares_ += static_cast<double>(squared_sample);
-        meter_sample_index_ = (meter_sample_index_ + 1) % meter_squared_samples_.size();
-        block_peak = std::max(block_peak, std::abs(output[i]));
-    }
-
-    const double mean_square = std::max(0.0, meter_sum_squares_) / static_cast<double>(meter_squared_samples_.size());
-    meter_rms_.store(std::sqrt(static_cast<float>(mean_square)), std::memory_order_relaxed);
+    fdn_sandbox::audio::Mix(output, input, {.output_gain = gain, .wet = wet_mix, .dry = dry_mix});
+    const auto reading = output_meter_.Measure(output);
+    fdn_sandbox::audio::AddMonoToInterleaved(output_buffer, output, num_channels);
+    meter_rms_.store(reading.rms, std::memory_order_relaxed);
 
     float previous_peak = meter_peak_.load(std::memory_order_relaxed);
-    while (previous_peak < block_peak &&
-           !meter_peak_.compare_exchange_weak(previous_peak, block_peak, std::memory_order_relaxed))
+    while (previous_peak < reading.peak &&
+           !meter_peak_.compare_exchange_weak(previous_peak, reading.peak, std::memory_order_relaxed))
     {
     }
-    if (block_peak >= 1.0f)
+    if (reading.clipped)
     {
         meter_clipped_.store(true, std::memory_order_relaxed);
     }
 }
 
-void FDNToolboxApp::WriteOutput(std::span<float> output_buffer, std::span<const float> output, size_t num_channels)
-{
-    for (size_t frame = 0; frame < output.size(); ++frame)
-    {
-        const size_t offset = frame * num_channels;
-        for (size_t channel = 0; channel < num_channels; ++channel)
-        {
-            output_buffer[offset + channel] += output[frame];
-        }
-    }
-}
-
 void FDNToolboxApp::UpdateCpuUsage(CpuUsageUpdate update)
 {
-    const float allowed_time =
-        (1e9f / Settings::Instance().SampleRateAs<float>()) * static_cast<float>(update.frame_size);
-    const float cpu_usage = static_cast<float>(update.duration_ns) / allowed_time;
-    cpu_usage_sum_ -= cpu_usage_samples_[cpu_usage_sample_index_];
-    cpu_usage_samples_[cpu_usage_sample_index_] = cpu_usage;
-    cpu_usage_sum_ += cpu_usage;
-    cpu_usage_sample_index_ = (cpu_usage_sample_index_ + 1) % kCpuUsageWindowSize;
-    cpu_usage_sample_count_ = std::min(cpu_usage_sample_count_ + 1, kCpuUsageWindowSize);
-    fdn_cpu_usage_.store(cpu_usage_sum_ / static_cast<float>(cpu_usage_sample_count_), std::memory_order_relaxed);
+    const auto cpu_usage =
+        cpu_average_.Push(update.duration_ns, update.frame_size, Settings::Instance().SampleRateAs<float>());
+    fdn_cpu_usage_.store(cpu_usage.average, std::memory_order_relaxed);
 
     if (std::cmp_less_equal(update.duration_ns, cpu_highwater_mark_ns_))
     {
         return;
     }
     cpu_highwater_mark_ns_ = static_cast<size_t>(update.duration_ns);
-    LOG_WARNING(Settings::Instance().GetLogger(), "New CPU highwater mark: {:.2f}%", cpu_usage * 100.f);
+    LOG_WARNING(Settings::Instance().GetLogger(), "New CPU highwater mark: {:.2f}%", cpu_usage.current * 100.f);
 }
 void FDNToolboxApp::DrawAudioPlayer()
 {
@@ -598,17 +551,9 @@ void FDNToolboxApp::DrawAudioStreamControl()
 
     if (!stream_running)
     {
-        audio_manager_->stop_audio_stream();
+        StopAudioStream();
         return;
     }
 
-    if (!audio_manager_->start_audio_stream(
-            audio_stream_option::kOutput,
-            [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
-                AudioCallback({.output_buffer = output_buffer, .frame_size = frame_size, .num_channels = num_channels});
-            },
-            kSystemBlockSize))
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
-    }
+    StartAudioStream();
 }

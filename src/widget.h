@@ -3,8 +3,6 @@
 #include <cstdint>
 #include <span>
 
-#include "app.h"
-
 #include <sffdn/sffdn.h>
 
 void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn);

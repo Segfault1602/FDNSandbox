@@ -1,3 +1,42 @@
+# ====== Headless core logic ======
+add_library(fdn_sandbox_core STATIC presets.cpp)
+add_library(fdn_sandbox::core ALIAS fdn_sandbox_core)
+
+target_include_directories(fdn_sandbox_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    fdn_sandbox_core
+    PUBLIC sfFDN::sfFDN
+           fdn_sandbox::fdn_sandbox_options
+    PRIVATE quill::quill
+            fdn_sandbox::fdn_sandbox_warnings
+)
+
+# ====== Headless analysis logic ======
+add_library(fdn_sandbox_analysis STATIC fdn_analyzer.cpp ir_analyzer.cpp)
+add_library(fdn_sandbox::analysis ALIAS fdn_sandbox_analysis)
+
+target_include_directories(fdn_sandbox_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    fdn_sandbox_analysis
+    PUBLIC audio_utils::audio_utils
+           quill::quill
+           sfFDN::sfFDN
+           fdn_sandbox::fdn_sandbox_options
+    PRIVATE fdn_sandbox::fdn_sandbox_warnings
+)
+
+# ====== Headless audio logic ======
+add_library(fdn_sandbox_audio STATIC audio/audio_block_ops.cpp)
+add_library(fdn_sandbox::audio ALIAS fdn_sandbox_audio)
+
+target_include_directories(fdn_sandbox_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    fdn_sandbox_audio
+    PUBLIC fdn_sandbox::fdn_sandbox_options
+    PRIVATE Eigen3::Eigen
+            fdn_sandbox::fdn_sandbox_warnings
+)
+
 # ====== FDN Sandbox App logic =======
 add_library(fdn_sandbox_app STATIC)
 target_sources(
@@ -11,11 +50,8 @@ target_sources(
             app_config.cpp
             app_audio.cpp
             app_analysis.cpp
-            fdn_analyzer.cpp
-            ir_analyzer.cpp
             fdn_info.cpp
             fdn_widget.cpp
-            presets.cpp
             app_imconfig.h
             icons.h
             notifications.cpp
@@ -40,12 +76,13 @@ target_link_libraries(
            Boost::dll
            Eigen3::Eigen
            nlohmann_json::nlohmann_json
+           fdn_sandbox::core
+           fdn_sandbox::analysis
+           fdn_sandbox::audio
            fdn_sandbox::fdn_sandbox_options
            fdn_sandbox::fdn_sandbox_warnings
 )
 
-target_compile_features(fdn_sandbox_app PRIVATE cxx_std_23)
-target_compile_definitions(fdn_sandbox_app PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 target_include_directories(fdn_sandbox_app PUBLIC ${IconFontCppHeaders_SOURCE_DIR})
 
 # ====== Metal implementation ======
@@ -68,7 +105,6 @@ elseif(WIN32)
     add_executable(${PROJECT_NAME} main_win32_dx12.cpp)
     target_link_libraries(${PROJECT_NAME} PRIVATE fdn_sandbox_app imgui freetype)
     target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_definitions(${PROJECT_NAME} PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
 
 else()
     # ========= OpenGL implementation =========

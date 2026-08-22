@@ -115,52 +115,53 @@ int main()
     // Set openmp threads to 4 because otherwise it might try to use the economy cores
     omp_set_num_threads(4);
 
-    FDNToolboxApp app(main_scale);
-
-    // Main loop
-    while (glfwWindowShouldClose(window) == 0)
     {
-        @autoreleasepool
+        FDNToolboxApp app(main_scale);
+
+        // Main loop
+        while (glfwWindowShouldClose(window) == 0)
         {
-            // Poll and handle events (inputs, window resize, etc.)
-            // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
-            // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
-            // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
-            // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
-            glfwPollEvents();
+            @autoreleasepool
+            {
+                // Poll and handle events (inputs, window resize, etc.)
+                // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to
+                // use your inputs. When either is true, do not dispatch or overwrite the corresponding input state.
+                glfwPollEvents();
 
-            int width = 0;
-            int height = 0;
-            glfwGetFramebufferSize(window, &width, &height);
-            layer.drawableSize = CGSizeMake(width, height);
-            const id<CAMetalDrawable> drawable = [layer nextDrawable];
+                int width = 0;
+                int height = 0;
+                glfwGetFramebufferSize(window, &width, &height);
+                layer.drawableSize = CGSizeMake(width, height);
+                const id<CAMetalDrawable> drawable = [layer nextDrawable];
 
-            const id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-            renderPassDescriptor.colorAttachments[0].clearColor =
-                MTLClearColorMake(clear_color.x * clear_color.w, clear_color.y * clear_color.w,
-                                  clear_color.z * clear_color.w, clear_color.w);
-            renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
-            renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
-            renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-            const id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
-            [renderEncoder pushDebugGroup:@"ImGui demo"];
+                const id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+                renderPassDescriptor.colorAttachments[0].clearColor =
+                    MTLClearColorMake(clear_color.x * clear_color.w, clear_color.y * clear_color.w,
+                                      clear_color.z * clear_color.w, clear_color.w);
+                renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
+                renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
+                renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+                const id<MTLRenderCommandEncoder> renderEncoder =
+                    [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+                [renderEncoder pushDebugGroup:@"ImGui demo"];
 
-            // Start the Dear ImGui frame
-            ImGui_ImplMetal_NewFrame(renderPassDescriptor);
-            ImGui_ImplGlfw_NewFrame();
-            ImGui::NewFrame();
+                // Start the Dear ImGui frame
+                ImGui_ImplMetal_NewFrame(renderPassDescriptor);
+                ImGui_ImplGlfw_NewFrame();
+                ImGui::NewFrame();
 
-            app.loop();
+                app.loop();
 
-            // Rendering
-            ImGui::Render();
-            ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), commandBuffer, renderEncoder);
+                // Rendering
+                ImGui::Render();
+                ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), commandBuffer, renderEncoder);
 
-            [renderEncoder popDebugGroup];
-            [renderEncoder endEncoding];
+                [renderEncoder popDebugGroup];
+                [renderEncoder endEncoding];
 
-            [commandBuffer presentDrawable:drawable];
-            [commandBuffer commit];
+                [commandBuffer presentDrawable:drawable];
+                [commandBuffer commit];
+            }
         }
     }
 

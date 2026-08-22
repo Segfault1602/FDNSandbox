@@ -57,47 +57,49 @@ int main()
 
     const ImVec4& clear_color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
 
-    FDNToolboxApp app(main_scale);
-
-    while (!glfwWindowShouldClose(window))
     {
-        // Poll and handle events (inputs, window resize, etc.)
-        // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your
-        // inputs.
-        // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or
-        // clear/overwrite your copy of the mouse data.
-        // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or
-        // clear/overwrite your copy of the keyboard data. Generally you may always pass all inputs to dear imgui, and
-        // hide them from your application based on those two flags.
-        glfwPollEvents();
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0)
+        FDNToolboxApp app(main_scale);
+
+        while (!glfwWindowShouldClose(window))
         {
-            ImGui_ImplGlfw_Sleep(10);
-            continue;
+            // Poll and handle events (inputs, window resize, etc.)
+            // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use
+            // your inputs.
+            // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or
+            // clear/overwrite your copy of the mouse data.
+            // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or
+            // clear/overwrite your copy of the keyboard data. Generally you may always pass all inputs to dear imgui,
+            // and hide them from your application based on those two flags.
+            glfwPollEvents();
+            if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0)
+            {
+                ImGui_ImplGlfw_Sleep(10);
+                continue;
+            }
+
+            // Start the Dear ImGui frame
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+
+            // ####### Insert App Here ##########
+
+            app.loop();
+
+            // ##################################
+
+            // Rendering
+            ImGui::Render();
+            int display_w, display_h;
+            glfwGetFramebufferSize(window, &display_w, &display_h);
+            glViewport(0, 0, display_w, display_h);
+            glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w,
+                         clear_color.w);
+            glClear(GL_COLOR_BUFFER_BIT);
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+            glfwSwapBuffers(window);
         }
-
-        // Start the Dear ImGui frame
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        // ####### Insert App Here ##########
-
-        app.loop();
-
-        // ##################################
-
-        // Rendering
-        ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w,
-                     clear_color.w);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        glfwSwapBuffers(window);
     }
 
     // Cleanup

@@ -4,6 +4,7 @@
 
 #include <imfilebrowser.h>
 
+#include "audio/audio_block_ops.h"
 #include "fdn_analyzer.h"
 #include "notifications.h"
 #include "optimization_gui.h"
@@ -73,6 +74,8 @@ class FDNToolboxApp
     };
 
     void AudioCallback(AudioCallbackArgs callback_args);
+    bool StartAudioStream();
+    void StopAudioStream();
     void ApplyPendingFDNUpdates();
     void AdoptPendingConvolutionReverb(size_t frame_size);
 
@@ -109,8 +112,8 @@ class FDNToolboxApp
     AudioProcessingTimes ProcessAudioEngines(const AudioEngineBuffers& buffers);
     void ClearUnstableFDN(std::span<const float> fdn_output);
     std::pair<float, float> PrepareMix(int reverb_type, std::span<float> input);
-    void MixAndMeter(std::span<float> output, std::span<const float> input, float gain, float wet_mix, float dry_mix);
-    static void WriteOutput(std::span<float> output_buffer, std::span<const float> output, size_t num_channels);
+    void MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output, std::span<const float> input,
+                          size_t num_channels, float gain, float wet_mix, float dry_mix);
     struct CpuUsageUpdate
     {
         int64_t duration_ns;
@@ -182,11 +185,7 @@ class FDNToolboxApp
     std::atomic<float> audio_gain_ = 1.0f;
     std::atomic<float> dry_wet_mix_ = 0.5f;
     std::atomic<float> fdn_cpu_usage_ = 0.0f;
-    static constexpr size_t kCpuUsageWindowSize = 12;
-    std::array<float, kCpuUsageWindowSize> cpu_usage_samples_{};
-    size_t cpu_usage_sample_index_ = 0;
-    size_t cpu_usage_sample_count_ = 0;
-    float cpu_usage_sum_ = 0.0f;
+    fdn_sandbox::audio::CpuAverage cpu_average_;
     float displayed_cpu_usage_ = 0.0f;
     float cpu_usage_display_timer_ = 0.0f;
     OutputMeterDisplayState output_meter_display_{};
@@ -194,9 +193,7 @@ class FDNToolboxApp
     std::atomic<float> meter_rms_ = 0.0f;
     std::atomic<float> meter_peak_ = 0.0f;
     std::atomic<bool> meter_clipped_ = false;
-    std::vector<float> meter_squared_samples_;
-    size_t meter_sample_index_ = 0;
-    double meter_sum_squares_ = 0.0;
+    fdn_sandbox::audio::OutputLevelMeter output_meter_;
 
     constexpr static int kFDN_REVERB = 0;
     constexpr static int kCONV_REVERB = 1;

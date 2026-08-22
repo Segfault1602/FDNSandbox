@@ -181,81 +181,84 @@ int main(int, char**)
 
     // Our state
     const ImVec4& clear_color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
-    FDNToolboxApp app(main_scale);
 
     // Main loop
     bool done = false;
-    while (!done)
     {
-        // Poll and handle messages (inputs, window resize, etc.)
-        // See the WndProc() function below for our to dispatch events to the Win32 backend.
-        MSG msg;
-        while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
+        FDNToolboxApp app(main_scale);
+
+        while (!done)
         {
-            ::TranslateMessage(&msg);
-            ::DispatchMessage(&msg);
-            if (msg.message == WM_QUIT)
-                done = true;
+            // Poll and handle messages (inputs, window resize, etc.)
+            // See the WndProc() function below for our to dispatch events to the Win32 backend.
+            MSG msg;
+            while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
+            {
+                ::TranslateMessage(&msg);
+                ::DispatchMessage(&msg);
+                if (msg.message == WM_QUIT)
+                    done = true;
+            }
+            if (done)
+                break;
+
+            // Handle window screen locked
+            if ((g_SwapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) ||
+                ::IsIconic(hwnd))
+            {
+                ::Sleep(10);
+                continue;
+            }
+            g_SwapChainOccluded = false;
+
+            // Start the Dear ImGui frame
+            ImGui_ImplDX12_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::NewFrame();
+
+            app.loop();
+
+            // Rendering
+            ImGui::Render();
+
+            FrameContext* frameCtx = WaitForNextFrameContext();
+            UINT backBufferIdx = g_pSwapChain->GetCurrentBackBufferIndex();
+            frameCtx->CommandAllocator->Reset();
+
+            D3D12_RESOURCE_BARRIER barrier = {};
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barrier.Transition.pResource = g_mainRenderTargetResource[backBufferIdx];
+            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            g_pd3dCommandList->Reset(frameCtx->CommandAllocator, nullptr);
+            g_pd3dCommandList->ResourceBarrier(1, &barrier);
+
+            // Render Dear ImGui graphics
+            const float clear_color_with_alpha[4] = {clear_color.x * clear_color.w, clear_color.y * clear_color.w,
+                                                     clear_color.z * clear_color.w, clear_color.w};
+            g_pd3dCommandList->ClearRenderTargetView(g_mainRenderTargetDescriptor[backBufferIdx],
+                                                     clear_color_with_alpha, 0, nullptr);
+            g_pd3dCommandList->OMSetRenderTargets(1, &g_mainRenderTargetDescriptor[backBufferIdx], FALSE, nullptr);
+            g_pd3dCommandList->SetDescriptorHeaps(1, &g_pd3dSrvDescHeap);
+            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_pd3dCommandList);
+            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+            g_pd3dCommandList->ResourceBarrier(1, &barrier);
+            g_pd3dCommandList->Close();
+
+            g_pd3dCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList* const*)&g_pd3dCommandList);
+            g_pd3dCommandQueue->Signal(g_fence, ++g_fenceLastSignaledValue);
+            frameCtx->FenceValue = g_fenceLastSignaledValue;
+
+            // Present
+            HRESULT hr = g_pSwapChain->Present(1, 0); // Present with vsync
+            // HRESULT hr = g_pSwapChain->Present(0, g_SwapChainTearingSupport ? DXGI_PRESENT_ALLOW_TEARING : 0); //
+            // Present without vsync
+            g_SwapChainOccluded = (hr == DXGI_STATUS_OCCLUDED);
+            g_frameIndex++;
         }
-        if (done)
-            break;
-
-        // Handle window screen locked
-        if ((g_SwapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) ||
-            ::IsIconic(hwnd))
-        {
-            ::Sleep(10);
-            continue;
-        }
-        g_SwapChainOccluded = false;
-
-        // Start the Dear ImGui frame
-        ImGui_ImplDX12_NewFrame();
-        ImGui_ImplWin32_NewFrame();
-        ImGui::NewFrame();
-
-        app.loop();
-
-        // Rendering
-        ImGui::Render();
-
-        FrameContext* frameCtx = WaitForNextFrameContext();
-        UINT backBufferIdx = g_pSwapChain->GetCurrentBackBufferIndex();
-        frameCtx->CommandAllocator->Reset();
-
-        D3D12_RESOURCE_BARRIER barrier = {};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barrier.Transition.pResource = g_mainRenderTargetResource[backBufferIdx];
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        g_pd3dCommandList->Reset(frameCtx->CommandAllocator, nullptr);
-        g_pd3dCommandList->ResourceBarrier(1, &barrier);
-
-        // Render Dear ImGui graphics
-        const float clear_color_with_alpha[4] = {clear_color.x * clear_color.w, clear_color.y * clear_color.w,
-                                                 clear_color.z * clear_color.w, clear_color.w};
-        g_pd3dCommandList->ClearRenderTargetView(g_mainRenderTargetDescriptor[backBufferIdx], clear_color_with_alpha, 0,
-                                                 nullptr);
-        g_pd3dCommandList->OMSetRenderTargets(1, &g_mainRenderTargetDescriptor[backBufferIdx], FALSE, nullptr);
-        g_pd3dCommandList->SetDescriptorHeaps(1, &g_pd3dSrvDescHeap);
-        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_pd3dCommandList);
-        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-        g_pd3dCommandList->ResourceBarrier(1, &barrier);
-        g_pd3dCommandList->Close();
-
-        g_pd3dCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList* const*)&g_pd3dCommandList);
-        g_pd3dCommandQueue->Signal(g_fence, ++g_fenceLastSignaledValue);
-        frameCtx->FenceValue = g_fenceLastSignaledValue;
-
-        // Present
-        HRESULT hr = g_pSwapChain->Present(1, 0); // Present with vsync
-        // HRESULT hr = g_pSwapChain->Present(0, g_SwapChainTearingSupport ? DXGI_PRESENT_ALLOW_TEARING : 0); // Present
-        // without vsync
-        g_SwapChainOccluded = (hr == DXGI_STATUS_OCCLUDED);
-        g_frameIndex++;
     }
 
     WaitForPendingOperations();

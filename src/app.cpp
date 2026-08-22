@@ -39,6 +39,7 @@ audio_utils::analysis::STFTOptions MakeDefaultStftOptions()
 FDNToolboxApp::FDNToolboxApp(float ui_scale)
     : fdn_update_queue_(16)
     , fdn_cleanup_queue_(16)
+    , output_meter_(static_cast<size_t>(Settings::Instance().SampleRateAs<float>() * kMeterIntegrationSeconds))
     , direct_delay_(0, Settings::Instance().SampleRate())
     , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
     , optimization_gui_(Settings::Instance().GetLogger())
@@ -66,9 +67,6 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
         throw std::runtime_error("Failed to create audio file manager");
     }
 
-    meter_squared_samples_.resize(
-        static_cast<size_t>(Settings::Instance().SampleRateAs<float>() * kMeterIntegrationSeconds));
-
     save_ir_browser.SetTitle("Save Impulse Response");
     save_ir_browser.SetTypeFilters({".wav"});
 
@@ -88,25 +86,39 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
     gui_fdn_ = presets::CreateDefaultFDN();
     UpdateFDN();
 
-    // Initialize audio manager and start the audio stream
-    if (!audio_manager_->start_audio_stream(
-            audio_stream_option::kOutput,
-            [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
-                AudioCallback({.output_buffer = output_buffer, .frame_size = frame_size, .num_channels = num_channels});
-            },
-            kSystemBlockSize))
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
-    }
-    LOG_INFO(Settings::Instance().GetLogger(), "Audio stream started");
+    StartAudioStream();
 }
 FDNToolboxApp::~FDNToolboxApp()
 {
-    if (audio_manager_ && audio_manager_->is_audio_stream_running())
+    StopAudioStream();
+}
+
+bool FDNToolboxApp::StartAudioStream()
+{
+    const bool started = audio_manager_->start_audio_stream(
+        audio_stream_option::kOutput,
+        [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
+            AudioCallback({.output_buffer = output_buffer, .frame_size = frame_size, .num_channels = num_channels});
+        },
+        kSystemBlockSize);
+    if (!started)
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
+        return false;
+    }
+
+    LOG_INFO(Settings::Instance().GetLogger(), "Audio stream started");
+    return true;
+}
+
+void FDNToolboxApp::StopAudioStream()
+{
+    if (audio_manager_)
     {
         audio_manager_->stop_audio_stream();
     }
 }
+
 void FDNToolboxApp::loop()
 {
     DrawMainMenuBar();
