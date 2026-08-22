@@ -1,6 +1,5 @@
 #include "presets.h"
 
-#include <algorithm>
 #include <memory>
 
 #include <sffdn/sffdn.h>

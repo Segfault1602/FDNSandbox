@@ -10,14 +10,12 @@
 #include <complex>
 #include <numbers>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include "settings.h"
-#include "sffdn/delay_utils.h"
 #include <audio_utils/fft_utils.h>
 
 namespace

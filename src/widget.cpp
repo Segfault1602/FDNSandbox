@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
 #include <random>
 #include <string>
 
@@ -573,7 +572,7 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 
     if (fdn)
     {
-        uint32_t matrix_size;
+        uint32_t matrix_size{0};
         feedback_matrix.resize(N * N);
         if (!fdn_info::GetFeedbackMatrix(fdn, feedback_matrix, matrix_size))
         {

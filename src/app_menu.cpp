@@ -13,7 +13,6 @@
 #include <nlohmann/json.hpp>
 #include <quill/LogMacros.h>
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <exception>

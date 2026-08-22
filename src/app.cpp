@@ -11,7 +11,6 @@
 #include <quill/LogMacros.h>
 
 #include <chrono>
-#include <memory>
 #include <stdexcept>
 
 namespace
