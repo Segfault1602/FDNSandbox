@@ -28,3 +28,5 @@ Checks: "*,
 WarningsAsErrors: ''
 HeaderFilterRegex: ''
 FormatStyle:     none
+CheckOptions:
+  modernize-use-std-numbers.DiffThreshold: '0.0001'

@@ -106,8 +106,8 @@ void DrawEmptyState(std::string_view message)
     const std::string message_text(message);
     ImPlotSpec spec{};
     spec.LineColor = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::TextSecondary);
-    ImPlot::PlotText(message_text.c_str(), limits.X.Min + limits.X.Size() * 0.5, limits.Y.Min + limits.Y.Size() * 0.5,
-                     ImVec2(0.0f, 0.0f), spec);
+    ImPlot::PlotText(message_text.c_str(), limits.X.Min + (limits.X.Size() * 0.5),
+                     limits.Y.Min + (limits.Y.Size() * 0.5), ImVec2(0.0f, 0.0f), spec);
 }
 
 ImPlotColormap OctaveBandColormap()

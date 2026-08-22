@@ -252,7 +252,7 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
     static std::array<float, 2> t60_range = {0.01f, 5.f};
 
     if (ImPlot::BeginPlot("Filter Designer",
-                          ImVec2(-1, ImGui::GetWindowHeight() - 4 * ImGui::GetFrameHeightWithSpacing()),
+                          ImVec2(-1, ImGui::GetWindowHeight() - (4 * ImGui::GetFrameHeightWithSpacing())),
                           ImPlotFlags_NoLegend))
     {
         ImPlot::SetupAxes("Frequency (Hz)", "RT60 (s)");
@@ -390,7 +390,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
     static bool show_filter_response = false;
     const float designer_height = (show_filter_response ? ImGui::GetWindowHeight() * 0.65f : ImGui::GetWindowHeight()) -
-                                  ImGui::GetFrameHeightWithSpacing() * 4;
+                                  (ImGui::GetFrameHeightWithSpacing() * 4);
 
     if (ImPlot::BeginPlot("Filter Designer", ImVec2(-1, designer_height), ImPlotFlags_NoLegend))
     {

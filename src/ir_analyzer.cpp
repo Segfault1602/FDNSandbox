@@ -17,9 +17,9 @@ struct Stopwatch
     {
     }
 
-    double ElapsedMs() const
+    [[nodiscard]] double ElapsedMs() const
     {
-        auto end_time = std::chrono::high_resolution_clock::now();
+        const auto end_time = std::chrono::high_resolution_clock::now();
         return std::chrono::duration<double, std::milli>(end_time - start_time_).count();
     }
 
@@ -132,10 +132,10 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         const Stopwatch stopwatch;
         spectrum_early_rir_time_ = early_rir_time;
 
-        uint32_t early_rir_sample_count = static_cast<uint32_t>(early_rir_time * samplerate_);
-        early_rir_sample_count = std::min(early_rir_sample_count, static_cast<uint32_t>(impulse_response_.size()));
-        auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
-        uint32_t nfft = std::max(kSpectrumNFFT, early_rir.size());
+        const auto early_rir_sample_count = std::min(static_cast<uint32_t>(early_rir_time * samplerate_),
+                                                     static_cast<uint32_t>(impulse_response_.size()));
+        const auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
+        auto nfft = std::max(kSpectrumNFFT, early_rir.size());
 
         nfft = audio_utils::FFT::NextSupportedFFTSize(nfft);
         audio_utils::FFT fft(nfft);
@@ -152,7 +152,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         frequency_bins_.resize(kNumFrequencyBins);
         for (size_t i = 0; i < kNumFrequencyBins; ++i)
         {
-            frequency_bins_[i] = static_cast<float>(i) * samplerate_ / nfft;
+            frequency_bins_[i] = (static_cast<float>(i) * samplerate_) / nfft;
         }
 
         spectrum_peaks_.clear();
@@ -199,10 +199,10 @@ CepstrumData IRAnalyzer::GetCepstrum(float early_rir_time)
         const Stopwatch stopwatch;
         cepstrum_early_rir_time_ = early_rir_time;
 
-        uint32_t early_rir_sample_count = static_cast<uint32_t>(early_rir_time * samplerate_);
-        early_rir_sample_count = std::min(early_rir_sample_count, static_cast<uint32_t>(impulse_response_.size()));
-        auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
-        uint32_t nfft = std::max(kSpectrumNFFT, early_rir.size());
+        const auto early_rir_sample_count = std::min(static_cast<uint32_t>(early_rir_time * samplerate_),
+                                                     static_cast<uint32_t>(impulse_response_.size()));
+        const auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
+        auto nfft = std::max(kSpectrumNFFT, early_rir.size());
 
         nfft = audio_utils::FFT::NextSupportedFFTSize(nfft);
         audio_utils::FFT fft(nfft);
@@ -227,13 +227,13 @@ AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
         const Stopwatch stopwatch;
         autocorrelation_early_rir_time_ = early_rir_time;
 
-        uint32_t early_rir_sample_count = static_cast<uint32_t>(early_rir_time * samplerate_);
-        early_rir_sample_count = std::min(early_rir_sample_count, static_cast<uint32_t>(impulse_response_.size()));
-        auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
+        const auto early_rir_sample_count = std::min(static_cast<uint32_t>(early_rir_time * samplerate_),
+                                                     static_cast<uint32_t>(impulse_response_.size()));
+        const auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
 
         autocorrelation_data_ = audio_utils::analysis::Autocorrelation(early_rir, true);
 
-        uint32_t nfft = std::max(kSpectrumNFFT, early_rir.size());
+        auto nfft = std::max(kSpectrumNFFT, early_rir.size());
         nfft = audio_utils::FFT::NextSupportedFFTSize(nfft);
         audio_utils::FFT fft(nfft);
 

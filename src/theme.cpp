@@ -64,11 +64,12 @@ ImVec4 WithAlpha(const ImVec4& color, float alpha)
 {
     return ImVec4(color.x, color.y, color.z, alpha);
 }
+
 } // namespace
 
 const ImVec4& Color(ColorRole role)
 {
-    const size_t index = static_cast<size_t>(role);
+    const auto index = static_cast<size_t>(role);
     assert(index < kColors.size());
     return kColors[index];
 }
@@ -85,7 +86,7 @@ void InitializeFonts()
     const std::string regular_path = (font_directory / "ClearSans-Regular.ttf").string();
     const std::string light_path = (font_directory / "ClearSans-Light.ttf").string();
 
-    ImGuiIO& io = ImGui::GetIO();
+    auto& io = ImGui::GetIO();
     ImFont* medium = io.Fonts->AddFontFromFileTTF(medium_path.c_str());
     ImFont* regular = io.Fonts->AddFontFromFileTTF(regular_path.c_str());
     ImFont* light = io.Fonts->AddFontFromFileTTF(light_path.c_str());
@@ -104,7 +105,7 @@ void InitializeFonts()
 
 void PushFont(FontRole role)
 {
-    const size_t index = static_cast<size_t>(role);
+    const auto index = static_cast<size_t>(role);
     assert(index < fonts.size());
     assert(fonts[index] != nullptr);
     ImGui::PushFont(fonts[index], kFontSizes[index]);
@@ -161,15 +162,15 @@ void DrawWordmark()
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float height = ImGui::GetTextLineHeight();
     const float mark_width = height * 1.2f;
-    const float center_y = start.y + height * 0.5f;
+    const float center_y = start.y + (height * 0.5f);
     const std::array points = {
         ImVec2(start.x, center_y),
-        ImVec2(start.x + mark_width * 0.16f, center_y),
-        ImVec2(start.x + mark_width * 0.30f, start.y),
-        ImVec2(start.x + mark_width * 0.46f, start.y + height),
-        ImVec2(start.x + mark_width * 0.63f, center_y),
-        ImVec2(start.x + mark_width * 0.78f, center_y),
-        ImVec2(start.x + mark_width * 0.89f, start.y + height * 0.25f),
+        ImVec2(start.x + (mark_width * 0.16f), center_y),
+        ImVec2(start.x + (mark_width * 0.30f), start.y),
+        ImVec2(start.x + (mark_width * 0.46f), start.y + height),
+        ImVec2(start.x + (mark_width * 0.63f), center_y),
+        ImVec2(start.x + (mark_width * 0.78f), center_y),
+        ImVec2(start.x + (mark_width * 0.89f), start.y + (height * 0.25f)),
         ImVec2(start.x + mark_width, center_y),
     };
 
@@ -214,7 +215,7 @@ void Apply(float dpi_scale)
     style.SeparatorSize = 1.0f;
     style.DisabledAlpha = 0.65f;
 
-    ImVec4* colors = style.Colors;
+    auto* colors = style.Colors;
     colors[ImGuiCol_Text] = Color(ColorRole::TextPrimary);
     colors[ImGuiCol_TextDisabled] = Color(ColorRole::TextSecondary);
     colors[ImGuiCol_WindowBg] = Color(ColorRole::WindowBackground);

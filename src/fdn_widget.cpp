@@ -83,7 +83,7 @@ std::optional<std::vector<float>> ReadMatrixFromClipboard(uint32_t matrix_size)
             {
                 break;
             }
-            matrix[row * matrix_size + column] = value;
+            matrix[(row * matrix_size) + column] = value;
         }
     }
 
@@ -407,7 +407,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config) const
 
     if (static_cast<sfFDN::DelayInterpolationType>(delay_interpolation_type) == sfFDN::DelayInterpolationType::None)
     {
-        uint32_t delay_samples = static_cast<uint32_t>(config.delay);
+        auto delay_samples = static_cast<uint32_t>(config.delay);
         config_changed |= ImGui::DragScalar("Delay", ImGuiDataType_U32, &delay_samples);
         config.delay = static_cast<float>(delay_samples);
     }
@@ -596,10 +596,10 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
 
         for (auto& section : config.sections)
         {
-            for (uint32_t i = 0; i < section.delays.size(); ++i)
+            for (auto& delay : section.delays)
             {
-                section.delays[i] = distr(eng); // Generate random delays
-                section.delays[i] = utils::GetClosestPrime(static_cast<uint32_t>(section.delays[i]));
+                delay = distr(eng); // Generate random delays
+                delay = utils::GetClosestPrime(static_cast<uint32_t>(delay));
             }
         }
 
@@ -763,18 +763,21 @@ bool FDNWidgetVisitor::operator()(sfFDN::TenBandFilterOptions& config) const
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::GraphicEQOptions&) const
+bool FDNWidgetVisitor::operator()([[maybe_unused]] sfFDN::GraphicEQOptions& config) const
 {
+    (void)config;
     return false;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::AllpassFilterOptions&) const
+bool FDNWidgetVisitor::operator()([[maybe_unused]] sfFDN::AllpassFilterOptions& config) const
 {
+    (void)config;
     return false;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::CascadedBiquadsOptions&) const
+bool FDNWidgetVisitor::operator()([[maybe_unused]] sfFDN::CascadedBiquadsOptions& config) const
 {
+    (void)config;
     return false;
 }
 
@@ -888,8 +891,9 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelFirOptions& config) const
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()(sfFDN::AttenuationFilterBankOptions&) const
+bool FDNWidgetVisitor::operator()([[maybe_unused]] sfFDN::AttenuationFilterBankOptions& config) const
 {
+    (void)config;
     return false;
 }
 
@@ -1065,9 +1069,9 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
         }
 
         // Remove processors in reverse order to avoid invalidating indices
-        for (auto it = processors_to_remove.rbegin(); it != processors_to_remove.rend(); ++it)
+        for (const auto index : std::views::reverse(processors_to_remove))
         {
-            processors.erase(processors.begin() + *it);
+            processors.erase(processors.begin() + static_cast<std::ptrdiff_t>(index));
             config_changed = true;
         }
     }
@@ -1137,9 +1141,10 @@ std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProce
     return new_processor;
 }
 
-bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::FDNConfig&)
+bool DrawVelvetNoiseDecorrelatorConfig(sfFDN::FirOptions& config, const sfFDN::FDNConfig& fdn_config)
 {
     bool config_changed = false;
+    (void)fdn_config;
     constexpr const char* kOvnSequences[] = {"decorrelator32_oVND15.wav", "decorrelator32_oVND30.wav"};
     static size_t selected_file = 0;
     if (ImGui::BeginCombo("OVN Sequence", kOvnSequences[selected_file]))

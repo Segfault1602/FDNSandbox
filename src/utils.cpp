@@ -322,7 +322,7 @@ std::string GetDelayLengthTypeName(int type)
 
 std::string GetDelayInterpolationTypeName(int type)
 {
-    const sfFDN::DelayInterpolationType interp_type = static_cast<sfFDN::DelayInterpolationType>(type);
+    const auto interp_type = static_cast<sfFDN::DelayInterpolationType>(type);
     switch (interp_type)
     {
     case sfFDN::DelayInterpolationType::None:
@@ -364,11 +364,11 @@ sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNC
 void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig& config,
                                          const sfFDN::AttenuationFilterBankOptions& new_options)
 {
-    for (auto i = 0u; i < config.loop_filter_configs.size(); ++i)
+    for (auto& loop_filter_config : config.loop_filter_configs)
     {
-        if (std::holds_alternative<sfFDN::AttenuationFilterBankOptions>(config.loop_filter_configs[i]))
+        if (std::holds_alternative<sfFDN::AttenuationFilterBankOptions>(loop_filter_config))
         {
-            config.loop_filter_configs[i] = new_options;
+            loop_filter_config = new_options;
             return;
         }
     }

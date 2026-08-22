@@ -1019,7 +1019,7 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
     {
         for (size_t j = 0; j < x_size; ++j)
         {
-            z_mdspan(i, j) = edr.energy_decay_relief[i + j * y_size];
+            z_mdspan(i, j) = edr.energy_decay_relief[i + (j * y_size)];
             if (z_mdspan(i, j) < -80.0f)
             {
                 z_mdspan(i, j) = -80.0f; // Clamp to -80 dB for better visualization

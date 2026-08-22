@@ -20,9 +20,9 @@ struct Stopwatch
     {
     }
 
-    double ElapsedMs() const
+    [[nodiscard]] double ElapsedMs() const
     {
-        auto end_time = std::chrono::high_resolution_clock::now();
+        const auto end_time = std::chrono::high_resolution_clock::now();
         return std::chrono::duration<double, std::milli>(end_time - start_time_).count();
     }
 
@@ -160,10 +160,10 @@ FilterData FDNAnalyzer::GetFilterData()
     if (analysis_flags_.test(static_cast<size_t>(FDNAnalysisType::FilterResponse)))
     {
         const Stopwatch stopwatch;
-        filter_freq_bins_.resize(kFilterNFFT / 2 + 1);
+        filter_freq_bins_.resize((kFilterNFFT / 2) + 1);
         for (size_t i = 0; i < filter_freq_bins_.size(); ++i)
         {
-            filter_freq_bins_[i] = static_cast<float>(i) * samplerate_ / kFilterNFFT;
+            filter_freq_bins_[i] = (static_cast<float>(i) * samplerate_) / kFilterNFFT;
         }
 
         filter_mag_responses_.clear();
@@ -176,14 +176,14 @@ FilterData FDNAnalyzer::GetFilterData()
 
             const uint32_t kFilterCount = filter_bank->InputChannelCount();
 
-            std::vector<float> impulse(kFilterNFFT * kFilterCount, 0.0f);
+            std::vector<float> impulse((kFilterNFFT * kFilterCount), 0.0f);
             // Create an impulse for each filter
             for (uint32_t i = 0; i < kFilterCount; ++i)
             {
-                impulse[i * kFilterNFFT] = 1.0f;
+                impulse[(i * kFilterNFFT)] = 1.0f;
             }
 
-            std::vector<float> output(kFilterNFFT * kFilterCount, 0.0f);
+            std::vector<float> output((kFilterNFFT * kFilterCount), 0.0f);
 
             const sfFDN::AudioBuffer input_buffer(kFilterNFFT, kFilterCount, impulse);
             sfFDN::AudioBuffer output_buffer(kFilterNFFT, kFilterCount, output);
