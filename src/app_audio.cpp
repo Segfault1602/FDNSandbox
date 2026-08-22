@@ -43,8 +43,9 @@ void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, 
 }
 } // namespace
 
-void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_size, size_t num_channels)
+void FDNToolboxApp::AudioCallback(AudioCallbackArgs callback_args)
 {
+    const auto [output_buffer, frame_size, num_channels] = callback_args;
     if (frame_size != kSystemBlockSize)
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Frame size mismatch: expected {}, got {}", kSystemBlockSize,
@@ -72,8 +73,8 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
     }
 
     audio_file_manager_->process_block(input_data, kSystemBlockSize, 1);
-    const AudioProcessingTimes processing_times =
-        ProcessAudioEngines(input_data, fdn_output_data, convolution_output_data);
+    const AudioProcessingTimes processing_times = ProcessAudioEngines(
+        {.input = input_data, .fdn_output = fdn_output_data, .convolution_output = convolution_output_data});
     ClearUnstableFDN(fdn_output_data);
 
     const int reverb_type = reverb_engine_.load();
@@ -100,7 +101,7 @@ void FDNToolboxApp::AudioCallback(std::span<float> output_buffer, size_t frame_s
     WriteOutput(output_buffer, output_data, num_channels);
 
     const int64_t duration = reverb_type == kFDN_REVERB ? processing_times.fdn_ns : processing_times.convolution_ns;
-    UpdateCpuUsage(duration, frame_size);
+    UpdateCpuUsage({.duration_ns = duration, .frame_size = frame_size});
 }
 
 void FDNToolboxApp::ApplyPendingFDNUpdates()
@@ -139,13 +140,11 @@ void FDNToolboxApp::AdoptPendingConvolutionReverb(size_t frame_size)
     active_convolution_reverb_.reset();
 }
 
-FDNToolboxApp::AudioProcessingTimes FDNToolboxApp::ProcessAudioEngines(std::span<float> input,
-                                                                       std::span<float> fdn_output,
-                                                                       std::span<float> convolution_output)
+FDNToolboxApp::AudioProcessingTimes FDNToolboxApp::ProcessAudioEngines(const AudioEngineBuffers& buffers)
 {
-    const sfFDN::AudioBuffer input_buffer(kSystemBlockSize, 1, input);
-    sfFDN::AudioBuffer fdn_output_buffer(kSystemBlockSize, 1, fdn_output);
-    sfFDN::AudioBuffer convolution_output_buffer(kSystemBlockSize, 1, convolution_output);
+    const sfFDN::AudioBuffer input_buffer(kSystemBlockSize, 1, buffers.input);
+    sfFDN::AudioBuffer fdn_output_buffer(kSystemBlockSize, 1, buffers.fdn_output);
+    sfFDN::AudioBuffer convolution_output_buffer(kSystemBlockSize, 1, buffers.convolution_output);
 
     const auto convolution_start = std::chrono::steady_clock::now();
     if (active_convolution_reverb_ != nullptr)
@@ -238,10 +237,11 @@ void FDNToolboxApp::WriteOutput(std::span<float> output_buffer, std::span<const 
     }
 }
 
-void FDNToolboxApp::UpdateCpuUsage(int64_t duration_ns, size_t frame_size)
+void FDNToolboxApp::UpdateCpuUsage(CpuUsageUpdate update)
 {
-    const float allowed_time = (1e9f / Settings::Instance().SampleRateAs<float>()) * static_cast<float>(frame_size);
-    const float cpu_usage = static_cast<float>(duration_ns) / allowed_time;
+    const float allowed_time =
+        (1e9f / Settings::Instance().SampleRateAs<float>()) * static_cast<float>(update.frame_size);
+    const float cpu_usage = static_cast<float>(update.duration_ns) / allowed_time;
     cpu_usage_sum_ -= cpu_usage_samples_[cpu_usage_sample_index_];
     cpu_usage_samples_[cpu_usage_sample_index_] = cpu_usage;
     cpu_usage_sum_ += cpu_usage;
@@ -249,11 +249,11 @@ void FDNToolboxApp::UpdateCpuUsage(int64_t duration_ns, size_t frame_size)
     cpu_usage_sample_count_ = std::min(cpu_usage_sample_count_ + 1, kCpuUsageWindowSize);
     fdn_cpu_usage_.store(cpu_usage_sum_ / static_cast<float>(cpu_usage_sample_count_), std::memory_order_relaxed);
 
-    if (std::cmp_less_equal(duration_ns, cpu_highwater_mark_ns_))
+    if (std::cmp_less_equal(update.duration_ns, cpu_highwater_mark_ns_))
     {
         return;
     }
-    cpu_highwater_mark_ns_ = static_cast<size_t>(duration_ns);
+    cpu_highwater_mark_ns_ = static_cast<size_t>(update.duration_ns);
     LOG_WARNING(Settings::Instance().GetLogger(), "New CPU highwater mark: {:.2f}%", cpu_usage * 100.f);
 }
 void FDNToolboxApp::DrawAudioPlayer()
@@ -604,7 +604,7 @@ void FDNToolboxApp::DrawAudioStreamControl()
     if (!audio_manager_->start_audio_stream(
             audio_stream_option::kOutput,
             [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
-                AudioCallback(output_buffer, frame_size, num_channels);
+                AudioCallback({.output_buffer = output_buffer, .frame_size = frame_size, .num_channels = num_channels});
             },
             kSystemBlockSize))
     {

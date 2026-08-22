@@ -92,7 +92,7 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
     if (!audio_manager_->start_audio_stream(
             audio_stream_option::kOutput,
             [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
-                AudioCallback(output_buffer, frame_size, num_channels);
+                AudioCallback({.output_buffer = output_buffer, .frame_size = frame_size, .num_channels = num_channels});
             },
             kSystemBlockSize))
     {

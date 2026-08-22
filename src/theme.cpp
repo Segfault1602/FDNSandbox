@@ -3,6 +3,7 @@
 #include "icons.h"
 
 #include <boost/dll/runtime_symbol_info.hpp>
+#include <imgui.h>
 #include <implot.h>
 
 #include <array>
@@ -107,14 +108,17 @@ void InitializeFonts()
     icon_config.PixelSnapH = true;
     icon_config.GlyphMinAdvanceX = 15.0f;
     icon_config.GlyphOffset = ImVec2(0.0f, 4.0f);
-    ImFont* fontaudio = io.Fonts->AddFontFromFileTTF(fontaudio_path.c_str(),
-                                                     kFontSizes[static_cast<size_t>(FontRole::Body)], &icon_config);
+    if (io.Fonts->AddFontFromFileTTF(fontaudio_path.c_str(), kFontSizes[static_cast<size_t>(FontRole::Body)],
+                                     &icon_config) == nullptr)
+    {
+        throw std::runtime_error("Failed to load application fonts from " + font_directory.string());
+    }
     ImFont* regular =
         io.Fonts->AddFontFromFileTTF(regular_path.c_str(), kFontSizes[static_cast<size_t>(FontRole::Description)]);
     ImFont* light =
         io.Fonts->AddFontFromFileTTF(light_path.c_str(), kFontSizes[static_cast<size_t>(FontRole::Metadata)]);
 
-    if (medium == nullptr || fontaudio == nullptr || regular == nullptr || light == nullptr)
+    if (medium == nullptr || regular == nullptr || light == nullptr)
     {
         throw std::runtime_error("Failed to load application fonts from " + font_directory.string());
     }

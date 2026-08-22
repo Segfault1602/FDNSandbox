@@ -118,9 +118,9 @@ bool FDNToolboxApp::DrawFDNConfigurator()
     }
 
     bool config_changed = false;
-    bool fdn_size_changed = false;
-    config_changed |= DrawStructureSection(random_seed, fdn_size_changed);
-    DrawVisualOverviewSection(fdn_size_changed, max_delay);
+    const StructureSectionResult structure_result = DrawStructureSection(random_seed);
+    config_changed |= structure_result.config_changed;
+    DrawVisualOverviewSection(structure_result.fdn_size_changed, max_delay);
     config_changed |= DrawInputStageSection();
     config_changed |= DrawDelayNetworkSection();
     config_changed |= DrawFeedbackMatrixSection();
@@ -132,23 +132,23 @@ bool FDNToolboxApp::DrawFDNConfigurator()
     return config_changed;
 }
 
-bool FDNToolboxApp::DrawStructureSection(uint32_t& random_seed, bool& fdn_size_changed)
+FDNToolboxApp::StructureSectionResult FDNToolboxApp::DrawStructureSection(uint32_t& random_seed)
 {
     if (!fdn_sandbox::theme::BeginSection("Structure", true))
     {
-        return false;
+        return {};
     }
 
+    StructureSectionResult result;
     fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
                                     fdn_sandbox::theme::ColorRole::TextSecondary,
                                     "Configure the network size, deterministic seed, and matrix orientation.");
-    bool config_changed = false;
     static bool random_seed_checkbox = false;
     ImGui::Checkbox("Random Seed", &random_seed_checkbox);
     if (random_seed_checkbox)
     {
         ImGui::SameLine();
-        config_changed |= ImGui::InputScalar("Seed", ImGuiDataType_U32, &random_seed, nullptr, nullptr, "%u");
+        result.config_changed |= ImGui::InputScalar("Seed", ImGuiDataType_U32, &random_seed, nullptr, nullptr, "%u");
     }
     else
     {
@@ -158,23 +158,23 @@ bool FDNToolboxApp::DrawStructureSection(uint32_t& random_seed, bool& fdn_size_c
     constexpr uint32_t kNMin = 4;
     constexpr uint32_t kNMax = 32;
     uint32_t fdn_size = fdn_config_.fdn_size;
-    fdn_size_changed =
+    result.fdn_size_changed =
         ImGui::SliderScalar("N", ImGuiDataType_U32, &fdn_size, &kNMin, &kNMax, nullptr, ImGuiSliderFlags_AlwaysClamp);
-    if (fdn_size_changed)
+    if (result.fdn_size_changed)
     {
         utils::ResizeFDNConfig(fdn_config_, fdn_size);
     }
-    config_changed |= fdn_size_changed;
+    result.config_changed |= result.fdn_size_changed;
     fdn_config_.fdn_size = fdn_size;
 
     static bool transpose = false;
     if (ImGui::Checkbox("Transpose", &transpose))
     {
         fdn_config_.transposed = transpose;
-        config_changed = true;
+        result.config_changed = true;
     }
     fdn_sandbox::theme::EndSection();
-    return config_changed;
+    return result;
 }
 
 void FDNToolboxApp::DrawVisualOverviewSection(bool fdn_size_changed, int max_delay)

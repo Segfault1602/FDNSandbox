@@ -221,8 +221,9 @@ bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain)
     return config_changed;
 }
 
-bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool& show_3band_designer)
+bool Draw3BandDesigner(ThreeBandDesignerData data, bool& show_3band_designer)
 {
+    const auto [t60s, frequencies] = data;
     if (!ImGui::Begin("3-Band Designer", &show_3band_designer))
     {
         ImGui::End();
@@ -382,9 +383,10 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
                                         // std::log10(frequencies.back() - 1.f), 256);
         const float nyquist_frequency = Settings::Instance().SampleRateAs<float>() * 0.5f;
         filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(nyquist_frequency), 512);
-        t60s_plot = utils::pchip(frequencies, t60s, frequencies_plot);
+        t60s_plot = utils::pchip(utils::PchipInput{.x = frequencies, .y = t60s, .xq = frequencies_plot});
 
-        gains = utils::T60ToGainsDb(t60s, kTestDelay, Settings::Instance().SampleRate());
+        gains = utils::T60ToGainsDb(utils::T60ToGainsDbInput{
+            .t60s = t60s, .delay = kTestDelay, .sample_rate = Settings::Instance().SampleRate()});
         gains_plot = gains;   // utils::pchip(frequencies, gains, frequencies_plot);
         point_changed = true; // Force initial plot update
     }
@@ -417,7 +419,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
         if (point_changed)
         {
-            t60s_plot = utils::pchip(frequencies, t60s, frequencies_plot);
+            t60s_plot = utils::pchip(utils::PchipInput{.x = frequencies, .y = t60s, .xq = frequencies_plot});
         }
 
         // Plot the RT60 values
@@ -448,7 +450,8 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
     if (point_changed)
     {
-        gains = utils::T60ToGainsDb(t60s, kTestDelay, Settings::Instance().SampleRate());
+        gains = utils::T60ToGainsDb(utils::T60ToGainsDbInput{
+            .t60s = t60s, .delay = kTestDelay, .sample_rate = Settings::Instance().SampleRate()});
         gains_plot = gains; // utils::pchip(frequencies, gains, frequencies_plot);
         std::vector<float> t60s_f(t60s.begin(), t60s.end());
 
@@ -1521,7 +1524,8 @@ bool DrawDelayFilterWidget(sfFDN::FDNConfig& config)
         }
         if (show_3band_designer)
         {
-            config_changed |= Draw3BandDesigner(t60s, frequencies, show_3band_designer);
+            config_changed |=
+                Draw3BandDesigner({.t60s = t60s, .frequencies = frequencies}, show_3band_designer);
         }
         ImGui::TreePop();
     }

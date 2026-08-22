@@ -9,6 +9,20 @@
 namespace utils
 {
 
+struct PchipInput
+{
+    std::span<const float> x;
+    std::span<const float> y;
+    std::span<const float> xq;
+};
+
+struct T60ToGainsDbInput
+{
+    std::span<const float> t60s;
+    uint32_t delay;
+    size_t sample_rate;
+};
+
 /**
  * @brief Check if a number is a power of two.
  *
@@ -57,7 +71,7 @@ std::vector<T> Linspace(T start, T stop, size_t num);
  * @param xq The x-coordinates of the query points.
  * @return A vector containing the interpolated values.
  */
-std::vector<float> pchip(std::span<const float> x, std::span<const float> y, std::span<const float> xq);
+std::vector<float> pchip(PchipInput input);
 
 /**
  * @brief Compute the absolute value of the frequency response.
@@ -78,9 +92,9 @@ std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std:
  */
 bool WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate);
 
-uint32_t GetChannelCountFromAudioFile(const std::string_view filename);
+uint32_t GetChannelCountFromAudioFile(std::string_view filename);
 
-std::vector<float> ReadAudioFile(const std::string_view filename, uint32_t channel);
+std::vector<float> ReadAudioFile(std::string_view filename, uint32_t channel);
 
 std::array<std::array<float, 6>, 10> GetOctaveBandsSOS();
 
@@ -95,9 +109,7 @@ sfFDN::AttenuationFilterBankOptions FindAttenuationFilterBankOptions(sfFDN::FDNC
 void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig& config,
                                          const sfFDN::AttenuationFilterBankOptions& new_options);
 
-std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate);
-
-std::vector<float> ComputeRMS(std::span<const float> buffer, uint32_t block_size, uint32_t hop_size);
+std::vector<float> T60ToGainsDb(T60ToGainsDbInput input);
 
 struct Span2D
 {
@@ -105,7 +117,7 @@ struct Span2D
     size_t rows;
     size_t cols;
 
-    float& operator()(size_t i, size_t j)
+    float& operator()(size_t i, size_t j) const
     {
         return data[(i * cols) + j];
     }

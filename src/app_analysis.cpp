@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <numbers>
 #include <span>
 #include <string>
@@ -144,8 +145,11 @@ void DrawSpectrumSeries(const fdn_analysis::SpectrumData& data, SpectrumUiState&
         state.show_rir ? fdn_sandbox::plot_ui::SeriesRole::Reference : fdn_sandbox::plot_ui::SeriesRole::Fdn;
     const bool frequency_scale_changed = state.previous_logarithmic_frequency != state.logarithmic_frequency;
     fdn_sandbox::plot_ui::SetupFrequencyAxis(
-        ImAxis_X1, state.logarithmic_frequency, data.frequency_bins.back(), ImPlotAxisFlags_None,
-        plot_mode_changed || frequency_scale_changed ? ImPlotCond_Always : ImPlotCond_Once);
+        {.axis = ImAxis_X1,
+         .logarithmic = state.logarithmic_frequency,
+         .nyquist = data.frequency_bins.back(),
+         .flags = ImPlotAxisFlags_None,
+         .limits_condition = plot_mode_changed || frequency_scale_changed ? ImPlotCond_Always : ImPlotCond_Once});
     state.previous_logarithmic_frequency = state.logarithmic_frequency;
     ImPlot::SetupAxis(ImAxis_Y1, "Magnitude (dB)");
     ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
@@ -166,8 +170,10 @@ void DrawSpectrumSeries(const fdn_analysis::SpectrumData& data, SpectrumUiState&
     {
         const size_t count = std::min(data.peaks_freqs.size(), data.peaks.size());
         const float marker_size = state.mode == SpectrumPlotMode::Peaks ? 2.5f : 3.0f;
-        ImPlot::PlotScatter("Peaks", data.peaks_freqs.data(), data.peaks.data(), ToImPlotCount(count),
-                            fdn_sandbox::plot_ui::MarkerSpec(series_role, ImPlotMarker_Circle, marker_size, 1.0f));
+        ImPlot::PlotScatter(
+            "Peaks", data.peaks_freqs.data(), data.peaks.data(), ToImPlotCount(count),
+            fdn_sandbox::plot_ui::MarkerSpec(
+                {.role = series_role, .marker = ImPlotMarker_Circle, .marker_size = marker_size, .weight = 1.0f}));
     }
 }
 
@@ -621,7 +627,8 @@ float FindMinimumMagnitude(const fdn_analysis::FilterData& data)
 
 void SetupFilterPhaseAxes()
 {
-    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
+    fdn_sandbox::plot_ui::SetupFrequencyAxis(
+        {.axis = ImAxis_X1, .logarithmic = true, .nyquist = Settings::Instance().SampleRateAs<double>() / 2.0});
     ImPlot::SetupAxis(ImAxis_Y1, "Phase (rad)");
     ImPlot::SetupAxisLimits(ImAxis_Y1, -std::numbers::pi, std::numbers::pi, ImPlotCond_Once);
     fdn_sandbox::plot_ui::DrawHorizontalGuide(
@@ -639,7 +646,8 @@ void DrawAttenuationMagnitude(const fdn_analysis::FilterData& data, float minimu
         return;
     }
     ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
-    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
+    fdn_sandbox::plot_ui::SetupFrequencyAxis(
+        {.axis = ImAxis_X1, .logarithmic = true, .nyquist = Settings::Instance().SampleRateAs<double>() / 2.0});
     ImPlot::SetupAxis(ImAxis_Y1, "Magnitude (dB)");
     ImPlot::SetupAxisLimits(ImAxis_Y1, std::min(-60.0f, minimum_magnitude * 1.2f), 5.0, ImPlotCond_Once);
     ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -120.0, 20.0);
@@ -654,7 +662,7 @@ void DrawAttenuationMagnitude(const fdn_analysis::FilterData& data, float minimu
         const auto response = data.mag_responses[i];
         const std::string name = "Delay filter " + std::to_string(i + 1);
         ImPlotSpec spec{};
-        spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i);
+        spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor({.index = i});
         spec.LineWeight = 1.4f;
         ImPlot::PlotLine(name.c_str(), data.frequency_bins.data(), response.data(),
                          ToImPlotCount(std::min(data.frequency_bins.size(), response.size())), spec);
@@ -679,7 +687,7 @@ void DrawAttenuationPhase(const fdn_analysis::FilterData& data)
         const auto response = data.phase_responses[i];
         const std::string name = "Delay filter " + std::to_string(i + 1);
         ImPlotSpec spec{};
-        spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i);
+        spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor({.index = i});
         spec.LineWeight = 1.4f;
         ImPlot::PlotLine(name.c_str(), data.frequency_bins.data(), response.data(),
                          ToImPlotCount(std::min(data.frequency_bins.size(), response.size())), spec);
@@ -708,7 +716,8 @@ void DrawToneCorrectionMagnitude(const fdn_analysis::FilterData& data)
     {
         return;
     }
-    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
+    fdn_sandbox::plot_ui::SetupFrequencyAxis(
+        {.axis = ImAxis_X1, .logarithmic = true, .nyquist = Settings::Instance().SampleRateAs<double>() / 2.0});
     ImPlot::SetupAxis(ImAxis_Y1, "Magnitude (dB)");
     ImPlot::SetupAxisLimits(ImAxis_Y1, -60.0, 10.0, ImPlotCond_Once);
     ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -120.0, 30.0);
@@ -794,6 +803,18 @@ struct EnergyDecayUiState
     std::array<bool, kOctaveBandNames.size()> octave_band_visibility{};
 };
 
+struct EnergyDecayDataPair
+{
+    std::reference_wrapper<const fdn_analysis::EnergyDecayCurveData> fdn_data;
+    std::reference_wrapper<const fdn_analysis::EnergyDecayCurveData> rir_data;
+};
+
+struct EnergyDecayTimePair
+{
+    std::span<const float> fdn_time;
+    std::span<const float> rir_time;
+};
+
 bool DrawEnergyDecayControls(EnergyDecayUiState& state, bool has_rir)
 {
     ImGui::DragFloatRange2("T60 decay range", &state.decay_db_start, &state.decay_db_end, 1.0, 0, 60);
@@ -849,7 +870,7 @@ void DrawRirOctaveEnergyDecay(size_t band, const fdn_analysis::EnergyDecayCurveD
         return;
     }
     const size_t stride = std::max<size_t>(1, point_count / 2048);
-    spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(band, 0.55f);
+    spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor({.index = band, .alpha = 0.55f});
     spec.LineWeight = 1.0f;
     spec.Stride = static_cast<int>(stride * sizeof(float));
     const std::string label = "RIR " + std::string(kOctaveBandNames[band]);
@@ -857,27 +878,28 @@ void DrawRirOctaveEnergyDecay(size_t band, const fdn_analysis::EnergyDecayCurveD
                      ToImPlotCount(((point_count - 1) / stride) + 1), spec);
 }
 
-void DrawOctaveEnergyDecay(const EnergyDecayUiState& state, const fdn_analysis::EnergyDecayCurveData& fdn_data,
-                           const fdn_analysis::EnergyDecayCurveData& rir_data, std::span<const float> fdn_time,
-                           std::span<const float> rir_time)
+void DrawOctaveEnergyDecay(const EnergyDecayUiState& state, const EnergyDecayDataPair& decay_data,
+                           const EnergyDecayTimePair& time_data)
 {
+    const fdn_analysis::EnergyDecayCurveData& fdn_data = decay_data.fdn_data.get();
+    const fdn_analysis::EnergyDecayCurveData& rir_data = decay_data.rir_data.get();
     for (size_t band = 0; band < kOctaveBandNames.size(); ++band)
     {
         if (!state.octave_band_visibility[band] || fdn_data.edc_octaves[band].empty())
         {
             continue;
         }
-        const size_t point_count = std::min(fdn_time.size(), fdn_data.edc_octaves[band].size());
+        const size_t point_count = std::min(time_data.fdn_time.size(), fdn_data.edc_octaves[band].size());
         const size_t stride = std::max<size_t>(1, point_count / 2048);
         ImPlotSpec spec{};
-        spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(band);
+        spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor({.index = band});
         spec.LineWeight = 1.5f;
         spec.Stride = static_cast<int>(stride * sizeof(float));
-        ImPlot::PlotLine(kOctaveBandNames[band], fdn_time.data(), fdn_data.edc_octaves[band].data(),
+        ImPlot::PlotLine(kOctaveBandNames[band], time_data.fdn_time.data(), fdn_data.edc_octaves[band].data(),
                          ToImPlotCount(((point_count - 1) / stride) + 1), spec);
         if (state.show_rir)
         {
-            DrawRirOctaveEnergyDecay(band, rir_data, rir_time, spec);
+            DrawRirOctaveEnergyDecay(band, rir_data, time_data.rir_time, spec);
         }
     }
 }
@@ -918,7 +940,8 @@ void DrawEnergyDecayPlot(const EnergyDecayUiState& state, bool show_octave_bands
 
     if (show_octave_bands)
     {
-        DrawOctaveEnergyDecay(state, fdn_data, rir_data, fdn_time, rir_time);
+        DrawOctaveEnergyDecay(state, {.fdn_data = std::cref(fdn_data), .rir_data = std::cref(rir_data)},
+                              {.fdn_time = fdn_time, .rir_time = rir_time});
     }
     else
     {
@@ -1212,7 +1235,8 @@ void FDNToolboxApp::DrawT60s()
     const ImPlotFlags plot_flags = show_rir ? ImPlotFlags_None : ImPlotFlags_NoLegend;
     if (ImPlot::BeginPlot("RT60s", ImVec2(-1, -1), plot_flags))
     {
-        fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
+        fdn_sandbox::plot_ui::SetupFrequencyAxis(
+            {.axis = ImAxis_X1, .logarithmic = true, .nyquist = Settings::Instance().SampleRateAs<double>() / 2.0});
         ImPlot::SetupAxis(ImAxis_Y1, "RT60 (s)");
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0f, 3.0f, ImPlotCond_Once);
 
@@ -1226,10 +1250,11 @@ void FDNToolboxApp::DrawT60s()
         else
         {
             const size_t fdn_t60_count = std::min(t60_data.octave_band_frequencies.size(), t60_data.t60_octaves.size());
-            ImPlot::PlotLine(
-                "FDN RT60", t60_data.octave_band_frequencies.data(), t60_data.t60_octaves.data(),
-                ToImPlotCount(fdn_t60_count),
-                fdn_sandbox::plot_ui::MarkerSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn, ImPlotMarker_Circle, 5.0f));
+            ImPlot::PlotLine("FDN RT60", t60_data.octave_band_frequencies.data(), t60_data.t60_octaves.data(),
+                             ToImPlotCount(fdn_t60_count),
+                             fdn_sandbox::plot_ui::MarkerSpec({.role = fdn_sandbox::plot_ui::SeriesRole::Fdn,
+                                                               .marker = ImPlotMarker_Circle,
+                                                               .marker_size = 5.0f}));
 
             if (show_rir)
             {
@@ -1238,10 +1263,12 @@ void FDNToolboxApp::DrawT60s()
                 {
                     const size_t rir_t60_count =
                         std::min(rir_t60_data.octave_band_frequencies.size(), rir_t60_data.t60_octaves.size());
-                    ImPlot::PlotLine("RIR RT60", rir_t60_data.octave_band_frequencies.data(),
-                                     rir_t60_data.t60_octaves.data(), ToImPlotCount(rir_t60_count),
-                                     fdn_sandbox::plot_ui::MarkerSpec(fdn_sandbox::plot_ui::SeriesRole::Reference,
-                                                                      ImPlotMarker_Square, 5.0f));
+                    ImPlot::PlotLine(
+                        "RIR RT60", rir_t60_data.octave_band_frequencies.data(), rir_t60_data.t60_octaves.data(),
+                        ToImPlotCount(rir_t60_count),
+                        fdn_sandbox::plot_ui::MarkerSpec({.role = fdn_sandbox::plot_ui::SeriesRole::Reference,
+                                                          .marker = ImPlotMarker_Square,
+                                                          .marker_size = 5.0f}));
                 }
             }
         }

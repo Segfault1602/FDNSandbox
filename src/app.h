@@ -29,6 +29,8 @@ class FDNToolboxApp
 
     FDNToolboxApp(const FDNToolboxApp&) = delete;
     FDNToolboxApp& operator=(const FDNToolboxApp&) = delete;
+    FDNToolboxApp(FDNToolboxApp&&) = delete;
+    FDNToolboxApp& operator=(FDNToolboxApp&&) = delete;
 
     void loop();
 
@@ -41,7 +43,7 @@ class FDNToolboxApp
     void DrawCompactOutputMeter();
     void UpdateUiTelemetry();
     void ProcessNotifications();
-    void BuildDefaultDockLayout(ImGuiID dockspace_id);
+    static void BuildDefaultDockLayout(ImGuiID dockspace_id);
     void DrawAudioDeviceGUI();
     bool DrawFDNConfigurator();
     bool DrawFDNExtras(bool force_update);
@@ -63,7 +65,14 @@ class FDNToolboxApp
 
     void UpdateFDN();
 
-    void AudioCallback(std::span<float> output_buffer, size_t frame_size, size_t num_channels);
+    struct AudioCallbackArgs
+    {
+        std::span<float> output_buffer;
+        size_t frame_size;
+        size_t num_channels;
+    };
+
+    void AudioCallback(AudioCallbackArgs callback_args);
     void ApplyPendingFDNUpdates();
     void AdoptPendingConvolutionReverb(size_t frame_size);
 
@@ -71,6 +80,13 @@ class FDNToolboxApp
     {
         int64_t convolution_ns = 0;
         int64_t fdn_ns = 0;
+    };
+
+    struct AudioEngineBuffers
+    {
+        std::span<float> input;
+        std::span<float> fdn_output;
+        std::span<float> convolution_output;
     };
 
     struct PendingFDNUpdate
@@ -90,13 +106,17 @@ class FDNToolboxApp
         bool clipping_warning_displayed = false;
     };
 
-    AudioProcessingTimes ProcessAudioEngines(std::span<float> input, std::span<float> fdn_output,
-                                             std::span<float> convolution_output);
+    AudioProcessingTimes ProcessAudioEngines(const AudioEngineBuffers& buffers);
     void ClearUnstableFDN(std::span<const float> fdn_output);
     std::pair<float, float> PrepareMix(int reverb_type, std::span<float> input);
     void MixAndMeter(std::span<float> output, std::span<const float> input, float gain, float wet_mix, float dry_mix);
     static void WriteOutput(std::span<float> output_buffer, std::span<const float> output, size_t num_channels);
-    void UpdateCpuUsage(int64_t duration_ns, size_t frame_size);
+    struct CpuUsageUpdate
+    {
+        int64_t duration_ns;
+        size_t frame_size;
+    };
+    void UpdateCpuUsage(CpuUsageUpdate update);
 
     void DrawTransportControls(int selected_audio_file);
     void PlaySelectedAudioFile(int selected_audio_file);
@@ -111,7 +131,7 @@ class FDNToolboxApp
     void DrawOptionsMenu(bool& show_audio_config_window);
     void DrawViewMenu();
     void DrawConfigurationSwitcher();
-    void DrawFrameRateStatus() const;
+    static void DrawFrameRateStatus();
     void DrawAudioConfigurationWindow(bool& show_audio_config_window);
     void ProcessFileBrowserSelections();
     void SaveSelectedImpulseResponse();
@@ -119,7 +139,13 @@ class FDNToolboxApp
     void SaveSelectedConfiguration();
     void LoadSelectedRIR();
 
-    bool DrawStructureSection(uint32_t& random_seed, bool& fdn_size_changed);
+    struct StructureSectionResult
+    {
+        bool config_changed = false;
+        bool fdn_size_changed = false;
+    };
+
+    StructureSectionResult DrawStructureSection(uint32_t& random_seed);
     void DrawVisualOverviewSection(bool fdn_size_changed, int max_delay);
     bool DrawInputStageSection();
     bool DrawDelayNetworkSection();
@@ -207,7 +233,7 @@ class FDNToolboxApp
         Mel
     } spectrogram_type_ = SpectrogramType::STFT;
 
-    std::string loaded_rir_filename_{};
+    std::string loaded_rir_filename_;
     fdn_analysis::IRAnalyzer rir_analyzer_;
 
     std::unique_ptr<sfFDN::PartitionedConvolver> convolution_reverb_;

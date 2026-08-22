@@ -60,14 +60,6 @@ bool isPrime(uint32_t n)
     return true;
 }
 
-float ComputeRMSImpl(std::span<const float> buffer)
-{
-    const auto buffer_length = static_cast<Eigen::Index>(buffer.size());
-    const Eigen::Map<const Eigen::ArrayXf> buffer_map(buffer.data(), buffer_length);
-    const float rms = std::sqrt(buffer_map.square().mean());
-    return rms;
-}
-
 } // namespace
 
 namespace utils
@@ -110,15 +102,15 @@ std::vector<T> Linspace(T start, T stop, size_t num)
     return result;
 }
 
-std::vector<float> pchip(std::span<const float> x, std::span<const float> y, std::span<const float> xq)
+std::vector<float> pchip(PchipInput input)
 {
-    std::vector<float> x_copy(x.begin(), x.end());
-    std::vector<float> y_copy(y.begin(), y.end());
+    std::vector<float> x_copy(input.x.begin(), input.x.end());
+    std::vector<float> y_copy(input.y.begin(), input.y.end());
     auto spline = boost::math::interpolators::pchip(std::move(x_copy), std::move(y_copy));
 
     std::vector<float> yq;
-    yq.reserve(xq.size());
-    for (const float i : xq)
+    yq.reserve(input.xq.size());
+    for (const float i : input.xq)
     {
         yq.push_back(spline(i));
     }
@@ -200,7 +192,7 @@ bool WriteAudioFile(const std::string& filename, std::span<const float> audio_da
     return true;
 }
 
-uint32_t GetChannelCountFromAudioFile(const std::string_view filename)
+uint32_t GetChannelCountFromAudioFile(std::string_view filename)
 {
     const std::string filename_string(filename);
     SF_INFO sf_info{};
@@ -216,7 +208,7 @@ uint32_t GetChannelCountFromAudioFile(const std::string_view filename)
     return sf_info.channels;
 }
 
-std::vector<float> ReadAudioFile(const std::string_view filename, uint32_t channel)
+std::vector<float> ReadAudioFile(std::string_view filename, uint32_t channel)
 {
     const std::string filename_string(filename);
     SF_INFO sf_info{};
@@ -385,29 +377,17 @@ void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig& config,
     }
 }
 
-std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, size_t sample_rate)
+std::vector<float> T60ToGainsDb(T60ToGainsDbInput input)
 {
-    std::vector<float> gains(t60s.size(), 0.0f);
-    for (size_t i = 0; i < t60s.size(); ++i)
+    std::vector<float> gains(input.t60s.size(), 0.0f);
+    for (size_t i = 0; i < input.t60s.size(); ++i)
     {
-        const auto sample_rate_float = static_cast<float>(sample_rate);
-        gains[i] = -60.f / (t60s[i] * sample_rate_float);
-        gains[i] *= static_cast<float>(delay);
+        const auto sample_rate_float = static_cast<float>(input.sample_rate);
+        gains[i] = -60.f / (input.t60s[i] * sample_rate_float);
+        gains[i] *= static_cast<float>(input.delay);
     }
 
     return gains;
-}
-
-std::vector<float> ComputeRMS(std::span<const float> buffer, uint32_t block_size, uint32_t hop_size)
-{
-    std::vector<float> rms_values;
-    for (size_t i = 0; i + block_size <= buffer.size(); i += hop_size)
-    {
-        auto block = buffer.subspan(i, block_size);
-        const float rms = ComputeRMSImpl(block);
-        rms_values.push_back(rms);
-    }
-    return rms_values;
 }
 
 void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size)

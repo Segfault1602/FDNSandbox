@@ -34,8 +34,9 @@ static void glfw_error_callback(int error, const char* description)
     }
 }
 
-int main(int, char**)
+int main()
 {
+
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -60,12 +61,12 @@ int main(int, char**)
 
     // Create window with graphics context
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
+    const float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
     GLFWwindow* window = glfwCreateWindow((int)(1880 * main_scale), (int)(1400 * main_scale), "FDN Sandbox", nullptr, nullptr);
     if (window == nullptr)
         return 1;
 
-    id <MTLDevice> device = MTLCreateSystemDefaultDevice();
+    const id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (device == nil)
     {
         glfwDestroyWindow(window);
@@ -73,7 +74,7 @@ int main(int, char**)
         return 1;
     }
 
-    id <MTLCommandQueue> commandQueue = [device newCommandQueue];
+    const id<MTLCommandQueue> commandQueue = [device newCommandQueue];
     if (commandQueue == nil)
     {
         [device release];
@@ -86,14 +87,14 @@ int main(int, char**)
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplMetal_Init(device);
 
-    NSWindow *nswin = glfwGetCocoaWindow(window);
-    CAMetalLayer *layer = [CAMetalLayer layer];
+    NSWindow* const nswin = glfwGetCocoaWindow(window);
+    CAMetalLayer* const layer = [CAMetalLayer layer];
     layer.device = device;
     layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     nswin.contentView.layer = layer;
     nswin.contentView.wantsLayer = YES;
 
-    MTLRenderPassDescriptor *renderPassDescriptor = [MTLRenderPassDescriptor new];
+    MTLRenderPassDescriptor* const renderPassDescriptor = [MTLRenderPassDescriptor new];
     if (renderPassDescriptor == nil)
     {
         ImGui_ImplMetal_Shutdown();
@@ -110,7 +111,7 @@ int main(int, char**)
 
     // Our state
     const ImVec4& app_background = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
-    float clear_color[4] = {app_background.x, app_background.y, app_background.z, app_background.w};
+    const float clear_color[4] = {app_background.x, app_background.y, app_background.z, app_background.w};
 
     // Set openmp threads to 4 because otherwise it might try to use the economy cores
     omp_set_num_threads(4);
@@ -133,14 +134,14 @@ int main(int, char**)
             int height = 0;
             glfwGetFramebufferSize(window, &width, &height);
             layer.drawableSize = CGSizeMake(width, height);
-            id<CAMetalDrawable> drawable = [layer nextDrawable];
+            const id<CAMetalDrawable> drawable = [layer nextDrawable];
 
-            id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+            const id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
             renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(clear_color[0] * clear_color[3], clear_color[1] * clear_color[3], clear_color[2] * clear_color[3], clear_color[3]);
             renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
             renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
             renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-            id <MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+            const id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
             [renderEncoder pushDebugGroup:@"ImGui demo"];
 
             // Start the Dear ImGui frame

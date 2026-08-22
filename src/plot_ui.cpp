@@ -62,33 +62,32 @@ ImPlotSpec LineSpec(SeriesRole role, float weight)
     return spec;
 }
 
-ImPlotSpec MarkerSpec(SeriesRole role, ImPlotMarker marker, float marker_size, float weight)
+ImPlotSpec MarkerSpec(MarkerSpecOptions options)
 {
-    ImPlotSpec spec = LineSpec(role, weight);
-    spec.Marker = marker;
-    spec.MarkerSize = marker_size;
+    ImPlotSpec spec = LineSpec(options.role, options.weight);
+    spec.Marker = options.marker;
+    spec.MarkerSize = options.marker_size;
     spec.MarkerLineColor = spec.LineColor;
     spec.MarkerFillColor = spec.LineColor;
     return spec;
 }
 
-void SetupFrequencyAxis(ImAxis axis, bool logarithmic, double nyquist, ImPlotAxisFlags flags,
-                        ImPlotCond limits_condition)
+void SetupFrequencyAxis(const FrequencyAxisOptions& options)
 {
-    const double max_frequency = std::max(20.0, nyquist);
-    ImPlot::SetupAxis(axis, "Frequency (Hz)", flags);
-    ImPlot::SetupAxisScale(axis, logarithmic ? ImPlotScale_Log10 : ImPlotScale_Linear);
-    ImPlot::SetupAxisLimits(axis, logarithmic ? 20.0 : 0.0, max_frequency, limits_condition);
-    ImPlot::SetupAxisLimitsConstraints(axis, logarithmic ? 10.0 : 0.0, max_frequency);
+    const double max_frequency = std::max(20.0, options.nyquist);
+    ImPlot::SetupAxis(options.axis, "Frequency (Hz)", options.flags);
+    ImPlot::SetupAxisScale(options.axis, options.logarithmic ? ImPlotScale_Log10 : ImPlotScale_Linear);
+    ImPlot::SetupAxisLimits(options.axis, options.logarithmic ? 20.0 : 0.0, max_frequency, options.limits_condition);
+    ImPlot::SetupAxisLimitsConstraints(options.axis, options.logarithmic ? 10.0 : 0.0, max_frequency);
 
-    if (logarithmic)
+    if (options.logarithmic)
     {
         size_t tick_count = 0;
         while (tick_count < kAudioFrequencyTicks.size() && kAudioFrequencyTicks[tick_count] <= max_frequency)
         {
             ++tick_count;
         }
-        ImPlot::SetupAxisTicks(axis, kAudioFrequencyTicks.data(), static_cast<int>(tick_count),
+        ImPlot::SetupAxisTicks(options.axis, kAudioFrequencyTicks.data(), static_cast<int>(tick_count),
                                kAudioFrequencyLabels.data(), false);
     }
 }
@@ -130,10 +129,10 @@ ImPlotColormap OctaveBandColormap()
     return colormap;
 }
 
-ImVec4 OctaveBandColor(size_t index, float alpha)
+ImVec4 OctaveBandColor(OctaveBandColorOptions options)
 {
-    ImVec4 color = ToImVec4(kOctaveBandColors.at(index % kOctaveBandColors.size()));
-    color.w = alpha;
+    ImVec4 color = ToImVec4(kOctaveBandColors.at(options.index % kOctaveBandColors.size()));
+    color.w = options.alpha;
     return color;
 }
 } // namespace fdn_sandbox::plot_ui

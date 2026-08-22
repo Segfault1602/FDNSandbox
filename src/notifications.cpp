@@ -6,6 +6,7 @@
 #include "imgui_internal.h"
 
 #include <algorithm>
+#include <ranges>
 #include <utility>
 
 namespace fdn_sandbox
@@ -42,13 +43,25 @@ void NotificationCenter::Push(NotificationSeverity severity, std::string id, std
         existing->expires_at = expires_at;
         return;
     }
-    notifications_.push_back(Notification{severity, std::move(id), std::move(title), std::move(message), expires_at});
+    notifications_.push_back(Notification{
+        .severity = severity,
+        .id = std::move(id),
+        .title = std::move(title),
+        .message = std::move(message),
+        .expires_at = expires_at,
+    });
 }
 
 void NotificationCenter::SetCritical(NotificationSeverity severity, std::string id, std::string title,
                                      std::string message)
 {
-    critical_notification_ = Notification{severity, std::move(id), std::move(title), std::move(message), 0.0};
+    critical_notification_ = Notification{
+        .severity = severity,
+        .id = std::move(id),
+        .title = std::move(title),
+        .message = std::move(message),
+        .expires_at = 0.0,
+    };
 }
 
 void NotificationCenter::ClearCritical(std::string_view id)
@@ -66,29 +79,29 @@ void NotificationCenter::DrawToasts()
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     float y_offset = 12.0f;
-    for (auto it = notifications_.rbegin(); it != notifications_.rend(); ++it)
+    for (const auto& notification : std::views::reverse(notifications_))
     {
-        const float alpha = static_cast<float>(std::clamp((it->expires_at - now) / 0.3, 0.0, 1.0));
+        const float alpha = static_cast<float>(std::clamp((notification.expires_at - now) / 0.3, 0.0, 1.0));
         ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 12.0f,
                                        viewport->WorkPos.y + viewport->WorkSize.y - y_offset),
                                 ImGuiCond_Always, ImVec2(1.0f, 1.0f));
         ImGui::SetNextWindowSizeConstraints(ImVec2(280.0f, 0.0f), ImVec2(380.0f, 160.0f));
         ImGui::SetNextWindowBgAlpha(0.94f * alpha);
 
-        const std::string window_id = "##Toast_" + it->id;
+        const std::string window_id = "##Toast_" + notification.id;
         constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                            ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
                                            ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing;
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
         ImGui::Begin(window_id.c_str(), nullptr, flags);
-        const ImVec4 color = SeverityColor(it->severity);
+        const ImVec4 color = SeverityColor(notification.severity);
         const ImVec2 window_pos = ImGui::GetWindowPos();
         ImGui::GetWindowDrawList()->AddRectFilled(window_pos,
                                                   ImVec2(window_pos.x + 4.0f, window_pos.y + ImGui::GetWindowHeight()),
                                                   ImGui::ColorConvertFloat4ToU32(color));
-        ImGui::TextColored(color, "%s %s", it->severity == NotificationSeverity::Error ? icons::Warning : "",
-                           it->title.c_str());
-        ImGui::TextWrapped("%s", it->message.c_str());
+        ImGui::TextColored(color, "%s %s", notification.severity == NotificationSeverity::Error ? icons::Warning : "",
+                           notification.title.c_str());
+        ImGui::TextWrapped("%s", notification.message.c_str());
         y_offset += ImGui::GetWindowHeight() + 8.0f;
         ImGui::End();
         ImGui::PopStyleVar();

@@ -476,7 +476,7 @@ void OptimizationGUI::DrawProgressLossPlot(const fdn_optimization::OptimizationP
     {
         const std::vector<double>& component_history = progress.loss_history[i];
         ImPlotSpec component_spec{};
-        component_spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
+        component_spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor({.index = i - 1});
         component_spec.LineWeight = 1.1f;
         ImPlot::PlotLine(("Component " + std::to_string(i)).c_str(), component_history.data(),
                          static_cast<int>(component_history.size()), 1.0, 0.0, component_spec);
@@ -499,7 +499,8 @@ bool OptimizationGUI::HandleOptimizationResult(sfFDN::FDNConfig& fdn_config)
     const auto status = fdn_optimizer_.GetStatus();
     if (status == fdn_optimization::OptimizationStatus::Failed)
     {
-        pending_event_ = Event{EventType::Failed, "Optimization failed. Check the application log for details."};
+        pending_event_ =
+            Event{.type = EventType::Failed, .message = "Optimization failed. Check the application log for details."};
         fdn_optimizer_.ResetStatus();
         return false;
     }
@@ -524,11 +525,12 @@ bool OptimizationGUI::HandleOptimizationResult(sfFDN::FDNConfig& fdn_config)
     }
 
     fdn_config = result.optimized_fdn_config;
-    pending_event_ = status == fdn_optimization::OptimizationStatus::Completed
-                         ? Event{EventType::Completed,
-                                 std::format("Completed in {:.2f} s after {} evaluations.",
-                                             result_summary_.elapsed_time_sec, result_summary_.evaluation_count)}
-                         : Event{EventType::Canceled, "Optimization was canceled."};
+    pending_event_ =
+        status == fdn_optimization::OptimizationStatus::Completed
+            ? Event{.type = EventType::Completed,
+                    .message = std::format("Completed in {:.2f} s after {} evaluations.",
+                                           result_summary_.elapsed_time_sec, result_summary_.evaluation_count)}
+            : Event{.type = EventType::Canceled, .message = "Optimization was canceled."};
     fdn_optimizer_.ResetStatus();
     return true;
 }
@@ -631,7 +633,7 @@ void OptimizationGUI::DrawLossSeries() const
         }
         else
         {
-            spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i - 1);
+            spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor({.index = i - 1});
             spec.LineWeight = 1.1f;
         }
         ImPlot::PlotLine(loss_history_.loss_names[i].c_str(), loss_history_.losses[i].data(),

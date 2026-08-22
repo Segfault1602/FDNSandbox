@@ -711,7 +711,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ThreeBandFilterOptions& config) const
 
     if (show_filter_designer)
     {
-        config_changed |= Draw3BandDesigner(config.t60s, config.freqs, show_filter_designer);
+        config_changed |= Draw3BandDesigner({.t60s = config.t60s, .frequencies = config.freqs}, show_filter_designer);
     }
 
     config.freqs[0] = std::clamp(config.freqs[0], 125.f, 8000.f);

@@ -69,6 +69,7 @@ FDNAnalyzer::FDNAnalyzer(uint32_t samplerate, quill::Logger* logger)
     : logger_(logger)
     , samplerate_(samplerate)
     , ir_analyzer_(samplerate, logger)
+    , impulse_response_size_samples_(samplerate)
 {
     // Initialize the impulse response size to a default value
     SetImpulseResponseSize(samplerate);
@@ -87,7 +88,7 @@ void FDNAnalyzer::SetImpulseResponseSize(uint32_t size_samples)
     analysis_flags_.set();
 }
 
-uint32_t FDNAnalyzer::GetImpulseResponseSize() const
+[[nodiscard]] uint32_t FDNAnalyzer::GetImpulseResponseSize() const
 {
     return impulse_response_size_samples_;
 }
@@ -130,7 +131,7 @@ std::span<const float> FDNAnalyzer::GetTimeData()
     return ir_analyzer_.GetTimeData();
 }
 
-bool FDNAnalyzer::IsClipping()
+[[nodiscard]] bool FDNAnalyzer::IsClipping() const
 {
     return is_clipping_;
 }

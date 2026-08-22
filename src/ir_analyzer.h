@@ -88,11 +88,11 @@ class IRAnalyzer
     IRAnalyzer(uint32_t samplerate, quill::Logger* logger);
 
     void SetImpulseResponse(std::vector<float>&& ir);
-    uint32_t GetImpulseResponseSize() const;
+    [[nodiscard]] uint32_t GetImpulseResponseSize() const;
 
     std::span<const float> GetImpulseResponse();
 
-    bool IsClipping() const;
+    [[nodiscard]] bool IsClipping() const;
     std::span<const float> GetTimeData();
 
     SpectrogramData GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale = false);
@@ -122,42 +122,42 @@ class IRAnalyzer
 
     std::vector<float> impulse_response_;
     std::vector<float> time_data_;
-    bool is_clipping_;
+    bool is_clipping_{false};
 
     std::vector<float> spectrogram_data_;
-    uint32_t spectrogram_bin_count_;
-    uint32_t spectrogram_frame_count_;
+    uint32_t spectrogram_bin_count_{0};
+    uint32_t spectrogram_frame_count_{0};
 
     std::vector<float> spectrum_data_;
     std::vector<float> frequency_bins_;
     std::vector<float> spectrum_peaks_;
     std::vector<float> peaks_freqs_;
-    float spectrum_early_rir_time_;
+    float spectrum_early_rir_time_{0.5f};
 
     std::vector<float> cepstrum_data_;
-    float cepstrum_early_rir_time_;
+    float cepstrum_early_rir_time_{0.5f};
 
     std::vector<float> autocorrelation_data_;
     std::vector<float> spectral_autocorrelation_data_;
-    float autocorrelation_early_rir_time_;
+    float autocorrelation_early_rir_time_{0.5f};
 
     std::vector<float> energy_decay_curve_;
     std::array<std::vector<float>, 9> edc_octaves_;
     std::vector<float> octave_band_frequencies_;
 
     std::vector<float> edr_data_;
-    uint32_t edr_bin_count_ = 0;
-    uint32_t edr_frame_count_ = 0;
-    uint32_t edr_hop_size_ = 512;
+    uint32_t edr_bin_count_{0};
+    uint32_t edr_frame_count_{0};
+    uint32_t edr_hop_size_{512};
 
     audio_utils::analysis::EstimateT60Results overall_t60_;
     std::vector<float> t60_octaves_;
 
     std::vector<float> echo_density_;
     std::vector<float> echo_density_indices_;
-    uint32_t echo_density_window_size_ms_;
-    uint32_t echo_density_hop_size_ms_;
-    float mixing_time_;
+    uint32_t echo_density_window_size_ms_{25};
+    uint32_t echo_density_hop_size_ms_{10};
+    float mixing_time_{0.0f};
 
     std::bitset<static_cast<size_t>(AnalysisType::AnalysisTypeCount)> analysis_flags_ = 0;
 };

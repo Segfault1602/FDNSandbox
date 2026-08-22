@@ -36,6 +36,11 @@ class OptimizationGUI
         std::string message;
     };
 
+    OptimizationGUI(const OptimizationGUI&) = delete;
+    OptimizationGUI& operator=(const OptimizationGUI&) = delete;
+    OptimizationGUI(OptimizationGUI&&) = delete;
+    OptimizationGUI& operator=(OptimizationGUI&&) = delete;
+
     OptimizationGUI(quill::Logger* logger);
     ~OptimizationGUI() = default;
 

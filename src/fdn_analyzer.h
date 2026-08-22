@@ -43,10 +43,10 @@ class FDNAnalyzer
     void SetFDN(std::unique_ptr<sfFDN::FDN> fdn);
 
     void SetImpulseResponseSize(uint32_t size_samples);
-    uint32_t GetImpulseResponseSize() const;
+    [[nodiscard]] uint32_t GetImpulseResponseSize() const;
 
     std::span<const float> GetImpulseResponse();
-    bool IsClipping();
+    [[nodiscard]] bool IsClipping() const;
     std::span<const float> GetTimeData();
 
     SpectrogramData GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale = false);
@@ -79,8 +79,8 @@ class FDNAnalyzer
 
     IRAnalyzer ir_analyzer_;
 
-    uint32_t impulse_response_size_samples_;
-    bool is_clipping_;
+    uint32_t impulse_response_size_samples_{0};
+    bool is_clipping_{false};
 
     std::vector<std::vector<float>> filter_mag_responses_;
     std::vector<std::vector<float>> filter_phase_responses_;

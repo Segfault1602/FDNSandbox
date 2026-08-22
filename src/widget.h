@@ -12,7 +12,13 @@ void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay);
 void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn);
 bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain);
 
-bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool& show_3band_designer);
+struct ThreeBandDesignerData
+{
+    std::span<float> t60s;
+    std::span<float> frequencies;
+};
+
+bool Draw3BandDesigner(ThreeBandDesignerData data, bool& show_3band_designer);
 bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer);
 
 // bool DrawInputGainsWidget(sfFDN::FDNConfig& config);

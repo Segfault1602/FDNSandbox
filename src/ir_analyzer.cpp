@@ -47,18 +47,7 @@ namespace fdn_analysis
 IRAnalyzer::IRAnalyzer(uint32_t samplerate, quill::Logger* logger)
     : samplerate_(samplerate)
     , logger_(logger)
-    , is_clipping_(false)
-    , spectrogram_bin_count_(0)
-    , spectrogram_frame_count_(0)
-    , spectrum_early_rir_time_(0.5f)
-    , cepstrum_early_rir_time_(0.5f)
-    , autocorrelation_early_rir_time_(0.5f)
-    , edr_bin_count_(0)
-    , edr_frame_count_(0)
     , overall_t60_(0.0f)
-    , echo_density_window_size_ms_(25)
-    , echo_density_hop_size_ms_(10)
-    , mixing_time_(0.0f)
 {
 }
 
@@ -76,7 +65,7 @@ void IRAnalyzer::SetImpulseResponse(std::vector<float>&& ir)
     analysis_flags_.set();
 }
 
-uint32_t IRAnalyzer::GetImpulseResponseSize() const
+[[nodiscard]] uint32_t IRAnalyzer::GetImpulseResponseSize() const
 {
     return impulse_response_.size();
 }
@@ -92,7 +81,7 @@ std::span<const float> IRAnalyzer::GetTimeData()
     return time_data_;
 }
 
-bool IRAnalyzer::IsClipping() const
+[[nodiscard]] bool IRAnalyzer::IsClipping() const
 {
     return is_clipping_;
 }

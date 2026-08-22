@@ -29,7 +29,7 @@ class Settings
         return static_cast<T>(sample_rate_);
     }
 
-    uint32_t IRDuration() const
+    [[nodiscard]] uint32_t IRDuration() const noexcept
     {
         return ir_duration_;
     }
@@ -42,7 +42,7 @@ class Settings
         }
     }
 
-    uint32_t BlockSize() const
+    [[nodiscard]] uint32_t BlockSize() const noexcept
     {
         return block_size_; // Fixed block size for processing
     }
@@ -52,7 +52,7 @@ class Settings
         block_size_ = block_size;
     }
 
-    quill::Logger* GetLogger() const
+    [[nodiscard]] quill::Logger* GetLogger() const noexcept
     {
         return logger_;
     }

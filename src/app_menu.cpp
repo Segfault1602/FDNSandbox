@@ -175,7 +175,7 @@ void FDNToolboxApp::DrawConfigurationSwitcher()
     UpdateFDN();
 }
 
-void FDNToolboxApp::DrawFrameRateStatus() const
+void FDNToolboxApp::DrawFrameRateStatus()
 {
     const float fps = ImGui::GetIO().Framerate;
     if (fps >= 58.f)
