@@ -186,12 +186,7 @@ void FDNToolboxApp::DrawVisualOverviewSection(bool fdn_size_changed, int max_del
     fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
                                     fdn_sandbox::theme::ColorRole::TextSecondary,
                                     "Inspect gain distribution, delay lengths, and the active feedback matrix.");
-    if (fdn_size_changed)
-    {
-        fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Metadata, fdn_sandbox::theme::ColorRole::StatusWarning,
-                                 "Overview will refresh after the resized FDN is rebuilt.");
-    }
-    else
+    if (!fdn_size_changed)
     {
         DrawInputOutputGainsPlot(fdn_config_, gui_fdn_.get());
         DrawDelaysPlot(fdn_config_, max_delay);
