@@ -67,7 +67,7 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
     }
 
     meter_squared_samples_.resize(
-        static_cast<size_t>(static_cast<float>(Settings::Instance().SampleRate()) * kMeterIntegrationSeconds));
+        static_cast<size_t>(Settings::Instance().SampleRateAs<float>() * kMeterIntegrationSeconds));
 
     save_ir_browser.SetTitle("Save Impulse Response");
     save_ir_browser.SetTypeFilters({".wav"});
@@ -184,7 +184,7 @@ void FDNToolboxApp::UpdateFDN()
 {
     LOG_INFO(Settings::Instance().GetLogger(), "Configuration changed, updating FDN...");
     auto start = std::chrono::high_resolution_clock::now();
-    fdn_config_.sample_rate = Settings::Instance().SampleRate();
+    fdn_config_.sample_rate = Settings::Instance().SampleRateAs<float>();
 
     gui_fdn_ = sfFDN::CreateFDNFromConfig(fdn_config_);
     gui_fdn_->SetDirectGain(0.f);

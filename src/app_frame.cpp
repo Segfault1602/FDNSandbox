@@ -31,7 +31,7 @@ void FDNToolboxApp::DrawToolbar()
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 side_bar_padding(style.WindowPadding.x, style.FramePadding.y);
-    const float toolbar_height = ImGui::GetFrameHeight() + side_bar_padding.y * 2.0f;
+    const float toolbar_height = ImGui::GetFrameHeight() + (side_bar_padding.y * 2.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, side_bar_padding);
     const bool open =
         ImGui::BeginViewportSideBar("##FDNSandboxToolbar", viewport, ImGuiDir_Up, toolbar_height, kSideBarFlags);
@@ -59,7 +59,8 @@ void FDNToolboxApp::DrawToolbar()
 
     if (optimization_gui_.IsActive())
     {
-        const float pulse = 0.55f + 0.45f * std::sin(static_cast<float>(ImGui::GetTime()) * 4.0f);
+        const float phase = static_cast<float>(ImGui::GetTime()) * 4.0f;
+        const float pulse = 0.55f + (0.45f * std::sin(phase));
         ImVec4 color = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::PlotOptimization);
         color.w = pulse;
         ImGui::SameLine();
@@ -97,7 +98,7 @@ void FDNToolboxApp::DrawStatusBar()
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 side_bar_padding(style.WindowPadding.x, style.FramePadding.y);
-    const float status_bar_height = ImGui::GetFrameHeight() + side_bar_padding.y * 2.0f;
+    const float status_bar_height = ImGui::GetFrameHeight() + (side_bar_padding.y * 2.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, side_bar_padding);
     const bool open =
         ImGui::BeginViewportSideBar("##FDNSandboxStatusBar", viewport, ImGuiDir_Down, status_bar_height, kSideBarFlags);

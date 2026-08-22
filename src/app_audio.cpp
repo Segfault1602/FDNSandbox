@@ -36,9 +36,9 @@ void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, 
     {
         const float t = static_cast<float>(i) / static_cast<float>(output.size() - 1);
         const float fadeout_gain =
-            t * t * (3 - 2 * t); // from https://signalsmith-audio.co.uk/writing/2021/cheap-energy-crossfade/
+            (t * t) * (3.0f - (2.0f * t)); // from https://signalsmith-audio.co.uk/writing/2021/cheap-energy-crossfade/
         const float fadein_gain = 1.0f - fadeout_gain;
-        output[i] = fade_in[i] * fadein_gain + fade_out[i] * fadeout_gain;
+        output[i] = (fade_in[i] * fadein_gain) + (fade_out[i] * fadeout_gain);
     }
 }
 } // namespace
@@ -240,8 +240,7 @@ void FDNToolboxApp::WriteOutput(std::span<float> output_buffer, std::span<const 
 
 void FDNToolboxApp::UpdateCpuUsage(int64_t duration_ns, size_t frame_size)
 {
-    const float allowed_time =
-        (1e9f / static_cast<float>(Settings::Instance().SampleRate())) * static_cast<float>(frame_size);
+    const float allowed_time = (1e9f / Settings::Instance().SampleRateAs<float>()) * static_cast<float>(frame_size);
     const float cpu_usage = static_cast<float>(duration_ns) / allowed_time;
     cpu_usage_sum_ -= cpu_usage_samples_[cpu_usage_sample_index_];
     cpu_usage_samples_[cpu_usage_sample_index_] = cpu_usage;
@@ -467,7 +466,8 @@ void FDNToolboxApp::DrawMeterBar(const ImVec2& size)
     const float peak_fraction = std::clamp((output_meter_display_.peak_db - kMinMeterDb) / -kMinMeterDb, 0.0f, 1.0f);
     const ImVec2 bar_min = ImGui::GetItemRectMin();
     const ImVec2 bar_max = ImGui::GetItemRectMax();
-    const float peak_x = bar_min.x + (bar_max.x - bar_min.x) * peak_fraction;
+    const float bar_width = bar_max.x - bar_min.x;
+    const float peak_x = bar_min.x + (bar_width * peak_fraction);
     ImGui::GetWindowDrawList()->AddLine(ImVec2(peak_x, bar_min.y), ImVec2(peak_x, bar_max.y),
                                         IM_COL32(235, 238, 242, 210), 1.5f);
 }

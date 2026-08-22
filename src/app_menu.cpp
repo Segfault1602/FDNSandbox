@@ -233,7 +233,8 @@ void FDNToolboxApp::SaveSelectedImpulseResponse()
     {
         filename += ".wav";
     }
-    if (utils::WriteAudioFile(filename, fdn_analyzer_.GetImpulseResponse(), Settings::Instance().SampleRate()))
+    if (utils::WriteAudioFile(filename, fdn_analyzer_.GetImpulseResponse(),
+                              static_cast<int>(Settings::Instance().SampleRate())))
     {
         notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "ir-saved", "Impulse response saved",
                                   filename);
@@ -269,7 +270,7 @@ void FDNToolboxApp::LoadSelectedRIR()
 {
     const std::string filename = load_rir_browser.GetSelected().string();
     std::vector<float> buffer;
-    int file_sample_rate = Settings::Instance().SampleRate();
+    int file_sample_rate = static_cast<int>(Settings::Instance().SampleRate());
     int file_num_channels = 0;
     if (!audio_utils::audio_file::ReadWavFile(filename, buffer, file_sample_rate, file_num_channels))
     {
@@ -342,11 +343,11 @@ void FDNToolboxApp::DrawSettingsWindow()
     if (ImGui::Combo("##FFTSize", &selected_fft_size_index, kFFTSizeOptions.data(),
                      static_cast<int>(kFFTSizeOptions.size())))
     {
-        stft_options_.fft_size = 512 * (1 << selected_fft_size_index);
+        stft_options_.fft_size = 512U * (1U << selected_fft_size_index);
         if (stft_options_.fft_size < stft_options_.window_size)
         {
             stft_options_.window_size = stft_options_.fft_size;
-            stft_options_.overlap = static_cast<uint32_t>(overlap * stft_options_.window_size);
+            stft_options_.overlap = static_cast<uint32_t>(static_cast<float>(stft_options_.window_size) * overlap);
             selected_window_size_index = selected_fft_size_index + 1;
         }
 
@@ -359,8 +360,8 @@ void FDNToolboxApp::DrawSettingsWindow()
     if (ImGui::Combo("##WindowSize", &selected_window_size_index, kWindowSizeOptions.data(),
                      static_cast<int>(kWindowSizeOptions.size())))
     {
-        stft_options_.window_size = 256 * (1 << selected_window_size_index);
-        stft_options_.overlap = static_cast<uint32_t>(overlap * stft_options_.window_size);
+        stft_options_.window_size = 256U * (1U << selected_window_size_index);
+        stft_options_.overlap = static_cast<uint32_t>(static_cast<float>(stft_options_.window_size) * overlap);
         if (stft_options_.window_size > stft_options_.fft_size)
         {
             stft_options_.fft_size = stft_options_.window_size;
@@ -374,7 +375,7 @@ void FDNToolboxApp::DrawSettingsWindow()
     ImGui::SetNextItemWidth(100);
     if (ImGui::SliderFloat("##Overlap", &overlap, 0.01f, 0.95f, "%.2f"))
     {
-        stft_options_.overlap = static_cast<uint32_t>(overlap * stft_options_.window_size);
+        stft_options_.overlap = static_cast<uint32_t>(static_cast<float>(stft_options_.window_size) * overlap);
         fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
     }
 
@@ -452,7 +453,7 @@ void FDNToolboxApp::DrawFDNInfoWindow()
 
     const auto t60_data = fdn_analyzer_.GetT60Data(-5.0f, -50.0f);
     const auto echo_density_data = fdn_analyzer_.GetEchoDensityData(25, 10);
-    const float sample_rate = static_cast<float>(Settings::Instance().SampleRate());
+    const auto sample_rate = Settings::Instance().SampleRateAs<float>();
 
     if (ImGui::BeginTable("##FDNSummary", 2,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp))

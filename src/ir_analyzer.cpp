@@ -10,6 +10,19 @@ namespace
 {
 constexpr size_t kSpectrumNFFT = 48000;
 
+struct EarlyIRSampleCountInput
+{
+    std::chrono::duration<float> duration;
+    uint32_t sample_rate;
+    size_t impulse_size;
+};
+
+size_t ClampEarlyIRSampleCount(const EarlyIRSampleCountInput& input)
+{
+    const float sample_count = std::max(0.0f, input.duration.count() * static_cast<float>(input.sample_rate));
+    return std::min(static_cast<size_t>(sample_count), input.impulse_size);
+}
+
 struct Stopwatch
 {
     Stopwatch()
@@ -132,8 +145,10 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         const Stopwatch stopwatch;
         spectrum_early_rir_time_ = early_rir_time;
 
-        const auto early_rir_sample_count = std::min(static_cast<uint32_t>(early_rir_time * samplerate_),
-                                                     static_cast<uint32_t>(impulse_response_.size()));
+        const size_t early_rir_sample_count =
+            ClampEarlyIRSampleCount({.duration = std::chrono::duration<float>{early_rir_time},
+                                     .sample_rate = samplerate_,
+                                     .impulse_size = impulse_response_.size()});
         const auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
         auto nfft = std::max(kSpectrumNFFT, early_rir.size());
 
@@ -148,18 +163,20 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
         fft.ForwardMag(early_rir, spectrum_data_, options);
 
         // Generate frequency bins
-        const uint32_t kNumFrequencyBins = spectrum_data_.size();
+        const auto kNumFrequencyBins = static_cast<size_t>(spectrum_data_.size());
         frequency_bins_.resize(kNumFrequencyBins);
+        const auto sample_rate = static_cast<float>(samplerate_);
         for (size_t i = 0; i < kNumFrequencyBins; ++i)
         {
-            frequency_bins_[i] = (static_cast<float>(i) * samplerate_) / nfft;
+            frequency_bins_[i] = (static_cast<float>(i) * sample_rate) / static_cast<float>(nfft);
         }
 
         spectrum_peaks_.clear();
         peaks_freqs_.clear();
         // Reserve space for peaks, 25% is probably an overly optimistic estimate
-        spectrum_peaks_.reserve(0.25 * kNumFrequencyBins);
-        peaks_freqs_.reserve(0.25 * kNumFrequencyBins);
+        const auto peak_reserve = static_cast<size_t>(0.25 * static_cast<double>(kNumFrequencyBins));
+        spectrum_peaks_.reserve(peak_reserve);
+        peaks_freqs_.reserve(peak_reserve);
 
         for (size_t i = 1; i < kNumFrequencyBins - 1; ++i)
         {
@@ -199,8 +216,10 @@ CepstrumData IRAnalyzer::GetCepstrum(float early_rir_time)
         const Stopwatch stopwatch;
         cepstrum_early_rir_time_ = early_rir_time;
 
-        const auto early_rir_sample_count = std::min(static_cast<uint32_t>(early_rir_time * samplerate_),
-                                                     static_cast<uint32_t>(impulse_response_.size()));
+        const size_t early_rir_sample_count =
+            ClampEarlyIRSampleCount({.duration = std::chrono::duration<float>{early_rir_time},
+                                     .sample_rate = samplerate_,
+                                     .impulse_size = impulse_response_.size()});
         const auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
         auto nfft = std::max(kSpectrumNFFT, early_rir.size());
 
@@ -227,8 +246,10 @@ AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
         const Stopwatch stopwatch;
         autocorrelation_early_rir_time_ = early_rir_time;
 
-        const auto early_rir_sample_count = std::min(static_cast<uint32_t>(early_rir_time * samplerate_),
-                                                     static_cast<uint32_t>(impulse_response_.size()));
+        const size_t early_rir_sample_count =
+            ClampEarlyIRSampleCount({.duration = std::chrono::duration<float>{early_rir_time},
+                                     .sample_rate = samplerate_,
+                                     .impulse_size = impulse_response_.size()});
         const auto early_rir = GetImpulseResponse().subspan(0, early_rir_sample_count);
 
         autocorrelation_data_ = audio_utils::analysis::Autocorrelation(early_rir, true);

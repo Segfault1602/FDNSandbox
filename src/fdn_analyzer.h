@@ -32,7 +32,7 @@ enum class FDNAnalysisType : uint8_t
 {
     ImpulseResponse = 0,
     FilterResponse = 1,
-    FDNAnalysisTypeCount
+    FDNAnalysisTypeCount = 2
 };
 
 class FDNAnalyzer

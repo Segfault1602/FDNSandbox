@@ -55,7 +55,7 @@ enum class FontRole : uint8_t
 
 void Apply(float dpi_scale);
 void InitializeFonts();
-const ImVec4& Color(ColorRole role);
+ImVec4 Color(ColorRole role);
 void PushFont(FontRole role);
 void PopFont();
 void Text(FontRole font_role, ColorRole color_role, std::string_view text);

@@ -35,6 +35,16 @@ struct MelFormatterContext
     std::span<const float> mel_frequencies;
 };
 
+constexpr int ToImPlotCount(size_t count)
+{
+    return static_cast<int>(count);
+}
+
+constexpr int ToImPlotCount(uint32_t count)
+{
+    return static_cast<int>(count);
+}
+
 int MelFormatter(double value, char* buff, int size, void* data)
 {
     const MelFormatterContext context = *reinterpret_cast<MelFormatterContext*>(data);
@@ -47,7 +57,7 @@ int MelFormatter(double value, char* buff, int size, void* data)
     const std::span<char> out_string(buff, size);
     const std::format_to_n_result result = std::format_to_n(out_string.begin(), size, "{}", mel);
     *result.out = '\0';
-    return std::strlen(buff);
+    return static_cast<int>(std::strlen(buff));
 }
 
 enum class SpectrumPlotMode : uint8_t
@@ -124,8 +134,8 @@ void DrawSpectrumPicker(SpectrumUiState& state, fdn_analysis::FDNAnalyzer& fdn_a
 fdn_analysis::SpectrumData GetSpectrumData(const SpectrumUiState& state, fdn_analysis::FDNAnalyzer& fdn_analyzer,
                                            fdn_analysis::IRAnalyzer& rir_analyzer)
 {
-    return state.show_rir ? rir_analyzer.GetSpectrum(state.early_rir_duration)
-                          : fdn_analyzer.GetSpectrum(state.early_rir_duration);
+    const auto early_rir_duration = static_cast<float>(state.early_rir_duration);
+    return state.show_rir ? rir_analyzer.GetSpectrum(early_rir_duration) : fdn_analyzer.GetSpectrum(early_rir_duration);
 }
 
 void DrawSpectrumSeries(const fdn_analysis::SpectrumData& data, SpectrumUiState& state, bool plot_mode_changed)
@@ -149,14 +159,14 @@ void DrawSpectrumSeries(const fdn_analysis::SpectrumData& data, SpectrumUiState&
     if (state.mode == SpectrumPlotMode::Spectrum || state.mode == SpectrumPlotMode::Both)
     {
         const size_t count = std::min(data.frequency_bins.size(), data.spectrum.size());
-        ImPlot::PlotLine("Spectrum", data.frequency_bins.data(), data.spectrum.data(), count,
+        ImPlot::PlotLine("Spectrum", data.frequency_bins.data(), data.spectrum.data(), ToImPlotCount(count),
                          fdn_sandbox::plot_ui::LineSpec(series_role, 1.7f));
     }
     if ((state.mode == SpectrumPlotMode::Peaks || state.mode == SpectrumPlotMode::Both) && !data.peaks.empty())
     {
         const size_t count = std::min(data.peaks_freqs.size(), data.peaks.size());
         const float marker_size = state.mode == SpectrumPlotMode::Peaks ? 2.5f : 3.0f;
-        ImPlot::PlotScatter("Peaks", data.peaks_freqs.data(), data.peaks.data(), count,
+        ImPlot::PlotScatter("Peaks", data.peaks_freqs.data(), data.peaks.data(), ToImPlotCount(count),
                             fdn_sandbox::plot_ui::MarkerSpec(series_role, ImPlotMarker_Circle, marker_size, 1.0f));
     }
 }
@@ -178,7 +188,7 @@ void DrawSpectrumHistogram(const fdn_analysis::SpectrumData& data, const Spectru
                                                                     : fdn_sandbox::plot_ui::SeriesRole::Fdn);
     spec.FillColor = spec.LineColor;
     spec.FillAlpha = 0.65f;
-    ImPlot::PlotHistogram("Histogram", data.peaks.data(), data.peaks.size(), ImPlotBin_Sqrt, 0.95f,
+    ImPlot::PlotHistogram("Histogram", data.peaks.data(), ToImPlotCount(data.peaks.size()), ImPlotBin_Sqrt, 0.95f,
                           ImPlotRange(-60, 20), spec);
 }
 
@@ -238,19 +248,20 @@ void FDNToolboxApp::DrawImpulseResponse()
     static float ir_duration = 1.f;
     if (ImGui::SliderScalar("IR Duration", ImGuiDataType_Float, &ir_duration, &kMinDuration, &kMaxDuration, "%.2f"))
     {
-        Settings::Instance().SetIRDuration(ir_duration);
-        fdn_analyzer_.SetImpulseResponseSize(ir_duration * Settings::Instance().SampleRate());
+        const auto sample_rate = Settings::Instance().SampleRateAs<float>();
+        Settings::Instance().SetIRDuration(static_cast<uint32_t>(ir_duration));
+        fdn_analyzer_.SetImpulseResponseSize(static_cast<uint32_t>(ir_duration * sample_rate));
     }
 
     if (!rir_analyzer_.GetImpulseResponse().empty())
     {
         if (ImGui::Button("Match RIR Length"))
         {
-            const float rir_duration = static_cast<float>(rir_analyzer_.GetImpulseResponse().size()) /
-                                       static_cast<float>(Settings::Instance().SampleRate());
+            const auto sample_rate = Settings::Instance().SampleRateAs<float>();
+            const float rir_duration = static_cast<float>(rir_analyzer_.GetImpulseResponse().size()) / sample_rate;
             ir_duration = rir_duration;
-            Settings::Instance().SetIRDuration(ir_duration);
-            fdn_analyzer_.SetImpulseResponseSize(ir_duration * Settings::Instance().SampleRate());
+            Settings::Instance().SetIRDuration(static_cast<uint32_t>(ir_duration));
+            fdn_analyzer_.SetImpulseResponseSize(static_cast<uint32_t>(ir_duration * sample_rate));
         }
     }
 
@@ -288,12 +299,12 @@ void FDNToolboxApp::DrawImpulseResponse()
                 fdn_spec.LineColor = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError);
             }
             const size_t fdn_count = std::min(imp_response.size(), time_data.size());
-            ImPlot::PlotLine("FDN Response", time_data.data(), imp_response.data(), fdn_count, fdn_spec);
+            ImPlot::PlotLine("FDN Response", time_data.data(), imp_response.data(), ToImPlotCount(fdn_count), fdn_spec);
 
             if (show_rir_overlay && !rir_time_data.empty())
             {
                 const size_t rir_count = std::min(rir_response.size(), rir_time_data.size());
-                ImPlot::PlotLine("Reference RIR", rir_time_data.data(), rir_response.data(), rir_count,
+                ImPlot::PlotLine("Reference RIR", rir_time_data.data(), rir_response.data(), ToImPlotCount(rir_count),
                                  fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Reference, 1.3f));
             }
         }
@@ -339,12 +350,12 @@ void FDNToolboxApp::DrawSpectrogram()
     if (show_rir)
     {
         spectrogram_data = rir_analyzer_.GetSpectrogram(stft_options_, spectrogram_type_ == SpectrogramType::Mel);
-        tmax = rir_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
+        tmax = rir_analyzer_.GetImpulseResponseSize() / Settings::Instance().SampleRateAs<double>();
     }
     else
     {
         spectrogram_data = fdn_analyzer_.GetSpectrogram(stft_options_, spectrogram_type_ == SpectrogramType::Mel);
-        tmax = fdn_analyzer_.GetImpulseResponseSize() / static_cast<double>(Settings::Instance().SampleRate());
+        tmax = fdn_analyzer_.GetImpulseResponseSize() / Settings::Instance().SampleRateAs<double>();
     }
 
     static bool previous_show_rir = show_rir;
@@ -358,13 +369,13 @@ void FDNToolboxApp::DrawSpectrogram()
     if (ImPlot::BeginPlot("##Spectrogram", ImVec2(ImGui::GetCurrentWindow()->Size[0] - kColorBarWidth, -1)))
     {
         const double tmin = 0.0;
-        double bin_count = Settings::Instance().SampleRate() / 2.0;
+        double bin_count = Settings::Instance().SampleRateAs<double>() / 2.0;
         const char* frequency_axis_label = "Frequency (Hz)";
 
         if (spectrogram_type_ == SpectrogramType::Mel && !spectrogram_data.data.empty())
         {
-            mels = audio_utils::GetMelFrequencies(spectrogram_data.bin_count, 0.f,
-                                                  Settings::Instance().SampleRate() / 2.f);
+            const auto sample_rate = Settings::Instance().SampleRateAs<float>();
+            mels = audio_utils::GetMelFrequencies(spectrogram_data.bin_count, 0.f, sample_rate / 2.0f);
             ctx.mel_frequencies = mels;
             ImPlot::SetupAxisFormat(ImAxis_Y1, MelFormatter, &ctx);
             bin_count = spectrogram_data.bin_count;
@@ -386,9 +397,9 @@ void FDNToolboxApp::DrawSpectrogram()
         {
             ImPlotSpec spec{};
             spec.Flags = ImPlotHeatmapFlags_ColMajor;
-            ImPlot::PlotHeatmap("##Spectrogram", spectrogram_data.data.data(), spectrogram_data.bin_count,
-                                spectrogram_data.frame_count, min_dB, max_dB, nullptr, {tmin, 0}, {tmax, bin_count},
-                                spec);
+            ImPlot::PlotHeatmap("##Spectrogram", spectrogram_data.data.data(),
+                                ToImPlotCount(spectrogram_data.bin_count), ToImPlotCount(spectrogram_data.frame_count),
+                                min_dB, max_dB, nullptr, {tmin, 0}, {tmax, bin_count}, spec);
         }
 
         ImPlot::EndPlot();
@@ -501,8 +512,7 @@ void DrawAutocorrelationPicker(AutocorrelationUiState& state, fdn_analysis::FDNA
 void UpdateLagAxis(std::vector<float>& axis, size_t size, AutocorrelationType type)
 {
     axis.resize(size);
-    const float scale =
-        type == AutocorrelationType::Time ? 1000.0f / static_cast<float>(Settings::Instance().SampleRate()) : 1.0f;
+    const float scale = type == AutocorrelationType::Time ? 1000.0f / Settings::Instance().SampleRateAs<float>() : 1.0f;
     for (size_t i = 0; i < axis.size(); ++i)
     {
         axis[i] = static_cast<float>(i) * scale;
@@ -544,11 +554,12 @@ void DrawAutocorrelationPlot(AutocorrelationUiState& state, std::span<const floa
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0.0, state.lag_axis.back());
         fdn_sandbox::plot_ui::DrawVerticalGuide(
             "##Zero Lag", 0.0, fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::TextSecondary), 0.75f);
-        ImPlot::PlotLine("FDN Autocorrelation", state.lag_axis.data(), fdn_data.data(), fdn_data.size(),
+        ImPlot::PlotLine("FDN Autocorrelation", state.lag_axis.data(), fdn_data.data(), ToImPlotCount(fdn_data.size()),
                          fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn));
         if (state.show_rir && !rir_data.empty())
         {
-            ImPlot::PlotLine("RIR Autocorrelation", state.rir_lag_axis.data(), rir_data.data(), rir_data.size(),
+            ImPlot::PlotLine("RIR Autocorrelation", state.rir_lag_axis.data(), rir_data.data(),
+                             ToImPlotCount(rir_data.size()),
                              fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Reference, 1.3f));
         }
         state.previous_type = state.type;
@@ -568,9 +579,11 @@ void DrawAutocorrelationContents(AutocorrelationUiState& state, fdn_analysis::FD
     }
 
     DrawAutocorrelationPicker(state, fdn_analyzer, rir_analyzer);
-    const fdn_analysis::AutocorrelationData fdn_data = fdn_analyzer.GetAutocorrelation(state.duration);
+    const fdn_analysis::AutocorrelationData fdn_data =
+        fdn_analyzer.GetAutocorrelation(static_cast<float>(state.duration));
     const fdn_analysis::AutocorrelationData rir_data =
-        state.show_rir ? rir_analyzer.GetAutocorrelation(state.duration) : fdn_analysis::AutocorrelationData{};
+        state.show_rir ? rir_analyzer.GetAutocorrelation(static_cast<float>(state.duration))
+                       : fdn_analysis::AutocorrelationData{};
     DrawAutocorrelationPlot(state, SelectAutocorrelation(fdn_data, state.type),
                             SelectAutocorrelation(rir_data, state.type));
     ImPlot::EndSubplots();
@@ -608,7 +621,7 @@ float FindMinimumMagnitude(const fdn_analysis::FilterData& data)
 
 void SetupFilterPhaseAxes()
 {
-    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRate() / 2.0);
+    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
     ImPlot::SetupAxis(ImAxis_Y1, "Phase (rad)");
     ImPlot::SetupAxisLimits(ImAxis_Y1, -std::numbers::pi, std::numbers::pi, ImPlotCond_Once);
     fdn_sandbox::plot_ui::DrawHorizontalGuide(
@@ -626,7 +639,7 @@ void DrawAttenuationMagnitude(const fdn_analysis::FilterData& data, float minimu
         return;
     }
     ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Outside);
-    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRate() / 2.0);
+    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
     ImPlot::SetupAxis(ImAxis_Y1, "Magnitude (dB)");
     ImPlot::SetupAxisLimits(ImAxis_Y1, std::min(-60.0f, minimum_magnitude * 1.2f), 5.0, ImPlotCond_Once);
     ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -120.0, 20.0);
@@ -644,7 +657,7 @@ void DrawAttenuationMagnitude(const fdn_analysis::FilterData& data, float minimu
         spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i);
         spec.LineWeight = 1.4f;
         ImPlot::PlotLine(name.c_str(), data.frequency_bins.data(), response.data(),
-                         std::min(data.frequency_bins.size(), response.size()), spec);
+                         ToImPlotCount(std::min(data.frequency_bins.size(), response.size())), spec);
     }
     ImPlot::EndPlot();
 }
@@ -669,7 +682,7 @@ void DrawAttenuationPhase(const fdn_analysis::FilterData& data)
         spec.LineColor = fdn_sandbox::plot_ui::OctaveBandColor(i);
         spec.LineWeight = 1.4f;
         ImPlot::PlotLine(name.c_str(), data.frequency_bins.data(), response.data(),
-                         std::min(data.frequency_bins.size(), response.size()), spec);
+                         ToImPlotCount(std::min(data.frequency_bins.size(), response.size())), spec);
     }
     ImPlot::EndPlot();
 }
@@ -695,7 +708,7 @@ void DrawToneCorrectionMagnitude(const fdn_analysis::FilterData& data)
     {
         return;
     }
-    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRate() / 2.0);
+    fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
     ImPlot::SetupAxis(ImAxis_Y1, "Magnitude (dB)");
     ImPlot::SetupAxisLimits(ImAxis_Y1, -60.0, 10.0, ImPlotCond_Once);
     ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -120.0, 30.0);
@@ -708,7 +721,7 @@ void DrawToneCorrectionMagnitude(const fdn_analysis::FilterData& data)
     else
     {
         ImPlot::PlotLine("TC Filter", data.frequency_bins.data(), data.tc_mag_response.data(),
-                         std::min(data.frequency_bins.size(), data.tc_mag_response.size()),
+                         ToImPlotCount(std::min(data.frequency_bins.size(), data.tc_mag_response.size())),
                          fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn));
     }
     ImPlot::EndPlot();
@@ -728,7 +741,7 @@ void DrawToneCorrectionPhase(const fdn_analysis::FilterData& data)
     else
     {
         ImPlot::PlotLine("TC Filter", data.frequency_bins.data(), data.tc_phase_response.data(),
-                         std::min(data.frequency_bins.size(), data.tc_phase_response.size()),
+                         ToImPlotCount(std::min(data.frequency_bins.size(), data.tc_phase_response.size())),
                          fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn));
     }
     ImPlot::EndPlot();
@@ -812,12 +825,13 @@ void DrawWidebandEnergyDecay(const fdn_analysis::EnergyDecayCurveData& fdn_data,
                              std::span<const float> rir_time, bool show_rir)
 {
     const size_t fdn_count = std::min(fdn_time.size(), fdn_data.energy_decay_curve.size());
-    ImPlot::PlotLine("FDN EDC", fdn_time.data(), fdn_data.energy_decay_curve.data(), fdn_count,
+    ImPlot::PlotLine("FDN EDC", fdn_time.data(), fdn_data.energy_decay_curve.data(), ToImPlotCount(fdn_count),
                      fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn));
     if (show_rir && !rir_data.energy_decay_curve.empty())
     {
         const size_t rir_count = std::min(rir_time.size(), rir_data.energy_decay_curve.size());
-        ImPlot::PlotLine("Reference RIR EDC", rir_time.data(), rir_data.energy_decay_curve.data(), rir_count,
+        ImPlot::PlotLine("Reference RIR EDC", rir_time.data(), rir_data.energy_decay_curve.data(),
+                         ToImPlotCount(rir_count),
                          fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Reference, 1.3f));
     }
 }
@@ -840,7 +854,7 @@ void DrawRirOctaveEnergyDecay(size_t band, const fdn_analysis::EnergyDecayCurveD
     spec.Stride = static_cast<int>(stride * sizeof(float));
     const std::string label = "RIR " + std::string(kOctaveBandNames[band]);
     ImPlot::PlotLine(label.c_str(), time.data(), data.edc_octaves[band].data(),
-                     static_cast<int>(((point_count - 1) / stride) + 1), spec);
+                     ToImPlotCount(((point_count - 1) / stride) + 1), spec);
 }
 
 void DrawOctaveEnergyDecay(const EnergyDecayUiState& state, const fdn_analysis::EnergyDecayCurveData& fdn_data,
@@ -860,7 +874,7 @@ void DrawOctaveEnergyDecay(const EnergyDecayUiState& state, const fdn_analysis::
         spec.LineWeight = 1.5f;
         spec.Stride = static_cast<int>(stride * sizeof(float));
         ImPlot::PlotLine(kOctaveBandNames[band], fdn_time.data(), fdn_data.edc_octaves[band].data(),
-                         static_cast<int>(((point_count - 1) / stride) + 1), spec);
+                         ToImPlotCount(((point_count - 1) / stride) + 1), spec);
         if (state.show_rir)
         {
             DrawRirOctaveEnergyDecay(band, rir_data, rir_time, spec);
@@ -973,7 +987,7 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
     const uint32_t y_size = edr.bin_count;
     const uint32_t x_size = edr.frame_count;
 
-    const size_t grid_size = x_size * y_size;
+    const size_t grid_size = static_cast<size_t>(x_size) * static_cast<size_t>(y_size);
     if (edr.energy_decay_relief.size() < grid_size)
     {
         fdn_sandbox::theme::Text(fdn_sandbox::theme::FontRole::Description, fdn_sandbox::theme::ColorRole::StatusError,
@@ -994,8 +1008,8 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
             for (size_t j = 0; j < x_size; ++j)
             {
                 x_mdspan(i, j) = static_cast<float>(j * edr.hop_size) /
-                                 static_cast<float>(Settings::Instance().SampleRate()); // Time in seconds
-                y_mdspan(i, j) = static_cast<float>(i);                                 // Mel band index
+                                 Settings::Instance().SampleRateAs<float>(); // Time in seconds
+                y_mdspan(i, j) = static_cast<float>(i);                      // Mel band index
             }
         }
     }
@@ -1008,10 +1022,7 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
         for (size_t j = 0; j < x_size; ++j)
         {
             z_mdspan(i, j) = edr.energy_decay_relief[i + (j * y_size)];
-            if (z_mdspan(i, j) < -80.0f)
-            {
-                z_mdspan(i, j) = -80.0f; // Clamp to -80 dB for better visualization
-            }
+            z_mdspan(i, j) = std::max(z_mdspan(i, j), -80.0f); // Clamp to -80 dB for better visualization
         }
     }
 
@@ -1026,8 +1037,8 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
         ImPlot3D::SetupAxes("Time (s)", "Mel Band", "Level (dB)", ImPlot3DAxisFlags_AutoFit, ImPlot3DAxisFlags_AutoFit,
                             ImPlot3DAxisFlags_AutoFit);
 
-        ImPlot3D::PlotSurface("EDR Surface", x_data.data(), y_data.data(), z_data.data(), x_size, y_size, 0.0, 0.0,
-                              spec);
+        ImPlot3D::PlotSurface("EDR Surface", x_data.data(), y_data.data(), z_data.data(), ToImPlotCount(x_size),
+                              ToImPlotCount(y_size), 0.0, 0.0, spec);
 
         ImPlot3D::PopStyleVar();
         ImPlot3D::PopColormap();
@@ -1057,15 +1068,15 @@ void FDNToolboxApp::DrawCepstrum()
 
         if (ImPlot::BeginPlot("Cepstrum", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
-            auto cepstrum_data = fdn_analyzer_.GetCepstrum(early_rir_duration);
+            const auto early_rir_seconds = static_cast<float>(early_rir_duration);
+            auto cepstrum_data = fdn_analyzer_.GetCepstrum(early_rir_seconds);
             static std::vector<float> quefrency_ms;
             if (quefrency_ms.size() != cepstrum_data.cepstrum.size())
             {
                 quefrency_ms.resize(cepstrum_data.cepstrum.size());
                 for (size_t i = 0; i < quefrency_ms.size(); ++i)
                 {
-                    quefrency_ms[i] =
-                        static_cast<float>(i) / static_cast<float>(Settings::Instance().SampleRate()) * 1000.0f;
+                    quefrency_ms[i] = static_cast<float>(i) / Settings::Instance().SampleRateAs<float>() * 1000.0f;
                 }
             }
 
@@ -1079,7 +1090,7 @@ void FDNToolboxApp::DrawCepstrum()
                 ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, quefrency_ms.back(), ImPlotCond_Once);
                 ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0.0, quefrency_ms.back());
                 ImPlot::PlotLine("Cepstrum", quefrency_ms.data(), cepstrum_data.cepstrum.data(),
-                                 cepstrum_data.cepstrum.size(),
+                                 ToImPlotCount(cepstrum_data.cepstrum.size()),
                                  fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn));
             }
 
@@ -1134,12 +1145,12 @@ void FDNToolboxApp::DrawEchoDensity()
             ir_spec.LineColor = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::TextSecondary);
             ir_spec.LineWeight = 0.8f;
             ir_spec.FillAlpha = 0.45f;
-            ImPlot::PlotLine("FDN Impulse Response", time_data.data(), ir.data(), std::min(time_data.size(), ir.size()),
-                             ir_spec);
+            ImPlot::PlotLine("FDN Impulse Response", time_data.data(), ir.data(),
+                             ToImPlotCount(std::min(time_data.size(), ir.size())), ir_spec);
             const size_t echo_density_count =
                 std::min(echo_density_data.sparse_indices.size(), echo_density_data.echo_density.size());
             ImPlot::PlotLine("FDN Echo Density", echo_density_data.sparse_indices.data(),
-                             echo_density_data.echo_density.data(), echo_density_count,
+                             echo_density_data.echo_density.data(), ToImPlotCount(echo_density_count),
                              fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn, 1.8f));
 
             if (echo_density_data.mixing_time < time_data.back())
@@ -1160,7 +1171,7 @@ void FDNToolboxApp::DrawEchoDensity()
                     const size_t rir_echo_density_count = std::min(rir_echo_density_data.sparse_indices.size(),
                                                                    rir_echo_density_data.echo_density.size());
                     ImPlot::PlotLine("RIR Echo Density", rir_echo_density_data.sparse_indices.data(),
-                                     rir_echo_density_data.echo_density.data(), rir_echo_density_count,
+                                     rir_echo_density_data.echo_density.data(), ToImPlotCount(rir_echo_density_count),
                                      fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Reference, 1.5f));
 
                     if (rir_echo_density_data.mixing_time < time_data.back())
@@ -1201,7 +1212,7 @@ void FDNToolboxApp::DrawT60s()
     const ImPlotFlags plot_flags = show_rir ? ImPlotFlags_None : ImPlotFlags_NoLegend;
     if (ImPlot::BeginPlot("RT60s", ImVec2(-1, -1), plot_flags))
     {
-        fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRate() / 2.0);
+        fdn_sandbox::plot_ui::SetupFrequencyAxis(ImAxis_X1, true, Settings::Instance().SampleRateAs<double>() / 2.0);
         ImPlot::SetupAxis(ImAxis_Y1, "RT60 (s)");
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0f, 3.0f, ImPlotCond_Once);
 
@@ -1216,7 +1227,8 @@ void FDNToolboxApp::DrawT60s()
         {
             const size_t fdn_t60_count = std::min(t60_data.octave_band_frequencies.size(), t60_data.t60_octaves.size());
             ImPlot::PlotLine(
-                "FDN RT60", t60_data.octave_band_frequencies.data(), t60_data.t60_octaves.data(), fdn_t60_count,
+                "FDN RT60", t60_data.octave_band_frequencies.data(), t60_data.t60_octaves.data(),
+                ToImPlotCount(fdn_t60_count),
                 fdn_sandbox::plot_ui::MarkerSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn, ImPlotMarker_Circle, 5.0f));
 
             if (show_rir)
@@ -1227,7 +1239,7 @@ void FDNToolboxApp::DrawT60s()
                     const size_t rir_t60_count =
                         std::min(rir_t60_data.octave_band_frequencies.size(), rir_t60_data.t60_octaves.size());
                     ImPlot::PlotLine("RIR RT60", rir_t60_data.octave_band_frequencies.data(),
-                                     rir_t60_data.t60_octaves.data(), rir_t60_count,
+                                     rir_t60_data.t60_octaves.data(), ToImPlotCount(rir_t60_count),
                                      fdn_sandbox::plot_ui::MarkerSpec(fdn_sandbox::plot_ui::SeriesRole::Reference,
                                                                       ImPlotMarker_Square, 5.0f));
                 }

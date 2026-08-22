@@ -18,11 +18,21 @@ constexpr std::array<const char*, 12> kAudioFrequencyLabels = {
     "20", "31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k", "20k",
 };
 
-const std::array<ImVec4, 9> kOctaveBandColors = {
-    ImVec4(0.800f, 0.400f, 0.467f, 1.0f), ImVec4(0.200f, 0.133f, 0.533f, 1.0f), ImVec4(0.867f, 0.800f, 0.467f, 1.0f),
-    ImVec4(0.067f, 0.467f, 0.200f, 1.0f), ImVec4(0.533f, 0.800f, 0.933f, 1.0f), ImVec4(0.533f, 0.133f, 0.333f, 1.0f),
-    ImVec4(0.267f, 0.667f, 0.600f, 1.0f), ImVec4(0.600f, 0.600f, 0.200f, 1.0f), ImVec4(0.667f, 0.267f, 0.600f, 1.0f),
+using ColorValue = std::array<float, 4>;
+
+constexpr std::array<ColorValue, 9> kOctaveBandColors = {
+    ColorValue{0.800f, 0.400f, 0.467f, 1.0f}, ColorValue{0.200f, 0.133f, 0.533f, 1.0f},
+    ColorValue{0.867f, 0.800f, 0.467f, 1.0f}, ColorValue{0.067f, 0.467f, 0.200f, 1.0f},
+    ColorValue{0.533f, 0.800f, 0.933f, 1.0f}, ColorValue{0.533f, 0.133f, 0.333f, 1.0f},
+    ColorValue{0.267f, 0.667f, 0.600f, 1.0f}, ColorValue{0.600f, 0.600f, 0.200f, 1.0f},
+    ColorValue{0.667f, 0.267f, 0.600f, 1.0f},
 };
+
+ImVec4 ToImVec4(const ColorValue& color)
+{
+    const auto [red, green, blue, alpha] = color;
+    return {red, green, blue, alpha};
+}
 
 ImVec4 SeriesColor(SeriesRole role)
 {
@@ -112,14 +122,17 @@ void DrawEmptyState(std::string_view message)
 
 ImPlotColormap OctaveBandColormap()
 {
-    static const ImPlotColormap colormap =
-        ImPlot::AddColormap("FDNSandbox Octaves", kOctaveBandColors.data(), static_cast<int>(kOctaveBandColors.size()));
+    static const ImPlotColormap colormap = [] {
+        std::array<ImVec4, kOctaveBandColors.size()> colors{};
+        std::ranges::transform(kOctaveBandColors, colors.begin(), ToImVec4);
+        return ImPlot::AddColormap("FDNSandbox Octaves", colors.data(), static_cast<int>(colors.size()));
+    }();
     return colormap;
 }
 
 ImVec4 OctaveBandColor(size_t index, float alpha)
 {
-    ImVec4 color = kOctaveBandColors[index % kOctaveBandColors.size()];
+    ImVec4 color = ToImVec4(kOctaveBandColors.at(index % kOctaveBandColors.size()));
     color.w = alpha;
     return color;
 }

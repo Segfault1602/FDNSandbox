@@ -107,7 +107,7 @@ struct Span2D
 
     float& operator()(size_t i, size_t j)
     {
-        return data[i * cols + j];
+        return data[(i * cols) + j];
     }
 };
 

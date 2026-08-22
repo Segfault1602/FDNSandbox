@@ -104,7 +104,7 @@ void NotificationCenter::DrawCriticalBanner()
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 padding(style.WindowPadding.x, style.FramePadding.y);
-    const float height = ImGui::GetFrameHeight() + padding.y * 2.0f;
+    const float height = ImGui::GetFrameHeight() + (padding.y * 2.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, padding);
     const bool open =
         ImGui::BeginViewportSideBar("##CriticalNotification", ImGui::GetMainViewport(), ImGuiDir_Up, height,

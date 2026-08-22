@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 
@@ -17,9 +18,15 @@ class Settings
         return instance;
     }
 
-    uint32_t SampleRate() const
+    [[nodiscard]] uint32_t SampleRate() const noexcept
     {
         return sample_rate_;
+    }
+
+    template <std::floating_point T>
+    [[nodiscard]] T SampleRateAs() const noexcept
+    {
+        return static_cast<T>(sample_rate_);
     }
 
     uint32_t IRDuration() const
@@ -58,8 +65,8 @@ class Settings
             "root", quill::Frontend::create_or_get_sink<quill::ConsoleSink>("sink_id_1"));
     }
 
-    size_t sample_rate_ = 48000; // Default sample rate
-    size_t ir_duration_ = 1;     // Default impulse response duration in seconds
+    uint32_t sample_rate_ = 48000; // Default sample rate
+    size_t ir_duration_ = 1;       // Default impulse response duration in seconds
 
     uint32_t block_size_ = 64; // Fixed block size for processing
     quill::Logger* logger_;

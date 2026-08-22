@@ -230,7 +230,7 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
     }
 
     bool config_changed = false;
-    constexpr uint32_t kTestDelay = 1000.f; // arbitrary, needed to design the filter for the GUI
+    constexpr uint32_t kTestDelay = 1000U; // arbitrary, needed to design the filter for the GUI
 
     assert(t60s.size() == 3);
     assert(frequencies.size() == 2);
@@ -244,7 +244,8 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
 
     if (filter_freqs_plot.empty()) // Only runs on first call
     {
-        filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 512);
+        const float nyquist_frequency = Settings::Instance().SampleRateAs<float>() * 0.5f;
+        filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(nyquist_frequency), 512);
         point_changed = true; // Force initial plot update
     }
 
@@ -258,7 +259,7 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
         ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, 20000.0f, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, t60_range[0], t60_range[1], ImPlotCond_Once);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-        const double nyquist_frequency = static_cast<double>(Settings::Instance().SampleRate()) / 2.0;
+        const double nyquist_frequency = Settings::Instance().SampleRateAs<double>() / 2.0;
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, nyquist_frequency);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0.f, 15.f);
 
@@ -291,7 +292,7 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
             three_band_options.freqs[0] = static_cast<float>(frequencies_draggable[0]);
             three_band_options.freqs[1] = static_cast<float>(frequencies_draggable[1]);
             three_band_options.q = 1.f / std::numbers::sqrt2_v<float>;
-            three_band_options.sample_rate = static_cast<float>(Settings::Instance().SampleRate());
+            three_band_options.sample_rate = Settings::Instance().SampleRateAs<float>();
             three_band_options.delay = kTestDelay;
             auto sos = sfFDN::DesignThreeBandAbsorption(three_band_options);
 
@@ -300,7 +301,7 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
             for (float& i : H)
             {
                 i = 20.f * std::log10(i);
-                i = (-60.f / (i)) / Settings::Instance().SampleRate();
+                i = (-60.f / i) / Settings::Instance().SampleRateAs<float>();
                 i *= static_cast<float>(kTestDelay);
             }
 
@@ -316,7 +317,7 @@ bool Draw3BandDesigner(std::span<float> t60s, std::span<float> frequencies, bool
 
         if (!H.empty())
         {
-            ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), H.size());
+            ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), static_cast<int>(H.size()));
         }
 
         auto plot_limits = ImPlot::GetPlotLimits(ImAxis_X1, ImAxis_Y1);
@@ -350,7 +351,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
     bool config_changed = false;
 
-    constexpr uint32_t kTestDelay = 1500.f; // arbitrary, needed to design the filter for the GUI
+    constexpr uint32_t kTestDelay = 1500U; // arbitrary, needed to design the filter for the GUI
 
     // Number of bands in the filter designer
     assert(t60s.size() == kNBands);
@@ -379,7 +380,8 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
     {
         frequencies_plot = frequencies; // utils::LogSpace(std::log10(frequencies[0] + 1e-6f),
                                         // std::log10(frequencies.back() - 1.f), 256);
-        filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(Settings::Instance().SampleRate() / 2.f), 512);
+        const float nyquist_frequency = Settings::Instance().SampleRateAs<float>() * 0.5f;
+        filter_freqs_plot = utils::LogSpace(std::log10(1.f), std::log10(nyquist_frequency), 512);
         t60s_plot = utils::pchip(frequencies, t60s, frequencies_plot);
 
         gains = utils::T60ToGainsDb(t60s, kTestDelay, Settings::Instance().SampleRate());
@@ -398,18 +400,18 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.01f, 5.0f, ImPlotCond_Once);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
 
-        const double nyquist_frequency = static_cast<double>(Settings::Instance().SampleRate()) / 2.0;
+        const double nyquist_frequency = Settings::Instance().SampleRateAs<double>() / 2.0;
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, nyquist_frequency);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0.f, 10.f);
 
         static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
-        ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), frequencies_d.size(), nullptr, false);
+        ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), static_cast<int>(frequencies_d.size()), nullptr, false);
 
         for (size_t i = 0; i < frequencies.size(); ++i)
         {
             double freq = frequencies[i]; // The frequency should stay constant
             double t60 = t60s[i];
-            point_changed |= ImPlot::DragPoint(i, &freq, &t60, ImVec4(0, 0.9f, 0, 0), 10);
+            point_changed |= ImPlot::DragPoint(static_cast<int>(i), &freq, &t60, ImVec4(0, 0.9f, 0, 0), 10);
             t60s[i] = std::clamp(static_cast<float>(t60), 0.01f, 10.0f); // Update the t60 value
         }
 
@@ -422,13 +424,14 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
         ImPlotSpec spec{};
         spec.Marker = ImPlotMarker_Circle;
         spec.MarkerSize = 7.0f;
-        ImPlot::PlotScatter("RT60", frequencies.data(), t60s.data(), t60s.size(), spec);
+        ImPlot::PlotScatter("RT60", frequencies.data(), t60s.data(), static_cast<int>(t60s.size()), spec);
 
-        ImPlot::PlotLine("RT60 Line", frequencies_plot.data(), t60s_plot.data(), t60s_plot.size());
+        ImPlot::PlotLine("RT60 Line", frequencies_plot.data(), t60s_plot.data(), static_cast<int>(t60s_plot.size()));
 
         ImPlotSpec shaded_spec{};
         shaded_spec.FillAlpha = 0.25f;
-        ImPlot::PlotShaded("RT60 Area", frequencies_plot.data(), t60s_plot.data(), t60s_plot.size(), 0.f, shaded_spec);
+        ImPlot::PlotShaded("RT60 Area", frequencies_plot.data(), t60s_plot.data(), static_cast<int>(t60s_plot.size()),
+                           0.f, shaded_spec);
 
         ImPlot::EndPlot();
     }
@@ -451,7 +454,7 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
 
         sfFDN::TenBandFilterOptions ten_band_options;
         std::ranges::copy(t60s_f, ten_band_options.t60s.begin());
-        ten_band_options.sample_rate = static_cast<float>(Settings::Instance().SampleRate());
+        ten_band_options.sample_rate = Settings::Instance().SampleRateAs<float>();
         ten_band_options.delay = kTestDelay;
         ten_band_options.shelf_cutoff = shelf_cutoff;
 
@@ -472,30 +475,32 @@ bool DrawFilterDesigner(std::span<float> t60s, bool& show_delay_filter_designer)
     if (show_filter_response && ImPlot::BeginPlot("Filter preview", ImVec2(-1, -1), ImPlotFlags_None))
     {
         ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)");
-        ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);
+        const float nyquist_frequency = Settings::Instance().SampleRateAs<float>() * 0.5f;
+        ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, nyquist_frequency, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, -10.0f, 1.0f, ImPlotCond_Once);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
 
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, Settings::Instance().SampleRate() / 2.f);
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0.0f, nyquist_frequency);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -60.f, 10.f);
 
         static std::vector<double> frequencies_d(frequencies.begin(), frequencies.end());
-        ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), frequencies_d.size(), nullptr, false);
+        ImPlot::SetupAxisTicks(ImAxis_X1, frequencies_d.data(), static_cast<int>(frequencies_d.size()), nullptr, false);
 
         ImPlotSpec spec{};
         spec.LineColor = ImVec4(0.70f, 0.70f, 0.20f, 1.0f);
         spec.LineWeight = 4.0f;
         spec.Marker = ImPlotMarker_Circle;
         spec.MarkerSize = 7.0f;
-        ImPlot::PlotLine("Target Gain", frequencies_plot.data(), gains_plot.data(), frequencies_plot.size(), spec);
+        ImPlot::PlotLine("Target Gain", frequencies_plot.data(), gains_plot.data(),
+                         static_cast<int>(frequencies_plot.size()), spec);
 
         if (!H.empty())
         {
             ImPlotSpec line_spec{};
             line_spec.LineColor = ImVec4(0.70f, 0.20f, 0.20f, 1.0f);
             line_spec.LineWeight = 3.0f;
-            ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(), filter_freqs_plot.size(),
-                             line_spec);
+            ImPlot::PlotLine("Filter Response", filter_freqs_plot.data(), H.data(),
+                             static_cast<int>(filter_freqs_plot.size()), line_spec);
         }
 
         ImPlot::EndPlot();
@@ -517,7 +522,7 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
     {
         std::vector<float> input_gains(config.fdn_size, 0.0f);
         std::vector<float> output_gains(config.fdn_size, 0.0f);
-        if (fdn)
+        if (fdn != nullptr)
         {
             fdn_info::GetInputAndOutputGains(fdn, input_gains, output_gains);
         }
@@ -531,16 +536,18 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
         if (ImPlot::BeginPlot("Input Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, input_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Input Gains", input_gains.data(), input_gains.size(), 0.90, 0);
+            ImPlot::SetupAxesLimits(-0.45, static_cast<double>(input_gains.size()) - 0.45, -1.0, 1.0,
+                                    ImPlotCond_Always);
+            ImPlot::PlotBars("Input Gains", input_gains.data(), static_cast<int>(input_gains.size()), 0.90, 0);
             ImPlot::EndPlot();
         }
 
         if (ImPlot::BeginPlot("Output Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, output_gains.size() - 0.45, -1, 1, ImPlotCond_Always);
-            ImPlot::PlotBars("Output Gains", output_gains.data(), output_gains.size(), 0.90, 0);
+            ImPlot::SetupAxesLimits(-0.45, static_cast<double>(output_gains.size()) - 0.45, -1.0, 1.0,
+                                    ImPlotCond_Always);
+            ImPlot::PlotBars("Output Gains", output_gains.data(), static_cast<int>(output_gains.size()), 0.90, 0);
             ImPlot::EndPlot();
         }
 
@@ -555,10 +562,11 @@ void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
         constexpr ImPlotAxisFlags axes_flags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines;
         ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
 
-        ImPlot::SetupAxesLimits(-1, config.delay_bank_config.delays.size(), 0, max_delay, ImPlotCond_Always);
+        ImPlot::SetupAxesLimits(-1.0, static_cast<double>(config.delay_bank_config.delays.size()), 0.0,
+                                static_cast<double>(max_delay), ImPlotCond_Always);
 
-        ImPlot::PlotBars("##Delays", config.delay_bank_config.delays.data(), config.delay_bank_config.delays.size(),
-                         0.90, 0);
+        ImPlot::PlotBars("##Delays", config.delay_bank_config.delays.data(),
+                         static_cast<int>(config.delay_bank_config.delays.size()), 0.90, 0);
         ImPlot::EndPlot();
     }
 }
@@ -569,11 +577,12 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
 
     static std::vector<float> feedback_matrix;
     const uint32_t N = config.fdn_size;
+    const size_t matrix_count = static_cast<size_t>(N) * static_cast<size_t>(N);
 
-    if (fdn)
+    if (fdn != nullptr)
     {
         uint32_t matrix_size{0};
-        feedback_matrix.resize(N * N);
+        feedback_matrix.resize(matrix_count);
         if (!fdn_info::GetFeedbackMatrix(fdn, feedback_matrix, matrix_size))
         {
             feedback_matrix.clear();
@@ -581,25 +590,18 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
         assert(matrix_size == N);
     }
 
-    // std::visit(
-    //     [&](auto&& arg) {
-    //         sfFDN::ScalarMatrixType matrix_type = arg.type;
-    //         feedback_matrix = sfFDN::GenerateMatrix(N, matrix_type);
-    //     },
-    //     config.feedback_matrix_config);
-
     ImPlot::PushColormap(feedback_matrix_colormap);
 
     const float win_width = ImGui::GetContentRegionAvail().x;
 
     if (ImPlot::BeginPlot("Feedback Matrix", ImVec2(win_width, 300), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
     {
-
         constexpr ImPlotAxisFlags axes_flags =
             ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickLabels;
         ImPlot::SetupAxes(nullptr, nullptr, axes_flags, axes_flags);
-        const char* label_fmt = N < 10 ? "%.2f" : nullptr; // Adjust label format based on N size
-        ImPlot::PlotHeatmap("heat", feedback_matrix.data(), N, N, -1, 1, label_fmt, ImPlotPoint(0, 0),
+        const int plot_size = static_cast<int>(N);
+        const char* label_fmt = plot_size < 10 ? "%.2f" : nullptr; // Adjust label format based on N size
+        ImPlot::PlotHeatmap("heat", feedback_matrix.data(), plot_size, plot_size, -1, 1, label_fmt, ImPlotPoint(0, 0),
                             ImPlotPoint(1, 1));
 
         ImPlot::EndPlot();
@@ -1723,7 +1725,7 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
     ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -1.0f, 1.0f);
     ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, time_data.back());
 
-    ImPlot::PlotLine("IR", time_data.data(), impulse_response.data(), impulse_response.size());
+    ImPlot::PlotLine("IR", time_data.data(), impulse_response.data(), static_cast<int>(impulse_response.size()));
 
     duration_changed = ImPlot::DragLineX(0, &ir_duration, ImVec4(1.f, 1.f, 1.f, 1.f), 1.f, ImPlotDragToolFlags_None);
 

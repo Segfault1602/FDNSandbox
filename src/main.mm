@@ -12,6 +12,7 @@
 #include "imgui_impl_metal.h"
 #include "implot.h"
 #include "implot3d.h"
+#include <cstdio>
 #include <omp.h>
 
 #define GLFW_INCLUDE_NONE
@@ -27,7 +28,10 @@
 
 static void glfw_error_callback(int error, const char* description)
 {
-    fprintf(stderr, "Glfw Error %d: %s\n", error, description);
+    if (std::fprintf(stderr, "Glfw Error %d: %s\n", error, description) < 0)
+    {
+        return;
+    }
 }
 
 int main(int, char**)
@@ -51,7 +55,7 @@ int main(int, char**)
 
     // Setup window
     glfwSetErrorCallback(glfw_error_callback);
-    if (!glfwInit())
+    if (glfwInit() == 0)
         return 1;
 
     // Create window with graphics context
@@ -62,7 +66,21 @@ int main(int, char**)
         return 1;
 
     id <MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (device == nil)
+    {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
+
     id <MTLCommandQueue> commandQueue = [device newCommandQueue];
+    if (commandQueue == nil)
+    {
+        [device release];
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
 
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -76,6 +94,19 @@ int main(int, char**)
     nswin.contentView.wantsLayer = YES;
 
     MTLRenderPassDescriptor *renderPassDescriptor = [MTLRenderPassDescriptor new];
+    if (renderPassDescriptor == nil)
+    {
+        ImGui_ImplMetal_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImPlot3D::DestroyContext();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
+        [commandQueue release];
+        [device release];
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
 
     // Our state
     const ImVec4& app_background = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::ApplicationBackground);
@@ -87,7 +118,7 @@ int main(int, char**)
     FDNToolboxApp app(main_scale);
 
     // Main loop
-    while (!glfwWindowShouldClose(window))
+    while (glfwWindowShouldClose(window) == 0)
     {
         @autoreleasepool
         {
@@ -98,7 +129,8 @@ int main(int, char**)
             // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
             glfwPollEvents();
 
-            int width, height;
+            int width = 0;
+            int height = 0;
             glfwGetFramebufferSize(window, &width, &height);
             layer.drawableSize = CGSizeMake(width, height);
             id<CAMetalDrawable> drawable = [layer nextDrawable];
@@ -136,6 +168,10 @@ int main(int, char**)
     ImPlot3D::DestroyContext();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
+
+    [renderPassDescriptor release];
+    [commandQueue release];
+    [device release];
 
     glfwDestroyWindow(window);
     glfwTerminate();

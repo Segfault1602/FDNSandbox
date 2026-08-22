@@ -16,7 +16,7 @@ sfFDN::FDNConfig GetDefaultFDNConfig()
     config.transposed = false;
     config.direct_gain = 0.0f;
     config.block_size = Settings::Instance().BlockSize();
-    config.sample_rate = Settings::Instance().SampleRate();
+    config.sample_rate = Settings::Instance().SampleRateAs<float>();
     config.delay_bank_config = sfFDN::DelayBankOptions{.delays = {809, 877, 937, 1049, 1151, 1249, 1373, 1499},
                                                        .block_size = Settings::Instance().BlockSize(),
                                                        .interpolation_type = sfFDN::DelayInterpolationType::None};

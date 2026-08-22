@@ -43,9 +43,10 @@ void GetFilterResponse(std::span<const float> input, std::vector<float>& mag_res
     phase_response.resize(filter_spectrum.size());
 
     // Compute the phase response
+    constexpr auto kRadiansToDegrees = static_cast<float>(180.0 / std::numbers::pi);
     for (size_t j = 0; j < phase_response.size(); ++j)
     {
-        phase_response[j] = 180.f / std::numbers::pi * std::arg(filter_spectrum[j]);
+        phase_response[j] = kRadiansToDegrees * std::arg(filter_spectrum[j]);
     }
 
     // Compute the magnitude response
@@ -161,29 +162,31 @@ FilterData FDNAnalyzer::GetFilterData()
     {
         const Stopwatch stopwatch;
         filter_freq_bins_.resize((kFilterNFFT / 2) + 1);
+        const auto sample_rate = static_cast<float>(samplerate_);
         for (size_t i = 0; i < filter_freq_bins_.size(); ++i)
         {
-            filter_freq_bins_[i] = (static_cast<float>(i) * samplerate_) / kFilterNFFT;
+            filter_freq_bins_[i] = (static_cast<float>(i) * sample_rate) / static_cast<float>(kFilterNFFT);
         }
 
         filter_mag_responses_.clear();
         filter_phase_responses_.clear();
 
-        if (fdn_->GetLoopFilter())
+        if (fdn_->GetLoopFilter() != nullptr)
         {
-            auto filter_bank = fdn_->GetLoopFilter();
+            auto* filter_bank = fdn_->GetLoopFilter();
             filter_bank->Clear();
 
             const uint32_t kFilterCount = filter_bank->InputChannelCount();
+            const size_t impulse_size = static_cast<size_t>(kFilterNFFT) * static_cast<size_t>(kFilterCount);
 
-            std::vector<float> impulse((kFilterNFFT * kFilterCount), 0.0f);
+            std::vector<float> impulse(impulse_size, 0.0f);
             // Create an impulse for each filter
             for (uint32_t i = 0; i < kFilterCount; ++i)
             {
-                impulse[(i * kFilterNFFT)] = 1.0f;
+                impulse[static_cast<size_t>(i) * static_cast<size_t>(kFilterNFFT)] = 1.0f;
             }
 
-            std::vector<float> output((kFilterNFFT * kFilterCount), 0.0f);
+            std::vector<float> output(impulse_size, 0.0f);
 
             const sfFDN::AudioBuffer input_buffer(kFilterNFFT, kFilterCount, impulse);
             sfFDN::AudioBuffer output_buffer(kFilterNFFT, kFilterCount, output);
@@ -199,7 +202,7 @@ FilterData FDNAnalyzer::GetFilterData()
             }
         }
 
-        if (fdn_->GetTCFilter())
+        if (fdn_->GetTCFilter() != nullptr)
         {
             auto* tc_filter = fdn_->GetTCFilter();
             tc_filter->Clear();

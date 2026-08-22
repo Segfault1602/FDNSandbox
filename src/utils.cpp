@@ -62,7 +62,8 @@ bool isPrime(uint32_t n)
 
 float ComputeRMSImpl(std::span<const float> buffer)
 {
-    const Eigen::Map<const Eigen::ArrayXf> buffer_map(buffer.data(), buffer.size());
+    const auto buffer_length = static_cast<Eigen::Index>(buffer.size());
+    const Eigen::Map<const Eigen::ArrayXf> buffer_map(buffer.data(), buffer_length);
     const float rms = std::sqrt(buffer_map.square().mean());
     return rms;
 }
@@ -129,12 +130,14 @@ std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std:
 {
     const size_t K = sos.size();
 
-    const Eigen::Map<const Eigen::ArrayXf> w_map(w.data(), w.size());
-    Eigen::ArrayXcf dig_w(w.size());
+    const auto w_length = static_cast<Eigen::Index>(w.size());
+    const Eigen::Map<const Eigen::ArrayXf> w_map(w.data(), w_length);
+    Eigen::ArrayXcf dig_w(static_cast<Eigen::Index>(w.size()));
     // if sample rate is specified, convert to rad/sample
-    if (sr != 0.0f)
+    if (sr != 0U)
     {
-        dig_w = Eigen::exp(std::complex(0.0f, 1.0f) * w_map * (-2.0f * std::numbers::pi_v<float> / sr));
+        const auto sample_rate = static_cast<float>(sr);
+        dig_w = Eigen::exp(std::complex(0.0f, 1.0f) * w_map * (-2.0f * std::numbers::pi_v<float> / sample_rate));
     }
     else
     {
@@ -158,7 +161,8 @@ std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std:
     }
 
     std::vector<float> h(w.size(), 0.0f);
-    Eigen::Map<Eigen::ArrayXf> h_map(h.data(), h.size());
+    const auto h_length = static_cast<Eigen::Index>(h.size());
+    Eigen::Map<Eigen::ArrayXf> h_map(h.data(), h_length);
     h_map = h_complex.abs();
 
     return h;
@@ -178,7 +182,8 @@ bool WriteAudioFile(const std::string& filename, std::span<const float> audio_da
         return false;
     }
 
-    const sf_count_t write_count = sf_writef_float(sndfile, audio_data.data(), audio_data.size());
+    const sf_count_t write_count =
+        sf_writef_float(sndfile, audio_data.data(), static_cast<sf_count_t>(audio_data.size()));
     if (!std::cmp_equal(write_count, audio_data.size()))
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Failed to write audio file: {}", sf_strerror(sndfile));
@@ -385,10 +390,8 @@ std::vector<float> T60ToGainsDb(std::span<const float> t60s, uint32_t delay, siz
     std::vector<float> gains(t60s.size(), 0.0f);
     for (size_t i = 0; i < t60s.size(); ++i)
     {
-        // gains[i] = std::pow(10.0, -3.0 / t60s[i]);
-        // gains[i] = std::pow(gains[i], static_cast<float>(delay) / sample_rate);
-        // gains[i] = 20.f * std::log10(gains[i]);
-        gains[i] = -60.f / (t60s[i] * sample_rate);
+        const auto sample_rate_float = static_cast<float>(sample_rate);
+        gains[i] = -60.f / (t60s[i] * sample_rate_float);
         gains[i] *= static_cast<float>(delay);
     }
 
@@ -430,7 +433,8 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
                 config.matrix_size = new_size;
                 if (config.custom_matrix.has_value())
                 {
-                    config.custom_matrix->resize(new_size * new_size, 0.f);
+                    const size_t matrix_size = static_cast<size_t>(new_size) * static_cast<size_t>(new_size);
+                    config.custom_matrix->resize(matrix_size, 0.f);
                 }
             },
             [new_size](sfFDN::MultichannelFirOptions& config) {

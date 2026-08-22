@@ -284,7 +284,7 @@ bool FDNToolboxApp::DrawLoopFiltersSection()
         }
         for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
         {
-            ImGui::PushID(i);
+            ImGui::PushID(static_cast<int>(i));
             filter_bank_changed |= DrawFDNOptions(filter_bank.filter_configs[i], fdn_config_);
             ImGui::PopID();
         }

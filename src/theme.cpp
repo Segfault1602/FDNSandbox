@@ -15,42 +15,43 @@ namespace fdn_sandbox::theme
 {
 namespace
 {
-using ColorArray = std::array<ImVec4, static_cast<size_t>(ColorRole::Count)>;
+using ColorValue = std::array<float, 4>;
+using ColorArray = std::array<ColorValue, static_cast<size_t>(ColorRole::Count)>;
 using FontArray = std::array<ImFont*, static_cast<size_t>(FontRole::Count)>;
 
-const ColorArray kColors = {
-    ImVec4(0.067f, 0.075f, 0.086f, 1.000f), // ApplicationBackground
-    ImVec4(0.106f, 0.118f, 0.133f, 1.000f), // WindowBackground
-    ImVec4(0.090f, 0.102f, 0.118f, 1.000f), // PanelBackground
-    ImVec4(0.075f, 0.086f, 0.102f, 1.000f), // InsetBackground
-    ImVec4(0.125f, 0.141f, 0.165f, 0.980f), // OverlayBackground
-    ImVec4(0.133f, 0.165f, 0.192f, 1.000f), // FieldBackground
-    ImVec4(0.165f, 0.216f, 0.251f, 1.000f), // FieldHovered
-    ImVec4(0.192f, 0.286f, 0.333f, 1.000f), // FieldActive
-    ImVec4(0.161f, 0.196f, 0.231f, 1.000f), // ButtonBackground
-    ImVec4(0.200f, 0.263f, 0.306f, 1.000f), // ButtonHovered
-    ImVec4(0.200f, 0.384f, 0.451f, 1.000f), // ButtonActive
-    ImVec4(0.906f, 0.918f, 0.929f, 1.000f), // TextPrimary
-    ImVec4(0.553f, 0.588f, 0.620f, 1.000f), // TextSecondary
-    ImVec4(0.243f, 0.624f, 0.757f, 1.000f), // Accent
-    ImVec4(0.345f, 0.706f, 0.824f, 1.000f), // AccentHovered
-    ImVec4(0.176f, 0.471f, 0.576f, 1.000f), // AccentActive
-    ImVec4(0.267f, 0.318f, 0.365f, 1.000f), // Border
-    ImVec4(0.169f, 0.192f, 0.220f, 1.000f), // Separator
-    ImVec4(0.349f, 0.663f, 0.416f, 1.000f), // StatusOk
-    ImVec4(0.835f, 0.655f, 0.227f, 1.000f), // StatusWarning
-    ImVec4(0.839f, 0.325f, 0.302f, 1.000f), // StatusError
-    ImVec4(0.349f, 0.663f, 0.416f, 1.000f), // MeterSafe
-    ImVec4(0.835f, 0.655f, 0.227f, 1.000f), // MeterWarning
-    ImVec4(0.886f, 0.471f, 0.239f, 1.000f), // MeterHot
-    ImVec4(0.290f, 0.565f, 0.761f, 1.000f), // PlotFdn
-    ImVec4(0.890f, 0.427f, 0.490f, 1.000f), // PlotReference
-    ImVec4(0.722f, 0.537f, 0.839f, 1.000f), // PlotOptimization
-    ImVec4(0.388f, 0.773f, 0.651f, 1.000f), // PlotAnalysis1
-    ImVec4(0.929f, 0.663f, 0.298f, 1.000f), // PlotAnalysis2
-    ImVec4(0.510f, 0.671f, 0.886f, 1.000f), // PlotAnalysis3
-    ImVec4(0.839f, 0.502f, 0.737f, 1.000f), // PlotAnalysis4
-    ImVec4(0.655f, 0.773f, 0.349f, 1.000f), // PlotAnalysis5
+constexpr ColorArray kColors = {
+    ColorValue{0.067f, 0.075f, 0.086f, 1.000f}, // ApplicationBackground
+    ColorValue{0.106f, 0.118f, 0.133f, 1.000f}, // WindowBackground
+    ColorValue{0.090f, 0.102f, 0.118f, 1.000f}, // PanelBackground
+    ColorValue{0.075f, 0.086f, 0.102f, 1.000f}, // InsetBackground
+    ColorValue{0.125f, 0.141f, 0.165f, 0.980f}, // OverlayBackground
+    ColorValue{0.133f, 0.165f, 0.192f, 1.000f}, // FieldBackground
+    ColorValue{0.165f, 0.216f, 0.251f, 1.000f}, // FieldHovered
+    ColorValue{0.192f, 0.286f, 0.333f, 1.000f}, // FieldActive
+    ColorValue{0.161f, 0.196f, 0.231f, 1.000f}, // ButtonBackground
+    ColorValue{0.200f, 0.263f, 0.306f, 1.000f}, // ButtonHovered
+    ColorValue{0.200f, 0.384f, 0.451f, 1.000f}, // ButtonActive
+    ColorValue{0.906f, 0.918f, 0.929f, 1.000f}, // TextPrimary
+    ColorValue{0.553f, 0.588f, 0.620f, 1.000f}, // TextSecondary
+    ColorValue{0.243f, 0.624f, 0.757f, 1.000f}, // Accent
+    ColorValue{0.345f, 0.706f, 0.824f, 1.000f}, // AccentHovered
+    ColorValue{0.176f, 0.471f, 0.576f, 1.000f}, // AccentActive
+    ColorValue{0.267f, 0.318f, 0.365f, 1.000f}, // Border
+    ColorValue{0.169f, 0.192f, 0.220f, 1.000f}, // Separator
+    ColorValue{0.349f, 0.663f, 0.416f, 1.000f}, // StatusOk
+    ColorValue{0.835f, 0.655f, 0.227f, 1.000f}, // StatusWarning
+    ColorValue{0.839f, 0.325f, 0.302f, 1.000f}, // StatusError
+    ColorValue{0.349f, 0.663f, 0.416f, 1.000f}, // MeterSafe
+    ColorValue{0.835f, 0.655f, 0.227f, 1.000f}, // MeterWarning
+    ColorValue{0.886f, 0.471f, 0.239f, 1.000f}, // MeterHot
+    ColorValue{0.290f, 0.565f, 0.761f, 1.000f}, // PlotFdn
+    ColorValue{0.890f, 0.427f, 0.490f, 1.000f}, // PlotReference
+    ColorValue{0.722f, 0.537f, 0.839f, 1.000f}, // PlotOptimization
+    ColorValue{0.388f, 0.773f, 0.651f, 1.000f}, // PlotAnalysis1
+    ColorValue{0.929f, 0.663f, 0.298f, 1.000f}, // PlotAnalysis2
+    ColorValue{0.510f, 0.671f, 0.886f, 1.000f}, // PlotAnalysis3
+    ColorValue{0.839f, 0.502f, 0.737f, 1.000f}, // PlotAnalysis4
+    ColorValue{0.655f, 0.773f, 0.349f, 1.000f}, // PlotAnalysis5
 };
 
 FontArray fonts{};
@@ -64,16 +65,22 @@ constexpr std::array<float, static_cast<size_t>(FontRole::Count)> kFontSizes = {
 
 ImVec4 WithAlpha(const ImVec4& color, float alpha)
 {
-    return ImVec4(color.x, color.y, color.z, alpha);
+    return {color.x, color.y, color.z, alpha};
+}
+
+ImVec4 ToImVec4(const ColorValue& color)
+{
+    const auto [red, green, blue, alpha] = color;
+    return {red, green, blue, alpha};
 }
 
 } // namespace
 
-const ImVec4& Color(ColorRole role)
+ImVec4 Color(ColorRole role)
 {
     const auto index = static_cast<size_t>(role);
     assert(index < kColors.size());
-    return kColors[index];
+    return ToImVec4(kColors.at(index));
 }
 
 void InitializeFonts()

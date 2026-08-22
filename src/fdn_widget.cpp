@@ -70,7 +70,8 @@ std::optional<std::vector<float>> ReadMatrixFromClipboard(uint32_t matrix_size)
         return std::nullopt;
     }
 
-    std::vector<float> matrix(matrix_size * matrix_size, 0.0f);
+    const size_t matrix_count = static_cast<size_t>(matrix_size) * static_cast<size_t>(matrix_size);
+    std::vector<float> matrix(matrix_count, 0.0f);
     std::istringstream clipboard_stream{std::string{clipboard_text}};
     std::string line;
     for (size_t row = 0; row < matrix_size && std::getline(clipboard_stream, line); ++row)
@@ -83,7 +84,8 @@ std::optional<std::vector<float>> ReadMatrixFromClipboard(uint32_t matrix_size)
             {
                 break;
             }
-            matrix[(row * matrix_size) + column] = value;
+            const size_t index = (row * static_cast<size_t>(matrix_size)) + column;
+            matrix[index] = value;
         }
     }
 
@@ -156,7 +158,8 @@ bool DrawDelayInterpolationType(sfFDN::DelayBankOptions& config)
 
 void DrawDelayRange(DelayRange& range, uint32_t block_size)
 {
-    ImGui::DragIntRange2("Delay Range", &range.minimum, &range.maximum, 1, block_size, 0, "%d samples", "%d samples",
+    const int block_size_i = static_cast<int>(block_size);
+    ImGui::DragIntRange2("Delay Range", &range.minimum, &range.maximum, 1, block_size_i, 0, "%d samples", "%d samples",
                          ImGuiSliderFlags_AlwaysClamp);
     range.minimum = std::max(range.minimum, 0);
     range.maximum = std::max(range.maximum, range.minimum + 1);
@@ -193,8 +196,9 @@ bool DrawDelayPresetsPopup(sfFDN::DelayBankOptions& config, const sfFDN::FDNConf
     {
         if (ImGui::Selectable(utils::GetDelayLengthTypeName(index).c_str()))
         {
-            config.delays = sfFDN::GetDelayLengths(fdn_config.fdn_size, range.minimum, range.maximum,
-                                                   static_cast<sfFDN::DelayLengthType>(index));
+            config.delays =
+                sfFDN::GetDelayLengths(fdn_config.fdn_size, static_cast<float>(range.minimum),
+                                       static_cast<float>(range.maximum), static_cast<sfFDN::DelayLengthType>(index));
             config_changed = true;
         }
     }
@@ -376,7 +380,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::ParallelGainsOptions& config) const
     bool config_changed = false;
     if (config.gains.size() != fdn_config.fdn_size)
     {
-        config.gains.resize(fdn_config.fdn_size, 1.f / fdn_config.fdn_size);
+        config.gains.resize(fdn_config.fdn_size, 1.f / static_cast<float>(fdn_config.fdn_size));
         config_changed = true;
     }
 
@@ -519,8 +523,8 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
 
         for (int i = 0; i < num_sections; ++i)
         {
-            config.delays[i] = distr(eng); // Generate random delays
-            config.delays[i] = utils::GetClosestPrime(static_cast<uint32_t>(config.delays[i]));
+            config.delays[i] = static_cast<float>(distr(eng)); // Generate random delays
+            config.delays[i] = static_cast<float>(utils::GetClosestPrime(static_cast<uint32_t>(config.delays[i])));
         }
 
         config_changed = true;
@@ -546,7 +550,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
             ImGui::PushID(row);
             config_changed |= ImGui::DragInt("##delay", &delay, 1, 1, 9999);
             delay = std::clamp(delay, 1, 9999);
-            config.delays[row] = delay;
+            config.delays[row] = static_cast<float>(delay);
             ImGui::PopID();
 
             ImGui::TableSetColumnIndex(1);
@@ -598,8 +602,8 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
         {
             for (auto& delay : section.delays)
             {
-                delay = distr(eng); // Generate random delays
-                delay = utils::GetClosestPrime(static_cast<uint32_t>(delay));
+                delay = static_cast<float>(distr(eng)); // Generate random delays
+                delay = static_cast<float>(utils::GetClosestPrime(static_cast<uint32_t>(delay)));
             }
         }
 
@@ -635,7 +639,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
 
                 config_changed |= ImGui::DragInt("##delay", &delay, 1, 1, 9999);
                 delay = std::clamp(delay, 1, 9999);
-                section.delays[col] = delay;
+                section.delays[col] = static_cast<float>(delay);
                 ImGui::PopID();
             }
 
@@ -838,7 +842,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::FirOptions& config) const
         // ImPlot::SetupAxisLimits(ImAxis_X1, 0, config.sequence.size(), ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0, 1.0, ImPlotCond_Always);
 
-        ImPlot::PlotLine("Velvet Noise", config.coeffs.data(), config.coeffs.size());
+        ImPlot::PlotLine("Velvet Noise", config.coeffs.data(), static_cast<int>(config.coeffs.size()));
         ImPlot::EndPlot();
     }
 
@@ -973,7 +977,7 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
         // Remove processors in reverse order to avoid invalidating indices
         for (auto& it : std::ranges::reverse_view(processors_to_remove))
         {
-            processors.erase(processors.begin() + it);
+            processors.erase(processors.begin() + static_cast<std::ptrdiff_t>(it));
             config_changed = true;
         }
     }
