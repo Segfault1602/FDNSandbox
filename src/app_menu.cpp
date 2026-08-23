@@ -1,7 +1,5 @@
 #include "app.h"
 
-#include <audio_utils/audio_file_manager.h>
-
 #include <audio_utils/audio_analysis.h>
 
 #include "icons.h"
@@ -94,7 +92,7 @@ void FDNToolboxApp::DrawMainMenuBar()
     }
 
     DrawAudioConfigurationWindow(show_audio_config_window);
-    ProcessFileBrowserSelections();
+    ProcessFileDialogSelections();
 }
 
 void FDNToolboxApp::DrawFileMenu()
@@ -106,19 +104,19 @@ void FDNToolboxApp::DrawFileMenu()
 
     if (ImGui::MenuItem("Save IR"))
     {
-        save_ir_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::SaveImpulseResponse);
     }
     if (ImGui::MenuItem("Load Config"))
     {
-        load_config_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::LoadConfiguration);
     }
     if (ImGui::MenuItem("Save Config"))
     {
-        save_config_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::SaveConfiguration);
     }
     if (ImGui::MenuItem("Load RIR"))
     {
-        load_rir_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::LoadRir);
     }
     ImGui::EndMenu();
 }
@@ -158,15 +156,13 @@ void FDNToolboxApp::DrawViewMenu()
 
 void FDNToolboxApp::DrawConfigurationSwitcher()
 {
-    uint32_t selected_config_slot =
-        fdn_session_.ActiveSlot() == fdn_sandbox::session::FdnSlot::A ? 0U : 1U;
+    uint32_t selected_config_slot = fdn_session_.ActiveSlot() == fdn_sandbox::session::FdnSlot::A ? 0U : 1U;
     if (!FancyButtons("A", "B", selected_config_slot))
     {
         return;
     }
 
-    const auto slot = selected_config_slot == 0 ? fdn_sandbox::session::FdnSlot::A
-                                                : fdn_sandbox::session::FdnSlot::B;
+    const auto slot = selected_config_slot == 0 ? fdn_sandbox::session::FdnSlot::A : fdn_sandbox::session::FdnSlot::B;
     auto commit = fdn_session_.SwitchTo(slot, Settings::Instance().SampleRateAs<float>());
     if (!commit)
     {
@@ -202,127 +198,89 @@ void FDNToolboxApp::DrawAudioConfigurationWindow(bool& show_audio_config_window)
     ImGui::End();
 }
 
-void FDNToolboxApp::ProcessFileBrowserSelections()
+void FDNToolboxApp::ProcessFileDialogSelections()
 {
-    save_ir_browser.Display();
-    load_config_browser.Display();
-    save_config_browser.Display();
-    load_rir_browser.Display();
-
-    if (save_ir_browser.HasSelected())
+    for (const auto& selection : file_dialogs_.Draw())
     {
-        SaveSelectedImpulseResponse();
-    }
-    if (load_config_browser.HasSelected())
-    {
-        LoadSelectedConfiguration();
-    }
-    if (save_config_browser.HasSelected())
-    {
-        SaveSelectedConfiguration();
-    }
-    if (load_rir_browser.HasSelected())
-    {
-        LoadSelectedRIR();
+        std::visit([this](const auto& value) { HandleFileDialogSelection(value); }, selection);
     }
 }
 
-void FDNToolboxApp::SaveSelectedImpulseResponse()
+void FDNToolboxApp::HandleFileDialogSelection(const fdn_sandbox::files::SaveImpulseResponseSelection& selection)
 {
-    std::string filename = save_ir_browser.GetSelected().string();
-    if (!filename.ends_with(".wav"))
-    {
-        filename += ".wav";
-    }
-    if (utils::WriteAudioFile(filename, analysis_workspace_.Generated().GetImpulseResponse(),
-                              static_cast<int>(Settings::Instance().SampleRate())))
+    const auto result = file_workflows_.SaveImpulseResponse(
+        selection.path, analysis_workspace_.Generated().GetImpulseResponse(), Settings::Instance().SampleRate());
+    if (result)
     {
         notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "ir-saved", "Impulse response saved",
-                                  filename);
+                                  selection.path.string());
+        return;
     }
-    else
-    {
-        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "ir-save-failed",
-                                  "Failed to save impulse response", filename, 6.0);
-    }
-    save_ir_browser.ClearSelected();
+
+    LOG_ERROR(Settings::Instance().GetLogger(), "Failed to save impulse response to {}: {}",
+              result.error().path.string(), result.error().message);
+    notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "ir-save-failed",
+                              "Failed to save impulse response", result.error().message, 6.0);
 }
 
-void FDNToolboxApp::LoadSelectedConfiguration()
+void FDNToolboxApp::HandleFileDialogSelection(const fdn_sandbox::files::LoadConfigurationSelection& selection)
 {
+    static_cast<void>(selection);
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Warning, "config-load-not-implemented",
                               "Configuration loading", "Loading configuration files is not implemented yet.");
-    load_config_browser.ClearSelected();
 }
 
-void FDNToolboxApp::SaveSelectedConfiguration()
+void FDNToolboxApp::HandleFileDialogSelection(const fdn_sandbox::files::SaveConfigurationSelection& selection)
 {
-    std::string filename = save_config_browser.GetSelected().string();
-    if (!filename.ends_with(".json"))
-    {
-        filename += ".json";
-    }
+    static_cast<void>(selection);
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Warning, "config-save-not-implemented",
                               "Configuration saving", "Saving configuration files is not implemented yet.");
-    save_config_browser.ClearSelected();
 }
 
-void FDNToolboxApp::LoadSelectedRIR()
+void FDNToolboxApp::HandleFileDialogSelection(const fdn_sandbox::files::LoadRirSelection& selection)
 {
-    const std::string filename = load_rir_browser.GetSelected().string();
-    std::vector<float> buffer;
-    int file_sample_rate = static_cast<int>(Settings::Instance().SampleRate());
-    int file_num_channels = 0;
-    if (!audio_utils::audio_file::ReadWavFile(filename, buffer, file_sample_rate, file_num_channels))
+    auto loaded = file_workflows_.LoadRir(selection.path, fdn_sandbox::audio::kSystemBlockSize);
+    if (!loaded)
     {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to load RIR file: {}", filename);
-        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-load-failed", "Failed to load RIR",
-                                  filename, 6.0);
-        load_rir_browser.ClearSelected();
+        const auto& error = loaded.error();
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to load RIR file {}: {}", error.path.string(),
+                  error.message);
+        if (error.kind == fdn_sandbox::files::FileErrorKind::UnsupportedChannelCount)
+        {
+            notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-invalid-channels", "Invalid RIR",
+                                      error.message, 6.0);
+        }
+        else if (error.kind == fdn_sandbox::files::FileErrorKind::EmptyAudio)
+        {
+            notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-empty", "Invalid RIR",
+                                      error.message, 6.0);
+        }
+        else
+        {
+            notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-load-failed", "Failed to load RIR",
+                                      error.message, 6.0);
+        }
         return;
     }
-    if (file_num_channels != 1)
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "RIR file must be mono. Loaded file has {} channels.",
-                  file_num_channels);
-        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-invalid-channels", "Invalid RIR",
-                                  std::format("Expected mono audio, found {} channels.", file_num_channels), 6.0);
-        load_rir_browser.ClearSelected();
-        return;
-    }
-    if (buffer.empty())
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "RIR file contains no audio samples: {}", filename);
-        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-empty", "Invalid RIR",
-                                  "The selected file contains no audio samples.", 6.0);
-        load_rir_browser.ClearSelected();
-        return;
-    }
-
-    LOG_INFO(Settings::Instance().GetLogger(), "Loaded RIR file: {} ({} Hz, {} channels, {} samples)", filename,
-             file_sample_rate, file_num_channels, buffer.size());
-    auto convolution_reverb =
-        std::make_unique<sfFDN::PartitionedConvolver>(fdn_sandbox::audio::kSystemBlockSize, buffer);
-    LOG_INFO(Settings::Instance().GetLogger(), "Created PartitionedConvolver with {}",
-             convolution_reverb->GetShortInfo());
-    analysis_workspace_.SetReferenceIr(
-        std::move(buffer),
-        fdn_sandbox::analysis::ReferenceIrMetadata{
-            .filename = filename,
-            .analysis_sample_rate = static_cast<std::uint32_t>(file_sample_rate),
-        });
-    if (!audio_engine_.TryInstallConvolver(std::move(convolution_reverb)))
+    if (!audio_engine_.TryInstallConvolver(std::move(loaded->convolver)))
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Audio engine rejected the loaded RIR");
         notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-install-failed",
                                   "Failed to activate RIR", "The audio engine rejected the convolver.", 6.0);
-        load_rir_browser.ClearSelected();
         return;
     }
+
+    const std::size_t sample_count = loaded->mono_samples.size();
+    const std::string filename = loaded->path.string();
+    const std::uint32_t sample_rate = loaded->effective_sample_rate;
+    analysis_workspace_.SetReferenceIr(std::move(loaded->mono_samples), fdn_sandbox::analysis::ReferenceIrMetadata{
+                                                                            .filename = filename,
+                                                                            .analysis_sample_rate = sample_rate,
+                                                                        });
+    LOG_INFO(Settings::Instance().GetLogger(), "Loaded RIR file: {} ({} Hz, 1 channel, {} samples)", filename,
+             sample_rate, sample_count);
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "rir-loaded", "RIR loaded",
-                              std::format("{} ({} samples)", std::filesystem::path(filename).filename().string(),
-                                          analysis_workspace_.Reference().GetImpulseResponseSize()));
-    load_rir_browser.ClearSelected();
+                              std::format("{} ({} samples)", loaded->path.filename().string(), sample_count));
 }
 void FDNToolboxApp::DrawSettingsWindow()
 {
@@ -349,8 +307,7 @@ void FDNToolboxApp::DrawSettingsWindow()
     if (ImGui::Combo("##Type", &selected_spectrogram_type, kSpectrogramTypes.data(),
                      static_cast<int>(kSpectrogramTypes.size())))
     {
-        spectrogram_settings.scale =
-            static_cast<fdn_sandbox::analysis::SpectrogramScale>(selected_spectrogram_type);
+        spectrogram_settings.scale = static_cast<fdn_sandbox::analysis::SpectrogramScale>(selected_spectrogram_type);
         analysis_workspace_.SetSpectrogramSettings(spectrogram_settings);
     }
     constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};

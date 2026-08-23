@@ -1,0 +1,40 @@
+#pragma once
+
+#include "audio/audio_clip.h"
+#include "files/file_error.h"
+
+#include <sffdn/sffdn.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <memory>
+#include <span>
+#include <vector>
+
+namespace fdn_sandbox::files
+{
+
+struct LoadedRir
+{
+    std::filesystem::path path;
+    std::uint32_t effective_sample_rate;
+    std::vector<float> mono_samples;
+    std::unique_ptr<sfFDN::PartitionedConvolver> convolver;
+};
+
+class FileWorkflows final
+{
+  public:
+    std::expected<LoadedRir, FileError> LoadRir(const std::filesystem::path& path,
+                                                std::size_t convolution_block_size) const;
+
+    std::expected<audio::AudioClip, FileError> LoadClip(const std::filesystem::path& path,
+                                                        std::uint32_t engine_sample_rate) const;
+
+    std::expected<void, FileError> SaveImpulseResponse(const std::filesystem::path& path,
+                                                       std::span<const float> samples, std::uint32_t sample_rate) const;
+};
+
+} // namespace fdn_sandbox::files

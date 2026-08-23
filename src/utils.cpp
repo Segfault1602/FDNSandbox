@@ -144,38 +144,6 @@ std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std:
     return h;
 }
 
-bool WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate)
-{
-    SF_INFO sf_info{};
-    sf_info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT; // Use WAV format with float samples
-    sf_info.samplerate = sample_rate;
-    sf_info.channels = 1; // Mono audio
-
-    SNDFILE* sndfile = sf_open(filename.c_str(), SFM_WRITE, &sf_info);
-    if (sndfile == nullptr)
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to open audio file for writing: {}", sf_strerror(nullptr));
-        return false;
-    }
-
-    const sf_count_t write_count =
-        sf_writef_float(sndfile, audio_data.data(), static_cast<sf_count_t>(audio_data.size()));
-    if (!std::cmp_equal(write_count, audio_data.size()))
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to write audio file: {}", sf_strerror(sndfile));
-        sf_close(sndfile);
-        return false;
-    }
-
-    const int close_error = sf_close(sndfile);
-    if (close_error != 0)
-    {
-        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to finalize audio file: {}", sf_error_number(close_error));
-        return false;
-    }
-    return true;
-}
-
 uint32_t GetChannelCountFromAudioFile(std::string_view filename)
 {
     const std::string filename_string(filename);

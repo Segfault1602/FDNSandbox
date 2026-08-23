@@ -8,8 +8,8 @@
 #include <imgui.h>
 #include <quill/LogMacros.h>
 
-#include <chrono>
 #include <cassert>
+#include <chrono>
 #include <stdexcept>
 
 FDNToolboxApp::FDNToolboxApp(float ui_scale)
@@ -17,27 +17,11 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
     , fdn_session_(presets::GetDefaultFDNConfig())
     , analysis_workspace_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
     , optimization_gui_(Settings::Instance().GetLogger())
-    , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
-    , load_config_browser(0)
-    , save_config_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
-    , load_rir_browser(0)
 {
     LOG_INFO(Settings::Instance().GetLogger(), "Starting FDN Toolbox");
 
     fdn_sandbox::theme::Apply(ui_scale);
     fdn_sandbox::theme::InitializeFonts();
-
-    save_ir_browser.SetTitle("Save Impulse Response");
-    save_ir_browser.SetTypeFilters({".wav"});
-
-    load_config_browser.SetTitle("Load FDN Configuration");
-    load_config_browser.SetTypeFilters({".json"});
-
-    save_config_browser.SetTitle("Save FDN Configuration");
-    save_config_browser.SetTypeFilters({".json"});
-
-    load_rir_browser.SetTitle("Load RIR File");
-    load_rir_browser.SetTypeFilters({".wav"});
 
     UpdateFDN();
 
@@ -173,6 +157,6 @@ void FDNToolboxApp::PublishFdnCommit(fdn_sandbox::session::FdnCommit commit)
 void FDNToolboxApp::ReportFdnBuildError(const fdn_sandbox::session::FdnBuildError& error)
 {
     LOG_ERROR(Settings::Instance().GetLogger(), "Failed to build FDN: {}", error.message);
-    notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-build-failed",
-                              "Failed to build FDN", error.message, 6.0);
+    notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-build-failed", "Failed to build FDN",
+                              error.message, 6.0);
 }

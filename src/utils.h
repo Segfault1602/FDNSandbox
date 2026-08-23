@@ -71,15 +71,6 @@ std::vector<float> pchip(PchipInput input);
  */
 std::vector<float> AbsFreqz(std::span<const sfFDN::FilterCoefficients> sos, std::span<const float> w, size_t sr);
 
-/**
- * @brief Write audio samples to a file.
- *
- * @param filename The path to the audio file.
- * @param audio_data The audio samples to write.
- * @param sample_rate The sample rate of the audio.
- */
-bool WriteAudioFile(const std::string& filename, std::span<const float> audio_data, int sample_rate);
-
 uint32_t GetChannelCountFromAudioFile(std::string_view filename);
 
 std::vector<float> ReadAudioFile(std::string_view filename, uint32_t channel);

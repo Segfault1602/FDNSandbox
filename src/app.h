@@ -2,10 +2,10 @@
 
 #include <imgui.h>
 
-#include <imfilebrowser.h>
-
-#include "audio/audio_engine.h"
 #include "analysis/analysis_workspace.h"
+#include "audio/audio_engine.h"
+#include "files/file_dialogs.h"
+#include "files/file_workflows.h"
 #include "notifications.h"
 #include "optimization_gui.h"
 #include "session/fdn_session.h"
@@ -91,11 +91,11 @@ class FDNToolboxApp
     void DrawConfigurationSwitcher();
     static void DrawFrameRateStatus();
     void DrawAudioConfigurationWindow(bool& show_audio_config_window);
-    void ProcessFileBrowserSelections();
-    void SaveSelectedImpulseResponse();
-    void LoadSelectedConfiguration();
-    void SaveSelectedConfiguration();
-    void LoadSelectedRIR();
+    void ProcessFileDialogSelections();
+    void HandleFileDialogSelection(const fdn_sandbox::files::SaveImpulseResponseSelection& selection);
+    void HandleFileDialogSelection(const fdn_sandbox::files::LoadConfigurationSelection& selection);
+    void HandleFileDialogSelection(const fdn_sandbox::files::SaveConfigurationSelection& selection);
+    void HandleFileDialogSelection(const fdn_sandbox::files::LoadRirSelection& selection);
 
     struct StructureSectionResult
     {
@@ -128,10 +128,6 @@ class FDNToolboxApp
 
     fdn_sandbox::analysis::AnalysisWorkspace analysis_workspace_;
     OptimizationGUI optimization_gui_;
-
-    ImGui::FileBrowser save_ir_browser;
-    ImGui::FileBrowser load_config_browser;
-    ImGui::FileBrowser save_config_browser;
-    ImGui::FileBrowser load_rir_browser;
-
+    fdn_sandbox::files::FileWorkflows file_workflows_;
+    fdn_sandbox::files::FileDialogs file_dialogs_;
 };

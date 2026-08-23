@@ -74,22 +74,22 @@ void FDNToolboxApp::DrawQuickFileActions()
 {
     if (ImGui::Button(fdn_sandbox::icons::LoadRir))
     {
-        load_rir_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::LoadRir);
     }
     ImGui::SameLine();
     if (ImGui::Button(fdn_sandbox::icons::LoadConfig))
     {
-        load_config_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::LoadConfiguration);
     }
     ImGui::SameLine();
     if (ImGui::Button(fdn_sandbox::icons::SaveConfig))
     {
-        save_config_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::SaveConfiguration);
     }
     ImGui::SameLine();
     if (ImGui::Button(fdn_sandbox::icons::SaveIr))
     {
-        save_ir_browser.Open();
+        file_dialogs_.Open(fdn_sandbox::files::FileDialogRequest::SaveImpulseResponse);
     }
 }
 

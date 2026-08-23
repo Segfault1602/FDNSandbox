@@ -1,6 +1,5 @@
 #include "app.h"
 
-#include "audio/audio_clip_loader.h"
 #include "icons.h"
 #include "settings.h"
 #include "theme.h"
@@ -75,13 +74,13 @@ void FDNToolboxApp::PlaySelectedAudioFile(int selected_audio_file)
     const auto audio_path = boost::dll::program_location().parent_path() / "audio" /
                             kAudioFiles.at(static_cast<size_t>(selected_audio_file));
     LOG_INFO(Settings::Instance().GetLogger(), "Playing audio file: {}", audio_path.string());
-    auto clip =
-        fdn_sandbox::audio::LoadAudioClip(std::filesystem::path(audio_path.string()), Settings::Instance().SampleRate());
-    if (clip && audio_engine_.TryInstallClip(std::move(*clip)) && audio_engine_.PlayClip(true))
+    auto clip = file_workflows_.LoadClip(std::filesystem::path(audio_path.string()), Settings::Instance().SampleRate());
+    if (clip && audio_engine_.TryInstallClip(std::make_unique<fdn_sandbox::audio::AudioClip>(std::move(*clip))) &&
+        audio_engine_.PlayClip(true))
     {
         return;
     }
-    const std::string error = clip ? "Failed to submit the decoded clip." : clip.error();
+    const std::string error = clip ? "Failed to submit the decoded clip." : clip.error().message;
     LOG_ERROR(Settings::Instance().GetLogger(), "Failed to play audio file: {}", error);
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "audio-clip-load-failed",
                               "Failed to play audio clip", error, 6.0);
@@ -145,8 +144,7 @@ void FDNToolboxApp::DrawConvolutionControls()
 {
     if (analysis_workspace_.HasReference())
     {
-        int selected_reverb_engine =
-            audio_engine_.GetReverbEngine() == fdn_sandbox::audio::ReverbEngine::Fdn ? 0 : 1;
+        int selected_reverb_engine = audio_engine_.GetReverbEngine() == fdn_sandbox::audio::ReverbEngine::Fdn ? 0 : 1;
         ImGui::RadioButton("FDN Reverb", &selected_reverb_engine, 0);
         ImGui::SameLine();
         ImGui::RadioButton("Convolution Reverb", &selected_reverb_engine, 1);
@@ -346,10 +344,9 @@ void DrawAudioStreamStatus(fdn_sandbox::audio::AudioEngine& engine)
 {
     ImGui::Text("Stream Status: ");
     ImGui::SameLine();
-    const auto status_color = engine.IsRunning() ? fdn_sandbox::theme::ColorRole::StatusOk
-                                                 : fdn_sandbox::theme::ColorRole::StatusError;
-    ImGui::TextColored(fdn_sandbox::theme::Color(status_color),
-                       engine.IsRunning() ? "Running" : "Stopped");
+    const auto status_color =
+        engine.IsRunning() ? fdn_sandbox::theme::ColorRole::StatusOk : fdn_sandbox::theme::ColorRole::StatusError;
+    ImGui::TextColored(fdn_sandbox::theme::Color(status_color), engine.IsRunning() ? "Running" : "Stopped");
 
     const auto audio_stream_info = engine.GetStreamInfo();
     ImGui::Text("Sample Rate: %d", audio_stream_info.sample_rate);

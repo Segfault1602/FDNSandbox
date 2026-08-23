@@ -29,7 +29,6 @@ target_link_libraries(
 add_library(
     fdn_sandbox_audio
     STATIC audio/audio_block_ops.cpp
-           audio/audio_clip_loader.cpp
            audio/audio_runtime.cpp
 )
 add_library(fdn_sandbox::audio ALIAS fdn_sandbox_audio)
@@ -59,6 +58,20 @@ target_link_libraries(
     PRIVATE fdn_sandbox::fdn_sandbox_warnings
 )
 
+# ====== Headless file workflows ======
+add_library(fdn_sandbox_files STATIC files/file_workflows.cpp)
+add_library(fdn_sandbox::files ALIAS fdn_sandbox_files)
+
+target_include_directories(fdn_sandbox_files PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    fdn_sandbox_files
+    PUBLIC sfFDN::sfFDN
+           fdn_sandbox::fdn_sandbox_options
+    PRIVATE samplerate
+            SndFile::sndfile
+            fdn_sandbox::fdn_sandbox_warnings
+)
+
 # ====== FDN Sandbox App logic =======
 add_library(fdn_sandbox_app STATIC)
 target_sources(
@@ -72,6 +85,7 @@ target_sources(
             app_config.cpp
             app_audio.cpp
             app_analysis.cpp
+            files/file_dialogs.cpp
             fdn_info.cpp
             fdn_widget.cpp
             app_imconfig.h
@@ -101,6 +115,7 @@ target_link_libraries(
            fdn_sandbox::analysis
            fdn_sandbox::audio
            fdn_sandbox::audio_engine
+           fdn_sandbox::files
            fdn_sandbox::fdn_sandbox_options
            fdn_sandbox::fdn_sandbox_warnings
 )
