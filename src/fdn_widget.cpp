@@ -1012,8 +1012,7 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
         for (size_t i = 0; i < processors.size(); ++i)
         {
             auto& processor = processors[i];
-            auto processor_id = reinterpret_cast<std::ptrdiff_t>(&processor);
-            ImGui::PushID(static_cast<int>(processor_id));
+            ImGui::PushID(static_cast<int>(i));
             if (ImGui::Button("edit"))
             {
                 ImGui::OpenPopup("edit_processor_popup");
@@ -1109,8 +1108,7 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
         for (size_t i = 0; i < processors.size(); ++i)
         {
             auto& processor = processors[i];
-            auto processor_id = reinterpret_cast<std::ptrdiff_t>(&processor);
-            ImGui::PushID(static_cast<int>(processor_id));
+            ImGui::PushID(static_cast<int>(i));
             if (ImGui::Button("edit"))
             {
                 ImGui::OpenPopup("edit_processor_popup");
