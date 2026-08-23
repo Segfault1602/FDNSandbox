@@ -16,6 +16,7 @@
 namespace fdn_sandbox::files
 {
 
+/// A decoded mono RIR and the convolver prepared from the same samples.
 struct LoadedRir
 {
     std::filesystem::path path;
@@ -24,6 +25,12 @@ struct LoadedRir
     std::unique_ptr<sfFDN::PartitionedConvolver> convolver;
 };
 
+/**
+ * @brief Performs headless, non-real-time audio file operations.
+ *
+ * Decodes clips and RIRs, resamples clips, prepares convolvers, and writes
+ * impulse responses without depending on ImGui or application notifications.
+ */
 class FileWorkflows final
 {
   public:

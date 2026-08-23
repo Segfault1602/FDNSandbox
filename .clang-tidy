@@ -1,6 +1,7 @@
 ---
 Checks: "*,
         -cppcoreguidelines-avoid-magic-numbers,
+        -cppcoreguidelines-pro-type-vararg,
         -misc-non-private-member-variables-in-classes,
         -modernize-use-trailing-return-type,
         -performance-enum-size,

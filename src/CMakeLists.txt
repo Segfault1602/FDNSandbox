@@ -72,34 +72,35 @@ target_link_libraries(
             fdn_sandbox::fdn_sandbox_warnings
 )
 
-# ====== FDN Sandbox App logic =======
-add_library(fdn_sandbox_app STATIC)
+# ====== ImGui views ======
+add_library(fdn_sandbox_ui STATIC)
 target_sources(
-    fdn_sandbox_app
+    fdn_sandbox_ui
     PRIVATE utils.cpp
             widget.cpp
-            app.cpp
-            app_frame.cpp
-            app_notifications.cpp
-            app_menu.cpp
-            app_config.cpp
-            app_audio.cpp
-            app_analysis.cpp
             files/file_dialogs.cpp
             fdn_info.cpp
             fdn_widget.cpp
             app_imconfig.h
             icons.h
-            notifications.cpp
-            notifications.h
             plot_ui.cpp
             plot_ui.h
             theme.cpp
             theme.h
             optimization_gui.cpp
+            views/analysis_views.cpp
+            views/audio_view.cpp
+            views/fdn_configurator_view.cpp
+            views/fdn_info_view.cpp
+            views/optimization_view.cpp
+            views/settings_view.cpp
+            views/shell_view.cpp
+            views/window_ids.h
 )
+add_library(fdn_sandbox::ui ALIAS fdn_sandbox_ui)
+
 target_link_libraries(
-    fdn_sandbox_app
+    fdn_sandbox_ui
     PUBLIC audio_utils::audio_utils
            quill::quill
            sfFDN::sfFDN
@@ -115,12 +116,30 @@ target_link_libraries(
            fdn_sandbox::analysis
            fdn_sandbox::audio
            fdn_sandbox::audio_engine
+           fdn_sandbox::fdn_sandbox_options
+    PRIVATE fdn_sandbox::fdn_sandbox_warnings
+)
+target_include_directories(fdn_sandbox_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${IconFontCppHeaders_SOURCE_DIR})
+
+# ====== FDN Sandbox App orchestration =======
+add_library(
+    fdn_sandbox_app
+    STATIC app.cpp
+           app_notifications.cpp
+           app_menu.cpp
+           app_audio.cpp
+           notifications.cpp
+           notifications.h
+)
+target_link_libraries(
+    fdn_sandbox_app
+    PUBLIC fdn_sandbox::ui
            fdn_sandbox::files
            fdn_sandbox::fdn_sandbox_options
-           fdn_sandbox::fdn_sandbox_warnings
+    PRIVATE Boost::dll
+            fdn_sandbox::fdn_sandbox_warnings
 )
-
-target_include_directories(fdn_sandbox_app PUBLIC ${IconFontCppHeaders_SOURCE_DIR})
+target_include_directories(fdn_sandbox_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ====== Metal implementation ======
 if(APPLE)

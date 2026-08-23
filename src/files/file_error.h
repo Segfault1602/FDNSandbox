@@ -21,6 +21,7 @@ enum class FileErrorKind : std::uint8_t
     ConvolverBuildFailed
 };
 
+/// Stable category, affected path, and diagnostic detail for a failed file operation.
 struct FileError
 {
     FileErrorKind kind;

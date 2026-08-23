@@ -14,6 +14,7 @@
 #include "settings.h"
 #include "theme.h"
 #include "utils.h"
+#include "views/window_ids.h"
 
 #include <algorithm>
 #include <cmath>
@@ -217,21 +218,22 @@ bool OptimizationGUI::Draw(sfFDN::FDNConfig& fdn_config, std::span<const float> 
     const float content_region_width = ImGui::GetContentRegionAvail().x;
 
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
-    ImGui::BeginChild("Optimization Parameters", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
-                      ImGuiWindowFlags_None);
+    ImGui::BeginChild(fdn_sandbox::views::ids::kOptimizationParametersChild, ImVec2(content_region_width * 0.25f, -1),
+                      ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
     DrawSetupPanel(target_rir);
     ImGui::EndChild();
 
     ImGui::SameLine();
 
-    ImGui::BeginChild("Optimization Results", ImVec2(content_region_width * 0.25f, -1), ImGuiChildFlags_Borders,
-                      ImGuiWindowFlags_None);
+    ImGui::BeginChild(fdn_sandbox::views::ids::kOptimizationResultsChild, ImVec2(content_region_width * 0.25f, -1),
+                      ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
     const bool updated_fdn = DrawOptimizationPanel(fdn_config, target_rir);
     ImGui::EndChild();
 
     ImGui::SameLine();
 
-    ImGui::BeginChild("Loss Plot", ImVec2(-1, -1), ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
+    ImGui::BeginChild(fdn_sandbox::views::ids::kOptimizationLossPlotChild, ImVec2(-1, -1), ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_None);
     PlotLossHistory();
     ImGui::EndChild();
 
@@ -354,7 +356,7 @@ void OptimizationGUI::StartOptimization(const sfFDN::FDNConfig& fdn_config, std:
     LossFunctions loss_functions = CreateLossFunctions(target_rir);
     fdn_optimizer_.SetLossFunctions(loss_functions);
     fdn_optimizer_.StartOptimization(opt_info_);
-    ImGui::OpenPopup("Optimization Progress");
+    ImGui::OpenPopup(fdn_sandbox::views::ids::kOptimizationProgressModal);
 }
 
 OptimizationGUI::LossFunctions OptimizationGUI::CreateLossFunctions(std::span<const float> target_rir) const
@@ -414,7 +416,7 @@ void OptimizationGUI::AppendRIRMatchLossFunctions(LossFunctions& loss_functions,
 void OptimizationGUI::DrawOptimizationProgressPopup()
 {
     ImGui::SetNextWindowSize(ImVec2(600, -1), ImGuiCond_Always);
-    if (!ImGui::BeginPopupModal("Optimization Progress", nullptr, ImGuiWindowFlags_None))
+    if (!ImGui::BeginPopupModal(fdn_sandbox::views::ids::kOptimizationProgressModal, nullptr, ImGuiWindowFlags_None))
     {
         return;
     }

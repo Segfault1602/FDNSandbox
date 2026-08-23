@@ -42,9 +42,16 @@ struct LoadRirSelection
     std::filesystem::path path;
 };
 
+/// Typed path selections returned by the application-level file dialogs.
 using FileDialogSelection = std::variant<SaveImpulseResponseSelection, LoadConfigurationSelection,
                                          SaveConfigurationSelection, LoadRirSelection>;
 
+/**
+ * @brief Owns and renders the application-level ImGui file browsers.
+ *
+ * Dialog configuration, extension normalization, and selection clearing stay
+ * inside this UI-only component.
+ */
 class FileDialogs final
 {
   public:
