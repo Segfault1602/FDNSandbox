@@ -88,6 +88,17 @@ void ReplaceAttenuationFilterBankOptions(sfFDN::FDNConfig& config,
 
 std::vector<float> T60ToGainsDb(T60ToGainsDbInput input);
 
+struct ParallelGainsResizeOptions
+{
+    uint32_t channel_count;
+    float sample_rate;
+    float new_gain;
+};
+
+void ResizeParallelGainsOptions(sfFDN::ParallelGainsOptions& config, ParallelGainsResizeOptions options);
+void SetTimeVaryingGainsEnabled(sfFDN::ParallelGainsOptions& config, bool enabled, uint32_t channel_count,
+                                float sample_rate);
+
 struct Span2D
 {
     std::span<float> data;

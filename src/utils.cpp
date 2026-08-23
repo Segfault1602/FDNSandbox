@@ -342,11 +342,73 @@ std::vector<float> T60ToGainsDb(T60ToGainsDbInput input)
     return gains;
 }
 
-void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size)
+namespace
+{
+sfFDN::ModulationOptions MakeDefaultGainModulation(uint32_t channel_index, uint32_t channel_count, float sample_rate)
+{
+    constexpr float kDefaultFrequencyHz = 0.25f;
+    constexpr float kDefaultAmplitude = 0.1f;
+
+    return sfFDN::ModulationOptions{
+        .frequency = sample_rate > 0.0f ? kDefaultFrequencyHz / sample_rate : 0.0f,
+        .amplitude = kDefaultAmplitude,
+        .initial_phase =
+            channel_count > 0 ? static_cast<float>(channel_index) / static_cast<float>(channel_count) : 0.0f,
+    };
+}
+} // namespace
+
+void ResizeParallelGainsOptions(sfFDN::ParallelGainsOptions& config, ParallelGainsResizeOptions options)
+{
+    config.gains.resize(options.channel_count, options.new_gain);
+    if (config.time_varying_config.empty())
+    {
+        return;
+    }
+
+    const size_t previous_size = config.time_varying_config.size();
+    config.time_varying_config.resize(options.channel_count);
+    for (size_t index = previous_size; index < options.channel_count; ++index)
+    {
+        config.time_varying_config[index] =
+            MakeDefaultGainModulation(static_cast<uint32_t>(index), options.channel_count, options.sample_rate);
+    }
+}
+
+void SetTimeVaryingGainsEnabled(sfFDN::ParallelGainsOptions& config, bool enabled, uint32_t channel_count,
+                                float sample_rate)
+{
+    if (!enabled)
+    {
+        config.time_varying_config.clear();
+        return;
+    }
+
+    if (!config.time_varying_config.empty())
+    {
+        ResizeParallelGainsOptions(config,
+                                   {.channel_count = channel_count, .sample_rate = sample_rate, .new_gain = 0.5f});
+        return;
+    }
+
+    config.time_varying_config.reserve(channel_count);
+    for (uint32_t index = 0; index < channel_count; ++index)
+    {
+        config.time_varying_config.push_back(MakeDefaultGainModulation(index, channel_count, sample_rate));
+    }
+}
+
+namespace
+{
+void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size,
+                                        float sample_rate)
 {
     std::visit(
         overloaded{
-            [new_size](sfFDN::ParallelGainsOptions& config) { config.gains.resize(new_size, 0.5f); },
+            [new_size, sample_rate](sfFDN::ParallelGainsOptions& config) {
+                ResizeParallelGainsOptions(config,
+                                           {.channel_count = new_size, .sample_rate = sample_rate, .new_gain = 0.5f});
+            },
             [new_size](sfFDN::MultichannelSchroederAllpassSectionOptions& config) { config.sections.resize(new_size); },
             [new_size](sfFDN::AttenuationFilterBankOptions& config) {
                 auto previous_size = config.filter_configs.size();
@@ -382,6 +444,7 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
         },
         config_variant);
 }
+} // namespace
 
 bool NormalizeAttenuationFilterBank(sfFDN::FDNConfig& config)
 {
@@ -421,22 +484,24 @@ void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size)
 
     config.delay_bank_config.delays.resize(new_size, 512.f);
 
-    config.input_block_config.parallel_gains_config.gains.resize(new_size, 0.5f);
+    ResizeParallelGainsOptions(config.input_block_config.parallel_gains_config,
+                               {.channel_count = new_size, .sample_rate = config.sample_rate, .new_gain = 0.5f});
 
     for (auto& processor_variant : config.input_block_config.multichannel_processors)
     {
-        ResizeMultichannelProcessorConfigs(processor_variant, new_size);
+        ResizeMultichannelProcessorConfigs(processor_variant, new_size, config.sample_rate);
     }
 
-    config.output_block_config.parallel_gains_config.gains.resize(new_size, 0.5f);
+    ResizeParallelGainsOptions(config.output_block_config.parallel_gains_config,
+                               {.channel_count = new_size, .sample_rate = config.sample_rate, .new_gain = 0.5f});
     for (auto& processor_variant : config.output_block_config.multichannel_processors)
     {
-        ResizeMultichannelProcessorConfigs(processor_variant, new_size);
+        ResizeMultichannelProcessorConfigs(processor_variant, new_size, config.sample_rate);
     }
 
     for (auto& processor_variant : config.loop_filter_configs)
     {
-        ResizeMultichannelProcessorConfigs(processor_variant, new_size);
+        ResizeMultichannelProcessorConfigs(processor_variant, new_size, config.sample_rate);
     }
 
     std::visit(

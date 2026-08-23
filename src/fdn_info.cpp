@@ -11,6 +11,19 @@
 
 namespace
 {
+size_t GetElapsedSamples()
+{
+    const auto sample_rate = Settings::Instance().SampleRateAs<float>();
+    float delta_seconds = 1.0f / sample_rate;
+    if (ImGui::GetCurrentContext() != nullptr)
+    {
+        delta_seconds = ImGui::GetIO().DeltaTime;
+    }
+
+    const float elapsed_samples = std::max(0.0f, delta_seconds * sample_rate);
+    return std::max<size_t>(1U, static_cast<size_t>(elapsed_samples));
+}
+
 bool GetInputGains(sfFDN::AudioProcessor* proc, std::vector<float>& input_gains)
 {
     auto* input_parallel_gains = dynamic_cast<sfFDN::ParallelGains*>(proc);
@@ -21,10 +34,7 @@ bool GetInputGains(sfFDN::AudioProcessor* proc, std::vector<float>& input_gains)
     }
     else if (auto* input_tv_gains = dynamic_cast<sfFDN::TimeVaryingParallelGains*>(proc))
     {
-        const float delta_seconds = ImGui::GetIO().DeltaTime;
-        const auto sample_rate = Settings::Instance().SampleRateAs<float>();
-        const float elapsed_samples = std::max(0.0f, delta_seconds * sample_rate);
-        const size_t samples_elapsed = std::max<size_t>(1U, static_cast<size_t>(elapsed_samples));
+        const size_t samples_elapsed = GetElapsedSamples();
 
         std::vector<float> input(samples_elapsed, 1.f);
         const size_t output_size = samples_elapsed * static_cast<size_t>(input_tv_gains->OutputChannelCount());
@@ -57,32 +67,41 @@ bool GetOutputGains(sfFDN::AudioProcessor* proc, std::vector<float>& output_gain
     else if (auto* output_tv_gains = dynamic_cast<sfFDN::TimeVaryingParallelGains*>(proc))
     {
         const uint32_t N = output_tv_gains->InputChannelCount();
-        const float delta_seconds = ImGui::GetIO().DeltaTime;
-        const auto sample_rate = Settings::Instance().SampleRateAs<float>();
-        const float elapsed_samples = std::max(0.0f, delta_seconds * sample_rate);
-        const size_t samples_elapsed = std::max<size_t>(static_cast<size_t>(N), static_cast<size_t>(elapsed_samples));
+        const size_t samples_elapsed = GetElapsedSamples();
 
-        const size_t input_size = samples_elapsed * static_cast<size_t>(N);
-        std::vector<float> input(input_size, 0.f);
-        std::vector<float> output(samples_elapsed, 0.f);
-
-        // Kinda hacky way to do this but if we make sure each channel are set to zeros except for one value, as long as
-        // that one value does not overlap between channels we should be able to work out the output gains for each
-        // channel
-        sfFDN::AudioBuffer input_buffer(static_cast<uint32_t>(samples_elapsed), N, input);
-        for (uint32_t i = 0; i < N; ++i)
+        if (samples_elapsed > 1)
         {
-            input_buffer.GetChannelSpan(i).last(N)[i] = 1.f;
+            const size_t advance_count = samples_elapsed - 1;
+            std::vector<float> advance_input(advance_count * static_cast<size_t>(N), 0.0f);
+            std::vector<float> advance_output(advance_count, 0.0f);
+            const sfFDN::AudioBuffer advance_input_buffer(static_cast<uint32_t>(advance_count), N, advance_input);
+            sfFDN::AudioBuffer advance_output_buffer(static_cast<uint32_t>(advance_count), 1U, advance_output);
+            output_tv_gains->Process(advance_input_buffer, advance_output_buffer);
         }
 
-        sfFDN::AudioBuffer output_buffer(static_cast<uint32_t>(samples_elapsed), 1U, output);
-
-        output_tv_gains->Process(input_buffer, output_buffer);
-
-        for (uint32_t i = 0; i < N; ++i)
+        for (uint32_t index = 0; index < N; ++index)
         {
-            output_gains[i] = output_buffer.GetChannelSpan(0).last(N)[i];
+            auto processor = output_tv_gains->Clone();
+            auto* clone = dynamic_cast<sfFDN::TimeVaryingParallelGains*>(processor.get());
+            if (clone == nullptr)
+            {
+                return false;
+            }
+
+            std::vector<float> input(N, 0.0f);
+            std::vector<float> output(1, 0.0f);
+            input[index] = 1.0f;
+            const sfFDN::AudioBuffer input_buffer(1U, N, input);
+            sfFDN::AudioBuffer output_buffer(1U, 1U, output);
+            clone->Process(input_buffer, output_buffer);
+            output_gains[index] = output.front();
         }
+
+        std::vector<float> advance_input(N, 0.0f);
+        std::vector<float> advance_output(1, 0.0f);
+        const sfFDN::AudioBuffer advance_input_buffer(1U, N, advance_input);
+        sfFDN::AudioBuffer advance_output_buffer(1U, 1U, advance_output);
+        output_tv_gains->Process(advance_input_buffer, advance_output_buffer);
         return true;
     }
 
@@ -129,7 +148,7 @@ void LogUnexpectedProcessor(GainProcessorRole role)
         return;
     }
 
-    std::cerr << "[fdn_info::GetInputAndOutputGains]: Outupt gains processor is not a ParallelGains instance.\n";
+    std::cerr << "[fdn_info::GetInputAndOutputGains]: Output gains processor is not a ParallelGains instance.\n";
 }
 
 bool GetGainsFromProcessor(sfFDN::AudioProcessor* processor, std::vector<float>& gains, uint32_t fdn_size,
@@ -160,11 +179,12 @@ bool GetGainsFromProcessor(sfFDN::AudioProcessor* processor, std::vector<float>&
         assert(candidate != nullptr);
         if (HasExpectedChannelCounts(*candidate, fdn_size, role) && GetGains(candidate, gains, role))
         {
-            break;
+            return true;
         }
     }
 
-    return true;
+    LogUnexpectedProcessor(role);
+    return false;
 }
 } // namespace
 

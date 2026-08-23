@@ -34,6 +34,31 @@ constexpr float kGainSliderSpacing = 5.0f;
 constexpr ImVec2 kGainSliderSize(24.0f, 68.0f);
 constexpr uint32_t kMaxGainSlidersPerRow = 8;
 
+double GetGainPlotLimit(std::span<const float> current_gains, const sfFDN::ParallelGainsOptions& config)
+{
+    double maximum = 1.0;
+    for (const float gain : current_gains)
+    {
+        if (std::isfinite(gain))
+        {
+            maximum = std::max(maximum, std::abs(static_cast<double>(gain)));
+        }
+    }
+
+    for (size_t index = 0; index < config.gains.size(); ++index)
+    {
+        const float center_gain = config.gains[index];
+        const float amplitude =
+            index < config.time_varying_config.size() ? std::abs(config.time_varying_config[index].amplitude) : 0.0f;
+        if (std::isfinite(center_gain) && std::isfinite(amplitude))
+        {
+            maximum = std::max(maximum, static_cast<double>(std::abs(center_gain) + amplitude));
+        }
+    }
+
+    return maximum > 1.0 ? maximum * 1.1 : maximum;
+}
+
 bool DrawSetAllGainsPopup(std::span<float> gains, float& value)
 {
     if (!ImGui::BeginPopupContextItem("Gains Popup"))
@@ -538,7 +563,8 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
         if (ImPlot::BeginPlot("Input Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, static_cast<double>(input_gains.size()) - 0.45, -1.0, 1.0,
+            const double gain_limit = GetGainPlotLimit(input_gains, config.input_block_config.parallel_gains_config);
+            ImPlot::SetupAxesLimits(-0.45, static_cast<double>(input_gains.size()) - 0.45, -gain_limit, gain_limit,
                                     ImPlotCond_Always);
             ImPlot::PlotBars("Input Gains", input_gains.data(), static_cast<int>(input_gains.size()), 0.90, 0);
             ImPlot::EndPlot();
@@ -547,7 +573,8 @@ void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn)
         if (ImPlot::BeginPlot("Output Gains", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             ImPlot::SetupAxes(nullptr, nullptr, axes_flags | ImPlotAxisFlags_NoTickLabels, axes_flags);
-            ImPlot::SetupAxesLimits(-0.45, static_cast<double>(output_gains.size()) - 0.45, -1.0, 1.0,
+            const double gain_limit = GetGainPlotLimit(output_gains, config.output_block_config.parallel_gains_config);
+            ImPlot::SetupAxesLimits(-0.45, static_cast<double>(output_gains.size()) - 0.45, -gain_limit, gain_limit,
                                     ImPlotCond_Always);
             ImPlot::PlotBars("Output Gains", output_gains.data(), static_cast<int>(output_gains.size()), 0.90, 0);
             ImPlot::EndPlot();

@@ -258,6 +258,73 @@ void MakeDelaysPrime(std::span<float> delays)
         return static_cast<float>(utils::GetClosestPrime(static_cast<uint32_t>(delay)));
     });
 }
+
+bool DrawTimeVaryingGains(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig& fdn_config)
+{
+    bool config_changed = false;
+    bool enabled = !config.time_varying_config.empty();
+    if (ImGui::Checkbox("Time Varying", &enabled))
+    {
+        utils::SetTimeVaryingGainsEnabled(config, enabled, fdn_config.fdn_size, fdn_config.sample_rate);
+        config_changed = true;
+    }
+
+    if (!enabled)
+    {
+        return config_changed;
+    }
+
+    if (!ImGui::BeginTable("##TimeVaryingGains", 4,
+                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+    {
+        return config_changed;
+    }
+
+    ImGui::TableSetupColumn("Channel", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("Frequency");
+    ImGui::TableSetupColumn("Amplitude");
+    ImGui::TableSetupColumn("Phase");
+    ImGui::TableHeadersRow();
+
+    constexpr float kMaximumFrequencyHz = 20.0f;
+    for (size_t index = 0; index < config.time_varying_config.size(); ++index)
+    {
+        auto& modulation = config.time_varying_config[index];
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%zu", index + 1);
+
+        ImGui::TableSetColumnIndex(1);
+        const float stored_frequency_hz = modulation.frequency * fdn_config.sample_rate;
+        float frequency_hz = std::clamp(stored_frequency_hz, 0.0f, kMaximumFrequencyHz);
+        const bool frequency_changed = ImGui::DragFloat("##Frequency", &frequency_hz, 0.01f, 0.0f, kMaximumFrequencyHz,
+                                                        "%.2f Hz", ImGuiSliderFlags_AlwaysClamp);
+        modulation.frequency = fdn_config.sample_rate > 0.0f ? frequency_hz / fdn_config.sample_rate : 0.0f;
+        config_changed |= frequency_changed || frequency_hz != stored_frequency_hz;
+
+        ImGui::TableSetColumnIndex(2);
+        const float stored_amplitude = modulation.amplitude;
+        modulation.amplitude = std::max(0.0f, modulation.amplitude);
+        const bool amplitude_changed =
+            ImGui::DragFloat("##Amplitude", &modulation.amplitude, 0.01f, 0.0f, 0.0f, "%.3f");
+        modulation.amplitude = std::max(0.0f, modulation.amplitude);
+        config_changed |= amplitude_changed || modulation.amplitude != stored_amplitude;
+
+        ImGui::TableSetColumnIndex(3);
+        const float stored_phase = modulation.initial_phase;
+        modulation.initial_phase = std::clamp(modulation.initial_phase, 0.0f, 1.0f);
+        const bool phase_changed = ImGui::DragFloat("##Phase", &modulation.initial_phase, 0.01f, 0.0f, 1.0f, "%.3f",
+                                                    ImGuiSliderFlags_AlwaysClamp);
+        config_changed |= phase_changed || modulation.initial_phase != stored_phase;
+
+        ImGui::PopID();
+    }
+
+    ImGui::EndTable();
+    return config_changed;
+}
 } // namespace
 
 bool FDNWidgetVisitor::operator()(sfFDN::ScalarFeedbackMatrixOptions& config) const
@@ -370,14 +437,16 @@ bool FDNWidgetVisitor::operator()(sfFDN::ModulationOptions& config) const
 
 bool FDNWidgetVisitor::operator()(sfFDN::ParallelGainsOptions& config) const
 {
-    bool config_changed = false;
-    if (config.gains.size() != fdn_config.fdn_size)
-    {
-        config.gains.resize(fdn_config.fdn_size, 1.f / static_cast<float>(fdn_config.fdn_size));
-        config_changed = true;
-    }
+    const bool size_changed =
+        config.gains.size() != fdn_config.fdn_size ||
+        (!config.time_varying_config.empty() && config.time_varying_config.size() != fdn_config.fdn_size);
+    utils::ResizeParallelGainsOptions(config, {.channel_count = fdn_config.fdn_size,
+                                               .sample_rate = fdn_config.sample_rate,
+                                               .new_gain = 1.f / static_cast<float>(fdn_config.fdn_size)});
 
+    bool config_changed = size_changed;
     config_changed |= DrawGainsWidget(config.gains, state.minimum_gain, state.maximum_gain, state.set_all_gain);
+    config_changed |= DrawTimeVaryingGains(config, fdn_config);
 
     return config_changed;
 }
