@@ -75,15 +75,15 @@ void FDNToolboxApp::ProcessNotifications()
     {
         switch (event->type)
         {
-        case OptimizationGUI::EventType::Completed:
+        case fdn_sandbox::views::OptimizationView::EventType::Completed:
             notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "optimization-completed",
                                       "Optimization completed", std::move(event->message), 6.0);
             break;
-        case OptimizationGUI::EventType::Canceled:
+        case fdn_sandbox::views::OptimizationView::EventType::Canceled:
             notification_center_.Push(fdn_sandbox::NotificationSeverity::Warning, "optimization-canceled",
                                       "Optimization canceled", std::move(event->message));
             break;
-        case OptimizationGUI::EventType::Failed:
+        case fdn_sandbox::views::OptimizationView::EventType::Failed:
             notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "optimization-failed",
                                       "Optimization failed", std::move(event->message), 6.0);
             break;

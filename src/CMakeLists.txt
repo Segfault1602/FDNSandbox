@@ -87,7 +87,6 @@ target_sources(
             plot_ui.h
             theme.cpp
             theme.h
-            optimization_gui.cpp
             views/analysis_views.cpp
             views/audio_view.cpp
             views/fdn_configurator_view.cpp
