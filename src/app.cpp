@@ -15,9 +15,6 @@
 
 namespace
 {
-constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
-constexpr float kMeterIntegrationSeconds = 0.3f;
-
 audio_utils::analysis::STFTOptions MakeDefaultStftOptions()
 {
     return {
@@ -37,10 +34,7 @@ audio_utils::analysis::STFTOptions MakeDefaultStftOptions()
 } // namespace
 
 FDNToolboxApp::FDNToolboxApp(float ui_scale)
-    : fdn_update_queue_(16)
-    , fdn_cleanup_queue_(16)
-    , output_meter_(static_cast<size_t>(Settings::Instance().SampleRateAs<float>() * kMeterIntegrationSeconds))
-    , direct_delay_(0, Settings::Instance().SampleRate())
+    : audio_engine_({.sample_rate = Settings::Instance().SampleRate()})
     , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
     , optimization_gui_(Settings::Instance().GetLogger())
     , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
@@ -54,18 +48,6 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
 
     fdn_sandbox::theme::Apply(ui_scale);
     fdn_sandbox::theme::InitializeFonts();
-
-    audio_manager_ = audio_manager::create_audio_manager();
-    if (!audio_manager_)
-    {
-        throw std::runtime_error("Failed to create audio manager");
-    }
-
-    audio_file_manager_ = audio_file_manager::create_audio_file_manager();
-    if (!audio_file_manager_)
-    {
-        throw std::runtime_error("Failed to create audio file manager");
-    }
 
     save_ir_browser.SetTitle("Save Impulse Response");
     save_ir_browser.SetTypeFilters({".wav"});
@@ -90,17 +72,12 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
 }
 FDNToolboxApp::~FDNToolboxApp()
 {
-    StopAudioStream();
+    audio_engine_.Shutdown();
 }
 
 bool FDNToolboxApp::StartAudioStream()
 {
-    const bool started = audio_manager_->start_audio_stream(
-        audio_stream_option::kOutput,
-        [this](std::span<float> output_buffer, size_t frame_size, size_t num_channels) {
-            AudioCallback({.output_buffer = output_buffer, .frame_size = frame_size, .num_channels = num_channels});
-        },
-        kSystemBlockSize);
+    const bool started = audio_engine_.Start();
     if (!started)
     {
         LOG_ERROR(Settings::Instance().GetLogger(), "Failed to start audio stream");
@@ -113,10 +90,7 @@ bool FDNToolboxApp::StartAudioStream()
 
 void FDNToolboxApp::StopAudioStream()
 {
-    if (audio_manager_)
-    {
-        audio_manager_->stop_audio_stream();
-    }
+    audio_engine_.Stop();
 }
 
 void FDNToolboxApp::loop()
@@ -186,10 +160,8 @@ void FDNToolboxApp::loop()
     }
     first_frame = false;
 
-    // Clean up old FDN instances that are no longer in use by the audio thread
-    while (fdn_cleanup_queue_.pop())
-    {
-    }
+    audio_engine_.FlushPendingCommands();
+    audio_engine_.CollectRetiredObjects();
 }
 
 void FDNToolboxApp::UpdateFDN()
@@ -205,10 +177,7 @@ void FDNToolboxApp::UpdateFDN()
     // matrices)
     fdn_analyzer_.SetFDN(gui_fdn_->CloneFDN());
     ++submitted_fdn_generation_;
-    fdn_update_queue_.emplace(PendingFDNUpdate{
-        .generation = submitted_fdn_generation_,
-        .fdn = gui_fdn_->CloneFDN(),
-    });
+    audio_engine_.TryInstallFdn(submitted_fdn_generation_, gui_fdn_->CloneFDN());
     notification_center_.ClearCritical("fdn-instability");
 
     auto end = std::chrono::high_resolution_clock::now();

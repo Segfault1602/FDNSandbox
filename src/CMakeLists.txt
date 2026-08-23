@@ -26,15 +26,37 @@ target_link_libraries(
 )
 
 # ====== Headless audio logic ======
-add_library(fdn_sandbox_audio STATIC audio/audio_block_ops.cpp)
+add_library(
+    fdn_sandbox_audio
+    STATIC audio/audio_block_ops.cpp
+           audio/audio_clip_loader.cpp
+           audio/audio_runtime.cpp
+)
 add_library(fdn_sandbox::audio ALIAS fdn_sandbox_audio)
 
 target_include_directories(fdn_sandbox_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(
     fdn_sandbox_audio
     PUBLIC fdn_sandbox::fdn_sandbox_options
+           readerwriterqueue
+           sfFDN::sfFDN
     PRIVATE Eigen3::Eigen
+            samplerate
+            sndfile
             fdn_sandbox::fdn_sandbox_warnings
+)
+
+# ====== Concrete audio device engine ======
+add_library(fdn_sandbox_audio_engine STATIC audio/audio_engine.cpp)
+add_library(fdn_sandbox::audio_engine ALIAS fdn_sandbox_audio_engine)
+
+target_include_directories(fdn_sandbox_audio_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    fdn_sandbox_audio_engine
+    PUBLIC audio_utils::audio_utils
+           fdn_sandbox::audio
+           fdn_sandbox::fdn_sandbox_options
+    PRIVATE fdn_sandbox::fdn_sandbox_warnings
 )
 
 # ====== FDN Sandbox App logic =======
@@ -79,6 +101,7 @@ target_link_libraries(
            fdn_sandbox::core
            fdn_sandbox::analysis
            fdn_sandbox::audio
+           fdn_sandbox::audio_engine
            fdn_sandbox::fdn_sandbox_options
            fdn_sandbox::fdn_sandbox_warnings
 )

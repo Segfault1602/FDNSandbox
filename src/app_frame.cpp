@@ -109,7 +109,7 @@ void FDNToolboxApp::DrawStatusBar()
         return;
     }
 
-    const bool stream_running = audio_manager_->is_audio_stream_running();
+    const bool stream_running = audio_engine_.IsRunning();
     ImGui::TextColored(fdn_sandbox::theme::Color(stream_running ? fdn_sandbox::theme::ColorRole::StatusOk
                                                                 : fdn_sandbox::theme::ColorRole::StatusError),
                        "%s", fdn_sandbox::icons::StatusOn);

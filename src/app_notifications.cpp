@@ -1,5 +1,10 @@
 #include "app.h"
 
+#include "settings.h"
+
+#include <quill/LogMacros.h>
+
+#include <format>
 #include <utility>
 
 void FDNToolboxApp::ProcessNotifications()
@@ -15,13 +20,56 @@ void FDNToolboxApp::ProcessNotifications()
         clipping_notification_active_ = false;
     }
 
-    const uint64_t instability_generation = fdn_instability_generation_.exchange(0, std::memory_order_acquire);
-    if (instability_generation >= submitted_fdn_generation_ && instability_generation != 0)
+    for (const fdn_sandbox::audio::AudioEvent& audio_event : audio_engine_.PollEvents())
     {
-        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-instability", "FDN instability",
-                                  "The FDN output exceeded the safety threshold and was cleared.", 6.0);
-        notification_center_.SetCritical(fdn_sandbox::NotificationSeverity::Error, "fdn-instability", "FDN instability",
-                                         "The network was cleared. Update the FDN configuration to dismiss.");
+        switch (audio_event.kind)
+        {
+        case fdn_sandbox::audio::AudioEventKind::FrameSizeMismatch:
+            LOG_ERROR(Settings::Instance().GetLogger(), "Frame size mismatch: expected {}, got {}",
+                      audio_event.expected, audio_event.actual);
+            notification_center_.Push(
+                fdn_sandbox::NotificationSeverity::Error, "audio-frame-size-mismatch",
+                "Unsupported audio block size",
+                std::format("Expected {} frames, but the audio device supplied {}.", audio_event.expected,
+                            audio_event.actual),
+                6.0);
+            break;
+        case fdn_sandbox::audio::AudioEventKind::FdnInstability:
+            if (audio_event.generation >= submitted_fdn_generation_ && audio_event.generation != 0)
+            {
+                notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-instability",
+                                          "FDN instability",
+                                          "The FDN output exceeded the safety threshold and was cleared.", 6.0);
+                notification_center_.SetCritical(
+                    fdn_sandbox::NotificationSeverity::Error, "fdn-instability", "FDN instability",
+                    "The network was cleared. Update the FDN configuration to dismiss.");
+            }
+            break;
+        case fdn_sandbox::audio::AudioEventKind::ConvolverBlockSizeMismatch:
+            LOG_ERROR(Settings::Instance().GetLogger(),
+                      "RIR PartitionedConvolver block size {} does not match system block size {}",
+                      audio_event.actual, audio_event.expected);
+            break;
+        case fdn_sandbox::audio::AudioEventKind::DirectDelayOutOfRange:
+            LOG_ERROR(Settings::Instance().GetLogger(), "Pre-delay samples {} exceed maximum delay {}",
+                      audio_event.actual, audio_event.expected);
+            break;
+        case fdn_sandbox::audio::AudioEventKind::CpuHighWater:
+            LOG_WARNING(Settings::Instance().GetLogger(), "New CPU highwater mark: {:.2f}%",
+                        audio_event.value * 100.0f);
+            break;
+        case fdn_sandbox::audio::AudioEventKind::ClipFinished:
+            break;
+        }
+    }
+
+    const fdn_sandbox::audio::AudioTelemetry telemetry = audio_engine_.ReadTelemetry();
+    if (telemetry.event_overflow_count > reported_event_overflow_count_)
+    {
+        reported_event_overflow_count_ = telemetry.event_overflow_count;
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Warning, "audio-event-overflow",
+                                  "Audio diagnostics dropped",
+                                  "The audio event queue overflowed before the UI could drain it.");
     }
 
     if (auto event = optimization_gui_.ConsumeEvent())

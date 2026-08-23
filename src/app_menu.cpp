@@ -1,5 +1,7 @@
 #include "app.h"
 
+#include <audio_utils/audio_file_manager.h>
+
 #include <audio_utils/audio_analysis.h>
 
 #include "icons.h"
@@ -27,7 +29,6 @@
 
 namespace
 {
-constexpr size_t kSystemBlockSize = 1024; // System block size for audio processing
 
 bool FancyButtons(const char* label1, const char* label2, uint32_t& selected)
 {
@@ -293,11 +294,12 @@ void FDNToolboxApp::LoadSelectedRIR()
     LOG_INFO(Settings::Instance().GetLogger(), "Loaded RIR file: {} ({} Hz, {} channels, {} samples)", filename,
              file_sample_rate, file_num_channels, buffer.size());
     loaded_rir_filename_ = filename;
-    auto convolution_reverb = std::make_unique<sfFDN::PartitionedConvolver>(kSystemBlockSize, buffer);
+    auto convolution_reverb =
+        std::make_unique<sfFDN::PartitionedConvolver>(fdn_sandbox::audio::kSystemBlockSize, buffer);
     LOG_INFO(Settings::Instance().GetLogger(), "Created PartitionedConvolver with {}",
              convolution_reverb->GetShortInfo());
     rir_analyzer_.SetImpulseResponse(std::move(buffer));
-    convolution_reverb_ = std::move(convolution_reverb);
+    audio_engine_.TryInstallConvolver(std::move(convolution_reverb));
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "rir-loaded", "RIR loaded",
                               std::format("{} ({} samples)", std::filesystem::path(filename).filename().string(),
                                           rir_analyzer_.GetImpulseResponseSize()));

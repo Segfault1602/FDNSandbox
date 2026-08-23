@@ -4,18 +4,13 @@
 
 #include <imfilebrowser.h>
 
-#include "audio/audio_block_ops.h"
+#include "audio/audio_engine.h"
 #include "fdn_analyzer.h"
 #include "notifications.h"
 #include "optimization_gui.h"
-#include <audio_utils/audio_file_manager.h>
-#include <audio_utils/audio_manager.h>
-#include <readerwriterqueue.h>
-
 #include <sffdn/sffdn.h>
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -66,37 +61,8 @@ class FDNToolboxApp
 
     void UpdateFDN();
 
-    struct AudioCallbackArgs
-    {
-        std::span<float> output_buffer;
-        size_t frame_size;
-        size_t num_channels;
-    };
-
-    void AudioCallback(AudioCallbackArgs callback_args);
     bool StartAudioStream();
     void StopAudioStream();
-    void ApplyPendingFDNUpdates();
-    void AdoptPendingConvolutionReverb(size_t frame_size);
-
-    struct AudioProcessingTimes
-    {
-        int64_t convolution_ns = 0;
-        int64_t fdn_ns = 0;
-    };
-
-    struct AudioEngineBuffers
-    {
-        std::span<float> input;
-        std::span<float> fdn_output;
-        std::span<float> convolution_output;
-    };
-
-    struct PendingFDNUpdate
-    {
-        uint64_t generation = 0;
-        std::unique_ptr<sfFDN::FDN> fdn;
-    };
 
     struct OutputMeterDisplayState
     {
@@ -108,18 +74,6 @@ class FDNToolboxApp
         float meter_fraction = 0.0f;
         bool clipping_warning_displayed = false;
     };
-
-    AudioProcessingTimes ProcessAudioEngines(const AudioEngineBuffers& buffers);
-    void ClearUnstableFDN(std::span<const float> fdn_output);
-    std::pair<float, float> PrepareMix(int reverb_type, std::span<float> input);
-    void MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output, std::span<const float> input,
-                          size_t num_channels, float gain, float wet_mix, float dry_mix);
-    struct CpuUsageUpdate
-    {
-        int64_t duration_ns;
-        size_t frame_size;
-    };
-    void UpdateCpuUsage(CpuUsageUpdate update);
 
     void DrawTransportControls(int selected_audio_file);
     void PlaySelectedAudioFile(int selected_audio_file);
@@ -158,61 +112,25 @@ class FDNToolboxApp
     bool DrawToneCorrectionSection();
 
     // Member variables
-    std::unique_ptr<audio_manager> audio_manager_;
-    std::unique_ptr<audio_file_manager> audio_file_manager_;
+    fdn_sandbox::audio::AudioEngine audio_engine_;
 
     std::unique_ptr<sfFDN::FDN> gui_fdn_;
-    std::unique_ptr<sfFDN::FDN> audio_fdn_;
-    std::unique_ptr<sfFDN::FDN> other_fdn_;
-
-    moodycamel::ReaderWriterQueue<PendingFDNUpdate> fdn_update_queue_;
-    moodycamel::ReaderWriterQueue<std::unique_ptr<sfFDN::FDN>> fdn_cleanup_queue_;
     uint64_t submitted_fdn_generation_ = 0;
-    uint64_t active_audio_fdn_generation_ = 0;
 
     sfFDN::FDNConfig fdn_config_;
 
     sfFDN::FDNConfig fdn_config_A_;
     sfFDN::FDNConfig fdn_config_B_;
 
-    enum class AudioState
-    {
-        Idle,
-        ImpulseRequested,
-
-    } audio_state_ = AudioState::Idle;
-
-    std::atomic<float> audio_gain_ = 1.0f;
-    std::atomic<float> dry_wet_mix_ = 0.5f;
-    std::atomic<float> fdn_cpu_usage_ = 0.0f;
-    fdn_sandbox::audio::CpuAverage cpu_average_;
     float displayed_cpu_usage_ = 0.0f;
     float cpu_usage_display_timer_ = 0.0f;
     OutputMeterDisplayState output_meter_display_{};
-
-    std::atomic<float> meter_rms_ = 0.0f;
-    std::atomic<float> meter_peak_ = 0.0f;
-    std::atomic<bool> meter_clipped_ = false;
-    fdn_sandbox::audio::OutputLevelMeter output_meter_;
-
-    constexpr static int kFDN_REVERB = 0;
-    constexpr static int kCONV_REVERB = 1;
-    std::atomic<int> reverb_engine_ = kFDN_REVERB;
-
-    std::atomic<float> fdn_dry_level_ = 0.5f;
-    std::atomic<float> fdn_wet_level_ = 0.5f;
-
-    // For convolution reverb
-    std::atomic<float> conv_wet_level_ = 1.0f;
-
-    std::atomic<uint32_t> direct_delay_ms_ = 0;
-    sfFDN::Delay direct_delay_;
 
     int selected_audio_file_ = 0;
     uint32_t selected_config_slot_ = 0;
     bool reset_layout_requested_ = false;
     bool clipping_notification_active_ = false;
-    std::atomic<uint64_t> fdn_instability_generation_ = 0;
+    uint64_t reported_event_overflow_count_ = 0;
     fdn_sandbox::NotificationCenter notification_center_;
 
     fdn_analysis::FDNAnalyzer fdn_analyzer_;
@@ -233,8 +151,4 @@ class FDNToolboxApp
     std::string loaded_rir_filename_;
     fdn_analysis::IRAnalyzer rir_analyzer_;
 
-    std::unique_ptr<sfFDN::PartitionedConvolver> convolution_reverb_;
-    std::unique_ptr<sfFDN::PartitionedConvolver> active_convolution_reverb_;
-    int last_reverb_type_ = kFDN_REVERB;
-    size_t cpu_highwater_mark_ns_ = 0;
 };
