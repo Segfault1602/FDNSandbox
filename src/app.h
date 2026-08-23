@@ -42,7 +42,6 @@ class FDNToolboxApp
     static void BuildDefaultDockLayout(ImGuiID dockspace_id);
     void DrawAudioDeviceGUI();
     bool DrawFDNConfigurator();
-    bool DrawFDNExtras(bool force_update);
     void DrawImpulseResponse();
     void DrawAudioPlayer();
     void DrawSettingsWindow();

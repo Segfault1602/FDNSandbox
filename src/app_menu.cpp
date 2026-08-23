@@ -198,8 +198,8 @@ void FDNToolboxApp::DrawAudioConfigurationWindow(bool& show_audio_config_window)
     if (ImGui::Begin("Audio", &show_audio_config_window))
     {
         DrawAudioDeviceGUI();
-        ImGui::End();
     }
+    ImGui::End();
 }
 
 void FDNToolboxApp::ProcessFileBrowserSelections()
@@ -311,7 +311,14 @@ void FDNToolboxApp::LoadSelectedRIR()
             .filename = filename,
             .analysis_sample_rate = static_cast<std::uint32_t>(file_sample_rate),
         });
-    audio_engine_.TryInstallConvolver(std::move(convolution_reverb));
+    if (!audio_engine_.TryInstallConvolver(std::move(convolution_reverb)))
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "Audio engine rejected the loaded RIR");
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-install-failed",
+                                  "Failed to activate RIR", "The audio engine rejected the convolver.", 6.0);
+        load_rir_browser.ClearSelected();
+        return;
+    }
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "rir-loaded", "RIR loaded",
                               std::format("{} ({} samples)", std::filesystem::path(filename).filename().string(),
                                           analysis_workspace_.Reference().GetImpulseResponseSize()));

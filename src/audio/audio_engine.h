@@ -20,7 +20,6 @@ namespace fdn_sandbox::audio
 struct AudioEngineConfig
 {
     std::uint32_t sample_rate;
-    std::size_t block_size = kSystemBlockSize;
 };
 
 class AudioEngine final
@@ -34,17 +33,17 @@ class AudioEngine final
     AudioEngine(AudioEngine&&) = delete;
     AudioEngine& operator=(AudioEngine&&) = delete;
 
-    bool Start();
+    [[nodiscard]] bool Start();
     void Stop() noexcept;
     void Shutdown() noexcept;
-    bool IsRunning() const noexcept;
+    [[nodiscard]] bool IsRunning() const noexcept;
 
-    bool TryInstallFdn(std::uint64_t generation, std::unique_ptr<sfFDN::FDN> value);
-    bool TryInstallConvolver(std::unique_ptr<sfFDN::PartitionedConvolver> value);
-    bool TryInstallClip(std::unique_ptr<AudioClip> value);
-    bool PlayClip(bool loop);
-    bool StopClip();
-    bool TriggerImpulse();
+    [[nodiscard]] bool TryInstallFdn(std::uint64_t generation, std::unique_ptr<sfFDN::FDN> value);
+    [[nodiscard]] bool TryInstallConvolver(std::unique_ptr<sfFDN::PartitionedConvolver> value);
+    [[nodiscard]] bool TryInstallClip(std::unique_ptr<AudioClip> value);
+    [[nodiscard]] bool PlayClip(bool loop);
+    [[nodiscard]] bool StopClip();
+    [[nodiscard]] bool TriggerImpulse();
 
     void FlushPendingCommands();
     void CollectRetiredObjects();
@@ -74,7 +73,6 @@ class AudioEngine final
     void AudioCallback(std::span<float> output_buffer, std::size_t frame_size,
                        std::size_t num_channels) noexcept;
 
-    AudioEngineConfig config_;
     AudioRuntime runtime_;
     std::unique_ptr<audio_manager> manager_;
     bool shutdown_ = false;

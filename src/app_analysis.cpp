@@ -255,7 +255,6 @@ void FDNToolboxApp::DrawImpulseResponse()
     if (ImGui::SliderScalar("IR Duration", ImGuiDataType_Float, &ir_duration, &kMinDuration, &kMaxDuration, "%.2f"))
     {
         const auto sample_rate = Settings::Instance().SampleRateAs<float>();
-        Settings::Instance().SetIRDuration(static_cast<uint32_t>(ir_duration));
         analysis_workspace_.Generated().SetImpulseResponseSize(static_cast<uint32_t>(ir_duration * sample_rate));
     }
 
@@ -267,7 +266,6 @@ void FDNToolboxApp::DrawImpulseResponse()
             const float rir_duration =
                 static_cast<float>(analysis_workspace_.Reference().GetImpulseResponse().size()) / sample_rate;
             ir_duration = rir_duration;
-            Settings::Instance().SetIRDuration(static_cast<uint32_t>(ir_duration));
             analysis_workspace_.Generated().SetImpulseResponseSize(
                 static_cast<uint32_t>(ir_duration * sample_rate));
         }

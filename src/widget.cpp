@@ -1614,9 +1614,11 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
         ImGui::TreePop();
     }
 
-    if (show_tc_filter_designer && ImGui::Begin("Filter Designer"))
+    if (show_tc_filter_designer)
     {
-        if (ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.90f), ImPlotFlags_None))
+        const bool filter_designer_visible = ImGui::Begin("Filter Designer");
+        if (filter_designer_visible &&
+            ImPlot::BeginPlot("Filter preview", ImVec2(-1, ImGui::GetWindowHeight() * 0.90f), ImPlotFlags_None))
         {
             ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
             ImPlot::SetupAxisLimits(ImAxis_X1, 20.0f, Settings::Instance().SampleRate() / 2.f, ImPlotCond_Always);
@@ -1696,7 +1698,6 @@ bool DrawToneCorrectionFilterDesigner(sfFDN::FDNConfig& config)
             }
             ImPlot::EndPlot();
         }
-
         ImGui::End();
     }
 

@@ -105,8 +105,6 @@ void FDNToolboxApp::loop()
 
     bool config_changed = false;
     config_changed = DrawFDNConfigurator();
-    // config_changed |= DrawFDNExtras(config_changed);
-
     if (config_changed)
     {
         UpdateFDN();

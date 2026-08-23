@@ -41,8 +41,14 @@ void FDNToolboxApp::DrawTransportControls(int selected_audio_file)
 {
     if (ImGui::Button(fdn_sandbox::icons::Impulse))
     {
-        audio_engine_.TriggerImpulse();
-        LOG_INFO(Settings::Instance().GetLogger(), "Playing impulse response...");
+        if (audio_engine_.TriggerImpulse())
+        {
+            LOG_INFO(Settings::Instance().GetLogger(), "Playing impulse response...");
+        }
+        else
+        {
+            LOG_ERROR(Settings::Instance().GetLogger(), "Audio engine rejected the impulse command");
+        }
     }
 
     ImGui::SameLine();
@@ -50,7 +56,10 @@ void FDNToolboxApp::DrawTransportControls(int selected_audio_file)
     {
         if (ImGui::Button(fdn_sandbox::icons::Stop))
         {
-            audio_engine_.StopClip();
+            if (!audio_engine_.StopClip())
+            {
+                LOG_WARNING(Settings::Instance().GetLogger(), "Audio engine rejected the stop command");
+            }
         }
         return;
     }
@@ -88,7 +97,10 @@ void FDNToolboxApp::DrawAudioFileSelector(int& selected_audio_file, const char* 
             if (ImGui::Selectable(kAudioFiles.at(index), is_selected))
             {
                 selected_audio_file = static_cast<int>(index);
-                audio_engine_.StopClip();
+                if (!audio_engine_.StopClip())
+                {
+                    LOG_WARNING(Settings::Instance().GetLogger(), "Audio engine rejected the stop command");
+                }
             }
         }
         ImGui::EndCombo();

@@ -7,14 +7,9 @@ namespace fdn_sandbox::audio
 {
 
 AudioEngine::AudioEngine(AudioEngineConfig config)
-    : config_(config)
-    , runtime_(config.sample_rate)
+    : runtime_(config.sample_rate)
     , manager_(audio_manager::create_audio_manager())
 {
-    if (config_.block_size != kSystemBlockSize)
-    {
-        throw std::invalid_argument("AudioEngine requires the fixed system block size");
-    }
     if (manager_ == nullptr)
     {
         throw std::runtime_error("Failed to create audio manager");
@@ -41,7 +36,7 @@ bool AudioEngine::Start()
         [this](std::span<float> output_buffer, std::size_t frame_size, std::size_t num_channels) {
             AudioCallback(output_buffer, frame_size, num_channels);
         },
-        static_cast<std::uint32_t>(config_.block_size));
+        static_cast<std::uint32_t>(kSystemBlockSize));
 }
 
 void AudioEngine::Stop() noexcept

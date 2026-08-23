@@ -29,27 +29,9 @@ class Settings
         return static_cast<T>(sample_rate_);
     }
 
-    [[nodiscard]] uint32_t IRDuration() const noexcept
-    {
-        return ir_duration_;
-    }
-
-    void SetIRDuration(uint32_t duration)
-    {
-        if (duration > 0)
-        {
-            ir_duration_ = duration;
-        }
-    }
-
     [[nodiscard]] uint32_t BlockSize() const noexcept
     {
         return block_size_; // Fixed block size for processing
-    }
-
-    void SetBlockSize(uint32_t block_size)
-    {
-        block_size_ = block_size;
     }
 
     [[nodiscard]] quill::Logger* GetLogger() const noexcept
@@ -66,8 +48,6 @@ class Settings
     }
 
     uint32_t sample_rate_ = 48000; // Default sample rate
-    size_t ir_duration_ = 1;       // Default impulse response duration in seconds
-
     uint32_t block_size_ = 64; // Fixed block size for processing
     quill::Logger* logger_;
 };

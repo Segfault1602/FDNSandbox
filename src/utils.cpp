@@ -86,22 +86,6 @@ std::vector<T> LogSpace(T start, T stop, size_t num)
     return result;
 }
 
-template <typename T>
-std::vector<T> Linspace(T start, T stop, size_t num)
-{
-    std::vector<T> result(num);
-    if (num == 0)
-    {
-        return result;
-    }
-
-    Eigen::Map<Eigen::ArrayX<T>> result_map(result.data(), num);
-
-    result_map = Eigen::ArrayX<T>::LinSpaced(num, start, stop);
-
-    return result;
-}
-
 std::vector<float> pchip(PchipInput input)
 {
     std::vector<float> x_copy(input.x.begin(), input.x.end());
@@ -538,6 +522,4 @@ std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& pro
 
 template std::vector<double> LogSpace(double start, double stop, size_t num);
 template std::vector<float> LogSpace(float start, float stop, size_t num);
-template std::vector<double> Linspace(double start, double stop, size_t num);
-template std::vector<float> Linspace(float start, float stop, size_t num);
 } // namespace utils

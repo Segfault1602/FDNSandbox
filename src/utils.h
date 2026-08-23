@@ -52,18 +52,6 @@ template <typename T>
 std::vector<T> LogSpace(T start, T stop, size_t num);
 
 /**
- * @brief Generate a linearly spaced vector.
- *
- * @tparam T The type of the elements in the vector.
- * @param start The starting value of the range.
- * @param stop The ending value of the range.
- * @param num The number of points to generate.
- * @return A vector containing linearly spaced values.
- */
-template <typename T>
-std::vector<T> Linspace(T start, T stop, size_t num);
-
-/**
  * @brief Perform piecewise cubic Hermite interpolation.
  *
  * @param x The x-coordinates of the data points.
@@ -95,8 +83,6 @@ bool WriteAudioFile(const std::string& filename, std::span<const float> audio_da
 uint32_t GetChannelCountFromAudioFile(std::string_view filename);
 
 std::vector<float> ReadAudioFile(std::string_view filename, uint32_t channel);
-
-std::array<std::array<float, 6>, 10> GetOctaveBandsSOS();
 
 std::string GetMatrixName(sfFDN::ScalarMatrixType type);
 

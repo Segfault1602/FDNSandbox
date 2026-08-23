@@ -153,11 +153,6 @@ bool AudioRuntime::TryPopEvent(AudioEvent& event) noexcept
     return handoff_.TryPopEvent(event);
 }
 
-bool AudioRuntime::HasActiveFdn() const noexcept
-{
-    return telemetry_generation_.load(std::memory_order_relaxed) != 0;
-}
-
 PlaybackState AudioRuntime::GetPlaybackState() const noexcept
 {
     return playback_state_.load(std::memory_order_relaxed);

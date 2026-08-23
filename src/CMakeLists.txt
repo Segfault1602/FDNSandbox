@@ -42,7 +42,7 @@ target_link_libraries(
            sfFDN::sfFDN
     PRIVATE Eigen3::Eigen
             samplerate
-            sndfile
+            SndFile::sndfile
             fdn_sandbox::fdn_sandbox_warnings
 )
 
@@ -88,8 +88,7 @@ target_link_libraries(
     fdn_sandbox_app
     PUBLIC audio_utils::audio_utils
            quill::quill
-           readerwriterqueue
-           sfFDN.sfFDN
+           sfFDN::sfFDN
            imgui
            fdn_optimization
            SndFile::sndfile

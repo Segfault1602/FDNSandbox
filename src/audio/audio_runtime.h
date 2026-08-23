@@ -33,16 +33,15 @@ class AudioRuntime final
     std::span<float> PrepareInput(std::size_t frame_size) noexcept;
     void Process(std::span<float> output_buffer, std::size_t frame_size, std::size_t num_channels) noexcept;
 
-    bool SubmitFdn(std::uint64_t generation, std::unique_ptr<sfFDN::FDN> value);
-    bool SubmitConvolver(std::unique_ptr<sfFDN::PartitionedConvolver> value);
-    bool SubmitClip(std::unique_ptr<AudioClip> value);
-    bool PlayClip(bool loop);
-    bool StopClip();
-    bool TriggerImpulse();
+    [[nodiscard]] bool SubmitFdn(std::uint64_t generation, std::unique_ptr<sfFDN::FDN> value);
+    [[nodiscard]] bool SubmitConvolver(std::unique_ptr<sfFDN::PartitionedConvolver> value);
+    [[nodiscard]] bool SubmitClip(std::unique_ptr<AudioClip> value);
+    [[nodiscard]] bool PlayClip(bool loop);
+    [[nodiscard]] bool StopClip();
+    [[nodiscard]] bool TriggerImpulse();
     void FlushPendingCommands();
     std::size_t CollectRetiredObjects();
     bool TryPopEvent(AudioEvent& event) noexcept;
-    bool HasActiveFdn() const noexcept;
     PlaybackState GetPlaybackState() const noexcept;
     void StopAcceptingCommands() noexcept;
     // The audio callback must be stopped before this is called.
