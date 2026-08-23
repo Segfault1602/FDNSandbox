@@ -1,14 +1,15 @@
 #include "files/file_dialogs.h"
 
+#include <filesystem>
 #include <string>
-#include <utility>
+#include <vector>
 
 namespace fdn_sandbox::files
 {
 namespace
 {
 
-std::filesystem::path EnsureExtension(std::filesystem::path path, const std::string& extension)
+std::filesystem::path EnsureExtension(const std::filesystem::path& path, const std::string& extension)
 {
     std::string value = path.string();
     if (!value.ends_with(extension))

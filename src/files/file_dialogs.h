@@ -58,7 +58,7 @@ class FileDialogs final
     FileDialogs();
 
     void Open(FileDialogRequest request);
-    std::vector<FileDialogSelection> Draw();
+    [[nodiscard]] std::vector<FileDialogSelection> Draw();
 
   private:
     ImGui::FileBrowser save_ir_;

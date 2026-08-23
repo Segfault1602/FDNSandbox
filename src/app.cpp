@@ -1,19 +1,25 @@
 #include "app.h"
 
+#include "notifications.h"
 #include "presets.h"
+#include "session/fdn_session.h"
 #include "settings.h"
 #include "theme.h"
+#include "views/fdn_info_view.h"
+#include "views/shell_view.h"
 #include "views/window_ids.h"
 
 #include "imgui_internal.h"
+#include <cstdint>
 #include <imgui.h>
 #include <quill/LogMacros.h>
 
 #include <cassert>
 #include <chrono>
 #include <filesystem>
-#include <stdexcept>
+#include <ratio>
 #include <string>
+#include <utility>
 
 FDNToolboxApp::FDNToolboxApp(float ui_scale)
     : audio_engine_({.sample_rate = Settings::Instance().SampleRate()})
@@ -63,9 +69,10 @@ void FDNToolboxApp::loop()
         shell_view_.DrawToolbar(audio_view_, audio_engine_, fdn_session_.ActiveSlot(), optimization_view_.IsActive()));
     notification_center_.DrawCriticalBanner();
     std::string reference_name;
-    if (analysis_workspace_.HasReference())
+    const auto& metadata = analysis_workspace_.ReferenceMetadata();
+    if (metadata.has_value())
     {
-        reference_name = std::filesystem::path(analysis_workspace_.ReferenceMetadata()->filename).filename().string();
+        reference_name = std::filesystem::path(metadata->filename).filename().string();
     }
     shell_view_.DrawStatusBar(
         fdn_sandbox::views::StatusBarData{
@@ -114,7 +121,7 @@ void FDNToolboxApp::loop()
     {
         UpdateFDN();
     }
-    fdn_info_view_.Draw(fdn_session_, analysis_workspace_, audio_view_.DisplayedCpuUsage());
+    fdn_sandbox::views::FdnInfoView::Draw(fdn_session_, analysis_workspace_, audio_view_.DisplayedCpuUsage());
     analysis_views_.DrawAll(analysis_workspace_);
 
     ImGui::End(); // End the main window

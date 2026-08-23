@@ -1,5 +1,9 @@
 #include "app.h"
 
+#include "audio/audio_clip.h"
+#include "audio/audio_types.h"
+#include "imgui.h"
+#include "notifications.h"
 #include "settings.h"
 
 #include <boost/dll/runtime_symbol_info.hpp>

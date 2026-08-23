@@ -44,9 +44,9 @@ struct StatusBarData
 class ShellView final
 {
   public:
-    ShellActions DrawMainMenuBar(AudioView& audio_view, audio::AudioEngine& engine);
-    ShellActions DrawToolbar(AudioView& audio_view, audio::AudioEngine& engine, session::FdnSlot active_slot,
-                             bool optimization_active);
+    [[nodiscard]] ShellActions DrawMainMenuBar(AudioView& audio_view, audio::AudioEngine& engine);
+    [[nodiscard]] ShellActions DrawToolbar(AudioView& audio_view, audio::AudioEngine& engine,
+                                           session::FdnSlot active_slot, bool optimization_active);
     void DrawStatusBar(const StatusBarData& data, const AudioView& audio_view);
     static void BuildDefaultDockLayout(ImGuiID dockspace_id);
 

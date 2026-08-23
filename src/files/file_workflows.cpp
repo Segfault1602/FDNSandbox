@@ -1,13 +1,20 @@
 #include "files/file_workflows.h"
+#include "audio/audio_clip.h"
+#include "files/file_error.h"
+#include "sffdn/partitioned_convolver.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
 #include <samplerate.h>
 #include <sndfile.h>
 
-#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,8 +42,10 @@ class SndFileHandle final
 
     SndFileHandle(const SndFileHandle&) = delete;
     SndFileHandle& operator=(const SndFileHandle&) = delete;
+    SndFileHandle(SndFileHandle&&) = delete;
+    SndFileHandle& operator=(SndFileHandle&&) = delete;
 
-    SNDFILE* Get() const noexcept
+    [[nodiscard]] SNDFILE* Get() const noexcept
     {
         return file_;
     }

@@ -1,10 +1,13 @@
 #include "views/audio_view.h"
 
+#include "audio/audio_engine.h"
+#include "audio/audio_types.h"
 #include "icons.h"
 #include "settings.h"
 #include "theme.h"
 #include "views/window_ids.h"
 
+#include <cstddef>
 #include <imgui.h>
 #include <quill/LogMacros.h>
 
@@ -15,6 +18,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace fdn_sandbox::views
 {

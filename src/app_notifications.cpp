@@ -1,5 +1,8 @@
 #include "app.h"
 
+#include "audio/audio_events.h"
+#include "audio/audio_types.h"
+#include "notifications.h"
 #include "settings.h"
 
 #include <quill/LogMacros.h>

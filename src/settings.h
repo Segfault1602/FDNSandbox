@@ -48,6 +48,6 @@ class Settings
     }
 
     uint32_t sample_rate_ = 48000; // Default sample rate
-    uint32_t block_size_ = 64; // Fixed block size for processing
+    uint32_t block_size_ = 64;     // Fixed block size for processing
     quill::Logger* logger_;
 };

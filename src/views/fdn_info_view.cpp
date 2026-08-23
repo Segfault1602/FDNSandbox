@@ -1,17 +1,20 @@
 #include "views/fdn_info_view.h"
 
+#include "analysis/analysis_workspace.h"
 #include "icons.h"
+#include "session/fdn_session.h"
 #include "settings.h"
 #include "utils.h"
 #include "views/window_ids.h"
 
 #include <imgui.h>
-#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <nlohmann/json_fwd.hpp>
 #include <string>
+#include <variant>
 
 namespace fdn_sandbox::views
 {

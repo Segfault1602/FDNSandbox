@@ -1,12 +1,21 @@
 #include "fdn_widget.h"
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <imgui.h>
 #include <implot.h>
 
 #include <imfilebrowser.h>
 
-#include <sffdn/sffdn.h>
+#include <numbers>
 
+#include "sffdn/delay_utils.h"
+#include "sffdn/fdn_config.h"
+#include "sffdn/matrix_gallery.h"
+#include "sffdn/types.h"
 #include "theme.h"
 #include "utils.h"
 #include "widget.h"
@@ -17,8 +26,11 @@
 #include <optional>
 #include <random>
 #include <ranges>
+#include <span>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -418,7 +430,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config) const
 
     if (is_time_varying)
     {
-        const FDNWidgetVisitor modulation_visitor{fdn_config, state};
+        const FDNWidgetVisitor modulation_visitor{.fdn_config = fdn_config, .state = state};
         config_changed |= modulation_visitor(*config.lfo_config);
 
         // Need to make sure that the modulation amplitude is not greater than the delay time
@@ -878,41 +890,41 @@ bool FDNWidgetVisitor::operator()([[maybe_unused]] sfFDN::AttenuationFilterBankO
 
 bool DrawFDNOptions(sfFDN::DelayBankOptions& config, const sfFDN::FDNConfig& fdn_config, FDNWidgetState& state)
 {
-    const FDNWidgetVisitor widget{fdn_config, state};
+    const FDNWidgetVisitor widget{.fdn_config = fdn_config, .state = state};
     return widget(config);
 }
 
 bool DrawFDNOptions(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig& fdn_config, FDNWidgetState& state)
 {
-    const FDNWidgetVisitor widget{fdn_config, state};
+    const FDNWidgetVisitor widget{.fdn_config = fdn_config, .state = state};
     return widget(config);
 }
 
 bool DrawFDNOptions(sfFDN::attenuation_filter_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config,
                     FDNWidgetState& state)
 {
-    FDNWidgetVisitor widget{fdn_config, state};
+    FDNWidgetVisitor widget{.fdn_config = fdn_config, .state = state};
     return std::visit(widget, config_variant);
 }
 
 bool DrawFDNOptions(sfFDN::single_channel_processor_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config,
                     FDNWidgetState& state)
 {
-    FDNWidgetVisitor widget{fdn_config, state};
+    FDNWidgetVisitor widget{.fdn_config = fdn_config, .state = state};
     return std::visit(widget, config_variant);
 }
 
 bool DrawFDNOptions(sfFDN::multi_channel_processor_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config,
                     FDNWidgetState& state)
 {
-    FDNWidgetVisitor widget{fdn_config, state};
+    FDNWidgetVisitor widget{.fdn_config = fdn_config, .state = state};
     return std::visit(widget, config_variant);
 }
 
 bool DrawFDNOptions(sfFDN::feedback_matrix_variant_t& config_variant, const sfFDN::FDNConfig& fdn_config,
                     FDNWidgetState& state)
 {
-    FDNWidgetVisitor widget{fdn_config, state};
+    FDNWidgetVisitor widget{.fdn_config = fdn_config, .state = state};
     return std::visit(widget, config_variant);
 }
 

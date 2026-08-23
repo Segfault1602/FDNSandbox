@@ -1,20 +1,31 @@
 #include "widget.h"
 
+#include <array>
+#include <cassert>
+#include <cfloat>
+#include <cmath>
+#include <cstddef>
 #include <imgui.h>
 #include <implot.h>
 
 #include <audio_utils/array_math.h>
-#include <sffdn/sffdn.h>
+#include <numbers>
 
 #include "fdn_info.h"
 #include "settings.h"
+#include "sffdn/fdn.h"
+#include "sffdn/fdn_config.h"
+#include "sffdn/filter_design.h"
+#include "sffdn/types.h"
 #include "theme.h"
 #include "utils.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <random>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace
 {

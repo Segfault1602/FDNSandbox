@@ -34,14 +34,15 @@ struct LoadedRir
 class FileWorkflows final
 {
   public:
-    std::expected<LoadedRir, FileError> LoadRir(const std::filesystem::path& path,
-                                                std::size_t convolution_block_size) const;
+    [[nodiscard]] std::expected<LoadedRir, FileError> LoadRir(const std::filesystem::path& path,
+                                                              std::size_t convolution_block_size) const;
 
-    std::expected<audio::AudioClip, FileError> LoadClip(const std::filesystem::path& path,
-                                                        std::uint32_t engine_sample_rate) const;
+    [[nodiscard]] std::expected<audio::AudioClip, FileError> LoadClip(const std::filesystem::path& path,
+                                                                      std::uint32_t engine_sample_rate) const;
 
-    std::expected<void, FileError> SaveImpulseResponse(const std::filesystem::path& path,
-                                                       std::span<const float> samples, std::uint32_t sample_rate) const;
+    [[nodiscard]] std::expected<void, FileError> SaveImpulseResponse(const std::filesystem::path& path,
+                                                                     std::span<const float> samples,
+                                                                     std::uint32_t sample_rate) const;
 };
 
 } // namespace fdn_sandbox::files

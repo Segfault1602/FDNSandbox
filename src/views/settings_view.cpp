@@ -1,5 +1,7 @@
 #include "views/settings_view.h"
 
+#include "analysis/analysis_workspace.h"
+#include "audio_utils/fft_utils.h"
 #include "settings.h"
 #include "views/window_ids.h"
 

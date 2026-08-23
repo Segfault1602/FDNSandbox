@@ -11,8 +11,7 @@
 namespace fdn_sandbox::audio
 {
 
-AudioRuntime::AudioRuntime(std::uint32_t sample_rate, std::size_t queue_capacity,
-                           std::size_t max_commands_per_block)
+AudioRuntime::AudioRuntime(std::uint32_t sample_rate, std::size_t queue_capacity, std::size_t max_commands_per_block)
     : sample_rate_(sample_rate)
     , max_commands_per_block_(max_commands_per_block)
     , handoff_(queue_capacity)
@@ -60,8 +59,7 @@ std::span<float> AudioRuntime::PrepareInput(std::size_t frame_size) noexcept
     return input_;
 }
 
-void AudioRuntime::Process(std::span<float> output_buffer, std::size_t frame_size,
-                           std::size_t num_channels) noexcept
+void AudioRuntime::Process(std::span<float> output_buffer, std::size_t frame_size, std::size_t num_channels) noexcept
 {
     if (frame_size != kSystemBlockSize || output_buffer.size() < frame_size * num_channels)
     {
@@ -99,12 +97,12 @@ void AudioRuntime::Process(std::span<float> output_buffer, std::size_t frame_siz
     std::span<float> output =
         reverb_engine == ReverbEngine::Fdn ? std::span<float>(fdn_output_) : std::span<float>(convolution_output_);
     const float wet = reverb_engine == ReverbEngine::Fdn ? fdn_wet_.load(std::memory_order_relaxed)
-                                                          : convolution_wet_.load(std::memory_order_relaxed);
+                                                         : convolution_wet_.load(std::memory_order_relaxed);
     const float dry = reverb_engine == ReverbEngine::Fdn ? fdn_dry_.load(std::memory_order_relaxed) : 0.0f;
     MixMeterAndWrite(output_buffer, output, num_channels, wet, dry);
 
-    const std::int64_t duration = reverb_engine == ReverbEngine::Fdn ? processing_times.fdn_ns
-                                                                     : processing_times.convolution_ns;
+    const std::int64_t duration =
+        reverb_engine == ReverbEngine::Fdn ? processing_times.fdn_ns : processing_times.convolution_ns;
     UpdateCpuUsage(duration);
 }
 
@@ -423,8 +421,7 @@ void AudioRuntime::PrepareMix(ReverbEngine engine) noexcept
         return;
     }
 
-    const std::uint32_t delay_samples =
-        direct_delay_ms_.load(std::memory_order_relaxed) * sample_rate_ / 1000;
+    const std::uint32_t delay_samples = direct_delay_ms_.load(std::memory_order_relaxed) * sample_rate_ / 1000;
     if (direct_delay_.GetMaximumDelay() < delay_samples)
     {
         PublishEvent({
@@ -439,8 +436,8 @@ void AudioRuntime::PrepareMix(ReverbEngine engine) noexcept
     direct_delay_.Process(input_buffer, input_buffer);
 }
 
-void AudioRuntime::MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output,
-                                    std::size_t num_channels, float wet, float dry) noexcept
+void AudioRuntime::MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output, std::size_t num_channels,
+                                    float wet, float dry) noexcept
 {
     Mix(output, input_, {.output_gain = output_gain_.load(std::memory_order_relaxed), .wet = wet, .dry = dry});
     const MeterReading reading = output_meter_.Measure(output);
@@ -460,7 +457,8 @@ void AudioRuntime::MixMeterAndWrite(std::span<float> output_buffer, std::span<fl
 
 void AudioRuntime::UpdateCpuUsage(std::int64_t duration_ns) noexcept
 {
-    const CpuUsageReading cpu_usage = cpu_average_.Push(duration_ns, kSystemBlockSize, static_cast<float>(sample_rate_));
+    const CpuUsageReading cpu_usage =
+        cpu_average_.Push(duration_ns, kSystemBlockSize, static_cast<float>(sample_rate_));
     cpu_usage_.store(cpu_usage.average, std::memory_order_relaxed);
 
     if (duration_ns <= 0 || static_cast<std::uint64_t>(duration_ns) <= cpu_highwater_mark_ns_)

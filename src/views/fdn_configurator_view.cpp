@@ -1,12 +1,12 @@
 #include "views/fdn_configurator_view.h"
 
 #include "fdn_widget.h"
+#include "session/fdn_session.h"
+#include "sffdn/types.h"
 #include "theme.h"
 #include "utils.h"
 #include "views/window_ids.h"
 #include "widget.h"
-
-#include <sffdn/sffdn.h>
 
 #include <imgui.h>
 
@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace
 {

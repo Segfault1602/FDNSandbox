@@ -1,12 +1,20 @@
+#include "analysis/analysis_workspace.h"
 #include "app.h"
 
+#include "audio/audio_types.h"
+#include "files/file_dialogs.h"
+#include "files/file_error.h"
+#include "notifications.h"
 #include "settings.h"
+#include <cstddef>
 #include <quill/LogMacros.h>
 
 #include <cstdint>
 #include <format>
 #include <memory>
 #include <string>
+#include <utility>
+#include <variant>
 
 void FDNToolboxApp::ProcessFileDialogSelections()
 {

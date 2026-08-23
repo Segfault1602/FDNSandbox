@@ -23,8 +23,7 @@ size_t ClampEarlyIRSampleCount(const EarlyIRSampleCountInput& input)
     return std::min(static_cast<size_t>(sample_count), input.impulse_size);
 }
 
-bool SameStftOptions(const audio_utils::analysis::STFTOptions& lhs,
-                     const audio_utils::analysis::STFTOptions& rhs)
+bool SameStftOptions(const audio_utils::analysis::STFTOptions& lhs, const audio_utils::analysis::STFTOptions& rhs)
 {
     return lhs.fft_size == rhs.fft_size && lhs.overlap == rhs.overlap && lhs.window_size == rhs.window_size &&
            lhs.window_type == rhs.window_type && lhs.samplerate == rhs.samplerate;
@@ -129,9 +128,8 @@ std::span<const float> IRAnalyzer::GetTimeData()
 
 SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale)
 {
-    const bool options_changed =
-        !spectrogram_options_ || !SameStftOptions(*spectrogram_options_, stft_options) ||
-        spectrogram_mel_scale_ != mel_scale;
+    const bool options_changed = !spectrogram_options_ || !SameStftOptions(*spectrogram_options_, stft_options) ||
+                                 spectrogram_mel_scale_ != mel_scale;
     if ((analysis_flags_.test(static_cast<size_t>(IRAnalysisType::Spectrogram)) || options_changed) &&
         !GetImpulseResponse().empty())
     {

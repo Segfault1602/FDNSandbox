@@ -89,8 +89,8 @@ MeterReading OutputLevelMeter::Measure(std::span<const float> samples) noexcept
     if (samples.empty())
     {
         return {
-            .rms = std::sqrt(static_cast<float>(
-                std::max(0.0, sum_squares_) / static_cast<double>(squared_samples_.size()))),
+            .rms = std::sqrt(
+                static_cast<float>(std::max(0.0, sum_squares_) / static_cast<double>(squared_samples_.size()))),
             .peak = 0.0f,
             .clipped = false,
         };

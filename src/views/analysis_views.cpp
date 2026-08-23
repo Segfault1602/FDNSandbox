@@ -1,10 +1,12 @@
 #include "views/analysis_views.h"
 
+#include "analysis/analysis_workspace.h"
 #include "fdn_analyzer.h"
 
 #include <audio_utils/audio_analysis.h>
 #include <audio_utils/fft_utils.h>
 
+#include "ir_analyzer.h"
 #include "plot_ui.h"
 #include "settings.h"
 #include "theme.h"
@@ -25,6 +27,7 @@
 #include <cstring>
 #include <format>
 #include <functional>
+#include <memory>
 #include <numbers>
 #include <span>
 #include <string>

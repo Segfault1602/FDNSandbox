@@ -1,17 +1,18 @@
 #include "views/shell_view.h"
 
+#include "files/file_dialogs.h"
 #include "icons.h"
-#include "settings.h"
+#include "imgui.h"
+#include "session/fdn_session.h"
 #include "theme.h"
 #include "views/audio_view.h"
 #include "views/window_ids.h"
 
 #include "imgui_internal.h"
 
-#include <algorithm>
 #include <cmath>
-#include <filesystem>
-#include <string>
+#include <cstdint>
+#include <optional>
 
 namespace
 {

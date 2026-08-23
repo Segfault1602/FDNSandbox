@@ -70,8 +70,7 @@ class AudioEngine final
     void PlayTestTone(bool play);
 
   private:
-    void AudioCallback(std::span<float> output_buffer, std::size_t frame_size,
-                       std::size_t num_channels) noexcept;
+    void AudioCallback(std::span<float> output_buffer, std::size_t frame_size, std::size_t num_channels) noexcept;
 
     AudioRuntime runtime_;
     std::unique_ptr<audio_manager> manager_;

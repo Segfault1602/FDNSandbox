@@ -31,8 +31,8 @@ class AudioView final
 
     void DrawMeterBar(const ImVec2& size) const;
     void DrawCompactOutputMeter() const;
-    float DisplayedCpuUsage() const noexcept;
-    bool IsClippingWarningDisplayed() const noexcept;
+    [[nodiscard]] float DisplayedCpuUsage() const noexcept;
+    [[nodiscard]] bool IsClippingWarningDisplayed() const noexcept;
 
   private:
     struct OutputMeterDisplayState

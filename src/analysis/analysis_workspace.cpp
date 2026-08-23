@@ -22,8 +22,7 @@ audio_utils::analysis::STFTOptions MakeDefaultStftOptions(std::uint32_t sample_r
     };
 }
 
-bool SameStftOptions(const audio_utils::analysis::STFTOptions& lhs,
-                     const audio_utils::analysis::STFTOptions& rhs)
+bool SameStftOptions(const audio_utils::analysis::STFTOptions& lhs, const audio_utils::analysis::STFTOptions& rhs)
 {
     return lhs.fft_size == rhs.fft_size && lhs.overlap == rhs.overlap && lhs.window_size == rhs.window_size &&
            lhs.window_type == rhs.window_type && lhs.samplerate == rhs.samplerate;
@@ -68,8 +67,7 @@ void AnalysisWorkspace::ClearReferenceIr()
 
 void AnalysisWorkspace::SetSpectrogramSettings(SpectrogramSettings settings)
 {
-    if (SameStftOptions(spectrogram_settings_.stft, settings.stft) &&
-        spectrogram_settings_.scale == settings.scale)
+    if (SameStftOptions(spectrogram_settings_.stft, settings.stft) && spectrogram_settings_.scale == settings.scale)
     {
         return;
     }

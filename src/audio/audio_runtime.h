@@ -71,8 +71,8 @@ class AudioRuntime final
     ProcessingTimes ProcessEngines() noexcept;
     void DetectInstability() noexcept;
     void PrepareMix(ReverbEngine engine) noexcept;
-    void MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output, std::size_t num_channels,
-                          float wet, float dry) noexcept;
+    void MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output, std::size_t num_channels, float wet,
+                          float dry) noexcept;
     void UpdateCpuUsage(std::int64_t duration_ns) noexcept;
     void PublishEvent(AudioEvent event) noexcept;
 

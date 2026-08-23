@@ -1,17 +1,25 @@
 #include "views/optimization_view.h"
 
+#include <array>
+#include <cassert>
+#include <chrono>
+#include <cstddef>
+#include <format>
 #include <imgui.h>
 #include <implot.h>
-#include <quill/LogMacros.h>
-#include <quill/std/Array.h>
-#include <quill/std/Vector.h>
+#include <memory>
+#include <optional>
+#include <quill/Logger.h>
 
-#include <sffdn/sffdn.h>
-
+#include "audio_loss.h"
+#include "audio_utils/audio_analysis.h"
+#include "audio_utils/fft_utils.h"
 #include "icons.h"
+#include "optim_types.h"
 #include "optimizer.h"
 #include "plot_ui.h"
 #include "settings.h"
+#include "sffdn/fdn_config.h"
 #include "theme.h"
 #include "utils.h"
 #include "views/window_ids.h"
@@ -20,7 +28,9 @@
 #include <cmath>
 #include <limits>
 #include <span>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace
 {
