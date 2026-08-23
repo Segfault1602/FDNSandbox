@@ -42,6 +42,7 @@ void Crossfade(std::span<const float> fade_in, std::span<const float> fade_out, 
 {
     assert(fade_in.size() == fade_out.size());
     assert(fade_in.size() == output.size());
+    assert(output.size() > 1);
 
     for (std::size_t i = 0; i < output.size(); ++i)
     {
