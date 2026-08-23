@@ -5,10 +5,10 @@
 #include <imfilebrowser.h>
 
 #include "audio/audio_engine.h"
-#include "fdn_analyzer.h"
+#include "analysis/analysis_workspace.h"
 #include "notifications.h"
 #include "optimization_gui.h"
-#include <sffdn/sffdn.h>
+#include "session/fdn_session.h"
 
 #include <array>
 #include <cstdint>
@@ -60,6 +60,8 @@ class FDNToolboxApp
     void DrawT60s();
 
     void UpdateFDN();
+    void PublishFdnCommit(fdn_sandbox::session::FdnCommit commit);
+    void ReportFdnBuildError(const fdn_sandbox::session::FdnBuildError& error);
 
     bool StartAudioStream();
     void StopAudioStream();
@@ -113,42 +115,24 @@ class FDNToolboxApp
 
     // Member variables
     fdn_sandbox::audio::AudioEngine audio_engine_;
-
-    std::unique_ptr<sfFDN::FDN> gui_fdn_;
-    uint64_t submitted_fdn_generation_ = 0;
-
-    sfFDN::FDNConfig fdn_config_;
-
-    sfFDN::FDNConfig fdn_config_A_;
-    sfFDN::FDNConfig fdn_config_B_;
+    fdn_sandbox::session::FdnSession fdn_session_;
 
     float displayed_cpu_usage_ = 0.0f;
     float cpu_usage_display_timer_ = 0.0f;
     OutputMeterDisplayState output_meter_display_{};
 
     int selected_audio_file_ = 0;
-    uint32_t selected_config_slot_ = 0;
     bool reset_layout_requested_ = false;
     bool clipping_notification_active_ = false;
     uint64_t reported_event_overflow_count_ = 0;
     fdn_sandbox::NotificationCenter notification_center_;
 
-    fdn_analysis::FDNAnalyzer fdn_analyzer_;
+    fdn_sandbox::analysis::AnalysisWorkspace analysis_workspace_;
     OptimizationGUI optimization_gui_;
 
     ImGui::FileBrowser save_ir_browser;
     ImGui::FileBrowser load_config_browser;
     ImGui::FileBrowser save_config_browser;
     ImGui::FileBrowser load_rir_browser;
-
-    audio_utils::analysis::STFTOptions stft_options_;
-    enum class SpectrogramType : uint8_t
-    {
-        STFT,
-        Mel
-    } spectrogram_type_ = SpectrogramType::STFT;
-
-    std::string loaded_rir_filename_;
-    fdn_analysis::IRAnalyzer rir_analyzer_;
 
 };

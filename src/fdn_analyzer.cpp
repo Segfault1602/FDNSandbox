@@ -85,7 +85,7 @@ void FDNAnalyzer::SetFDN(std::unique_ptr<sfFDN::FDN> fdn)
 void FDNAnalyzer::SetImpulseResponseSize(uint32_t size_samples)
 {
     impulse_response_size_samples_ = size_samples;
-    analysis_flags_.set();
+    analysis_flags_.set(static_cast<size_t>(FDNAnalysisType::ImpulseResponse));
 }
 
 [[nodiscard]] uint32_t FDNAnalyzer::GetImpulseResponseSize() const
@@ -95,7 +95,7 @@ void FDNAnalyzer::SetImpulseResponseSize(uint32_t size_samples)
 
 std::span<const float> FDNAnalyzer::GetImpulseResponse()
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::ImpulseResponse)))
+    if (analysis_flags_.test(static_cast<size_t>(FDNAnalysisType::ImpulseResponse)))
     {
         const Stopwatch stopwatch;
 
@@ -113,7 +113,7 @@ std::span<const float> FDNAnalyzer::GetImpulseResponse()
 
         is_clipping_ =
             std::ranges::any_of(impulse_response, [](float sample) { return sample < -1.0f || sample > 1.0f; });
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::ImpulseResponse));
+        analysis_flags_.reset(static_cast<size_t>(FDNAnalysisType::ImpulseResponse));
 
         LOG_INFO(logger_, "Rendering new impulse response took {} ms", stopwatch.ElapsedMs());
 

@@ -256,28 +256,30 @@ void FDNToolboxApp::DrawImpulseResponse()
     {
         const auto sample_rate = Settings::Instance().SampleRateAs<float>();
         Settings::Instance().SetIRDuration(static_cast<uint32_t>(ir_duration));
-        fdn_analyzer_.SetImpulseResponseSize(static_cast<uint32_t>(ir_duration * sample_rate));
+        analysis_workspace_.Generated().SetImpulseResponseSize(static_cast<uint32_t>(ir_duration * sample_rate));
     }
 
-    if (!rir_analyzer_.GetImpulseResponse().empty())
+    if (analysis_workspace_.HasReference())
     {
         if (ImGui::Button("Match RIR Length"))
         {
             const auto sample_rate = Settings::Instance().SampleRateAs<float>();
-            const float rir_duration = static_cast<float>(rir_analyzer_.GetImpulseResponse().size()) / sample_rate;
+            const float rir_duration =
+                static_cast<float>(analysis_workspace_.Reference().GetImpulseResponse().size()) / sample_rate;
             ir_duration = rir_duration;
             Settings::Instance().SetIRDuration(static_cast<uint32_t>(ir_duration));
-            fdn_analyzer_.SetImpulseResponseSize(static_cast<uint32_t>(ir_duration * sample_rate));
+            analysis_workspace_.Generated().SetImpulseResponseSize(
+                static_cast<uint32_t>(ir_duration * sample_rate));
         }
     }
 
     static bool show_rir = false;
     ImGui::Checkbox("Show RIR", &show_rir);
 
-    const auto imp_response = fdn_analyzer_.GetImpulseResponse();
-    const auto time_data = fdn_analyzer_.GetTimeData();
-    const auto rir_response = rir_analyzer_.GetImpulseResponse();
-    const auto rir_time_data = rir_analyzer_.GetTimeData();
+    const auto imp_response = analysis_workspace_.Generated().GetImpulseResponse();
+    const auto time_data = analysis_workspace_.Generated().GetTimeData();
+    const auto rir_response = analysis_workspace_.Reference().GetImpulseResponse();
+    const auto rir_time_data = analysis_workspace_.Reference().GetTimeData();
     const bool show_rir_overlay = show_rir && !rir_response.empty();
     const ImPlotFlags plot_flags = show_rir_overlay ? ImPlotFlags_None : ImPlotFlags_NoLegend;
 
@@ -300,7 +302,7 @@ void FDNToolboxApp::DrawImpulseResponse()
                 0.75f);
 
             ImPlotSpec fdn_spec = fdn_sandbox::plot_ui::LineSpec(fdn_sandbox::plot_ui::SeriesRole::Fdn, 1.7f);
-            if (fdn_analyzer_.IsClipping())
+            if (analysis_workspace_.Generated().IsClipping())
             {
                 fdn_spec.LineColor = fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusError);
             }
@@ -353,22 +355,28 @@ void FDNToolboxApp::DrawSpectrogram()
     constexpr float kColorBarWidth = 100.0f;
     fdn_analysis::SpectrogramData spectrogram_data{};
     double tmax = 1.0;
+    const auto& spectrogram_settings = analysis_workspace_.GetSpectrogramSettings();
     if (show_rir)
     {
-        spectrogram_data = rir_analyzer_.GetSpectrogram(stft_options_, spectrogram_type_ == SpectrogramType::Mel);
-        tmax = rir_analyzer_.GetImpulseResponseSize() / Settings::Instance().SampleRateAs<double>();
+        spectrogram_data = analysis_workspace_.Reference().GetSpectrogram(
+            spectrogram_settings.stft, spectrogram_settings.scale == fdn_sandbox::analysis::SpectrogramScale::Mel);
+        tmax =
+            analysis_workspace_.Reference().GetImpulseResponseSize() / Settings::Instance().SampleRateAs<double>();
     }
     else
     {
-        spectrogram_data = fdn_analyzer_.GetSpectrogram(stft_options_, spectrogram_type_ == SpectrogramType::Mel);
-        tmax = fdn_analyzer_.GetImpulseResponseSize() / Settings::Instance().SampleRateAs<double>();
+        spectrogram_data = analysis_workspace_.Generated().GetSpectrogram(
+            spectrogram_settings.stft, spectrogram_settings.scale == fdn_sandbox::analysis::SpectrogramScale::Mel);
+        tmax =
+            analysis_workspace_.Generated().GetImpulseResponseSize() / Settings::Instance().SampleRateAs<double>();
     }
 
     static bool previous_show_rir = show_rir;
-    static SpectrogramType previous_spectrogram_type = spectrogram_type_;
+    static auto previous_spectrogram_scale = spectrogram_settings.scale;
     static uint32_t previous_bin_count = 0;
     static uint32_t previous_frame_count = 0;
-    const bool dimensions_changed = show_rir != previous_show_rir || spectrogram_type_ != previous_spectrogram_type ||
+    const bool dimensions_changed = show_rir != previous_show_rir ||
+                                    spectrogram_settings.scale != previous_spectrogram_scale ||
                                     spectrogram_data.bin_count != previous_bin_count ||
                                     spectrogram_data.frame_count != previous_frame_count;
 
@@ -378,7 +386,8 @@ void FDNToolboxApp::DrawSpectrogram()
         double bin_count = Settings::Instance().SampleRateAs<double>() / 2.0;
         const char* frequency_axis_label = "Frequency (Hz)";
 
-        if (spectrogram_type_ == SpectrogramType::Mel && !spectrogram_data.data.empty())
+        if (spectrogram_settings.scale == fdn_sandbox::analysis::SpectrogramScale::Mel &&
+            !spectrogram_data.data.empty())
         {
             const auto sample_rate = Settings::Instance().SampleRateAs<float>();
             mels = audio_utils::GetMelFrequencies(spectrogram_data.bin_count, 0.f, sample_rate / 2.0f);
@@ -435,7 +444,7 @@ void FDNToolboxApp::DrawSpectrogram()
     ImPlot::PopColormap();
 
     previous_show_rir = show_rir;
-    previous_spectrogram_type = spectrogram_type_;
+    previous_spectrogram_scale = spectrogram_settings.scale;
     previous_bin_count = spectrogram_data.bin_count;
     previous_frame_count = spectrogram_data.frame_count;
 
@@ -450,8 +459,8 @@ void FDNToolboxApp::DrawSpectrum()
     }
 
     static SpectrumUiState state;
-    DrawSpectrumControls(state, !rir_analyzer_.GetImpulseResponse().empty());
-    DrawSpectrumContents(state, fdn_analyzer_, rir_analyzer_);
+    DrawSpectrumControls(state, analysis_workspace_.HasReference());
+    DrawSpectrumContents(state, analysis_workspace_.Generated(), analysis_workspace_.Reference());
     ImGui::End();
 }
 
@@ -605,8 +614,8 @@ void FDNToolboxApp::DrawAutocorrelation()
     }
 
     static AutocorrelationUiState state;
-    DrawAutocorrelationControls(state, !rir_analyzer_.GetImpulseResponse().empty());
-    DrawAutocorrelationContents(state, fdn_analyzer_, rir_analyzer_);
+    DrawAutocorrelationControls(state, analysis_workspace_.HasReference());
+    DrawAutocorrelationContents(state, analysis_workspace_.Generated(), analysis_workspace_.Reference());
     ImGui::End();
 }
 
@@ -782,7 +791,7 @@ void FDNToolboxApp::DrawFilterResponse()
 
     if (ImGui::BeginTabBar("Filter Responses"))
     {
-        const fdn_analysis::FilterData data = fdn_analyzer_.GetFilterData();
+        const fdn_analysis::FilterData data = analysis_workspace_.Generated().GetFilterData();
         DrawAttenuationFilterTab(data, FindMinimumMagnitude(data));
         DrawToneCorrectionTab(data);
         ImGui::EndTabBar();
@@ -960,13 +969,18 @@ void FDNToolboxApp::DrawEnergyDecayCurve()
     }
 
     static EnergyDecayUiState state;
-    const bool show_octave_bands = DrawEnergyDecayControls(state, !rir_analyzer_.GetImpulseResponse().empty());
-    const fdn_analysis::EnergyDecayCurveData fdn_data = fdn_analyzer_.GetEnergyDecayCurveData();
+    const bool show_octave_bands = DrawEnergyDecayControls(state, analysis_workspace_.HasReference());
+    const fdn_analysis::EnergyDecayCurveData fdn_data =
+        analysis_workspace_.Generated().GetEnergyDecayCurveData();
     const fdn_analysis::EnergyDecayCurveData rir_data =
-        state.show_rir ? rir_analyzer_.GetEnergyDecayCurveData() : fdn_analysis::EnergyDecayCurveData{};
-    const fdn_analysis::T60Data t60_data = fdn_analyzer_.GetT60Data(-state.decay_db_start, -state.decay_db_end);
-    const std::span<const float> rir_time = state.show_rir ? rir_analyzer_.GetTimeData() : std::span<const float>{};
-    DrawEnergyDecayPlot(state, show_octave_bands, fdn_data, rir_data, t60_data, fdn_analyzer_.GetTimeData(), rir_time);
+        state.show_rir ? analysis_workspace_.Reference().GetEnergyDecayCurveData()
+                       : fdn_analysis::EnergyDecayCurveData{};
+    const fdn_analysis::T60Data t60_data =
+        analysis_workspace_.Generated().GetT60Data(-state.decay_db_start, -state.decay_db_end);
+    const std::span<const float> rir_time =
+        state.show_rir ? analysis_workspace_.Reference().GetTimeData() : std::span<const float>{};
+    DrawEnergyDecayPlot(state, show_octave_bands, fdn_data, rir_data, t60_data,
+                        analysis_workspace_.Generated().GetTimeData(), rir_time);
     ImGui::End();
 }
 void FDNToolboxApp::DrawEnergyDecayRelief()
@@ -984,11 +998,11 @@ void FDNToolboxApp::DrawEnergyDecayRelief()
     fdn_analysis::EnergyDecayReliefData edr{};
     if (show_rir)
     {
-        edr = rir_analyzer_.GetEnergyDecayReliefData();
+        edr = analysis_workspace_.Reference().GetEnergyDecayReliefData();
     }
     else
     {
-        edr = fdn_analyzer_.GetEnergyDecayReliefData();
+        edr = analysis_workspace_.Generated().GetEnergyDecayReliefData();
     }
 
     if (edr.energy_decay_relief.empty() || edr.bin_count == 0 || edr.frame_count == 0)
@@ -1084,7 +1098,8 @@ void FDNToolboxApp::DrawCepstrum()
     {
         if (ImPlot::BeginPlot("Impulse Response Cepstrum#", ImVec2(), ImPlotFlags_NoLegend))
         {
-            DrawEarlyRIRPicker(fdn_analyzer_.GetImpulseResponse(), fdn_analyzer_.GetTimeData(), early_rir_duration);
+            DrawEarlyRIRPicker(analysis_workspace_.Generated().GetImpulseResponse(),
+                               analysis_workspace_.Generated().GetTimeData(), early_rir_duration);
             early_rir_duration = std::max(early_rir_duration, 0.1);
             ImPlot::EndPlot();
         }
@@ -1092,7 +1107,7 @@ void FDNToolboxApp::DrawCepstrum()
         if (ImPlot::BeginPlot("Cepstrum", ImVec2(-1, -1), ImPlotFlags_NoLegend))
         {
             const auto early_rir_seconds = static_cast<float>(early_rir_duration);
-            auto cepstrum_data = fdn_analyzer_.GetCepstrum(early_rir_seconds);
+            auto cepstrum_data = analysis_workspace_.Generated().GetCepstrum(early_rir_seconds);
             static std::vector<float> quefrency_ms;
             if (quefrency_ms.size() != cepstrum_data.cepstrum.size())
             {
@@ -1145,9 +1160,9 @@ void FDNToolboxApp::DrawEchoDensity()
     static bool show_rir = false;
     ImGui::Checkbox("Show RIR", &show_rir);
 
-    auto echo_density_data = fdn_analyzer_.GetEchoDensityData(window_size_ms, hop_size_ms);
-    auto ir = fdn_analyzer_.GetImpulseResponse();
-    auto time_data = fdn_analyzer_.GetTimeData();
+    auto echo_density_data = analysis_workspace_.Generated().GetEchoDensityData(window_size_ms, hop_size_ms);
+    auto ir = analysis_workspace_.Generated().GetImpulseResponse();
+    auto time_data = analysis_workspace_.Generated().GetTimeData();
     const ImPlotFlags plot_flags = show_rir ? ImPlotFlags_None : ImPlotFlags_NoLegend;
 
     if (ImPlot::BeginPlot("Echo Density", ImVec2(-1, -1), plot_flags))
@@ -1188,7 +1203,8 @@ void FDNToolboxApp::DrawEchoDensity()
 
             if (show_rir)
             {
-                auto rir_echo_density_data = rir_analyzer_.GetEchoDensityData(window_size_ms, hop_size_ms);
+                auto rir_echo_density_data =
+                    analysis_workspace_.Reference().GetEchoDensityData(window_size_ms, hop_size_ms);
                 if (!rir_echo_density_data.echo_density.empty())
                 {
                     const size_t rir_echo_density_count = std::min(rir_echo_density_data.sparse_indices.size(),
@@ -1228,9 +1244,16 @@ void FDNToolboxApp::DrawT60s()
     const float db_end = -50;
 
     static bool show_rir = false;
-    ImGui::Checkbox("Show RIR", &show_rir);
+    if (analysis_workspace_.HasReference())
+    {
+        ImGui::Checkbox("Show RIR", &show_rir);
+    }
+    else
+    {
+        show_rir = false;
+    }
 
-    auto t60_data = fdn_analyzer_.GetT60Data(db_start, db_end);
+    auto t60_data = analysis_workspace_.Generated().GetT60Data(db_start, db_end);
     ImGui::Text("Wideband T60: %.2f s", t60_data.overall_t60.t60);
     const ImPlotFlags plot_flags = show_rir ? ImPlotFlags_None : ImPlotFlags_NoLegend;
     if (ImPlot::BeginPlot("RT60s", ImVec2(-1, -1), plot_flags))
@@ -1258,7 +1281,7 @@ void FDNToolboxApp::DrawT60s()
 
             if (show_rir)
             {
-                auto rir_t60_data = rir_analyzer_.GetT60Data(db_start, db_end);
+                auto rir_t60_data = analysis_workspace_.Reference().GetT60Data(db_start, db_end);
                 if (!rir_t60_data.t60_octaves.empty())
                 {
                     const size_t rir_t60_count =

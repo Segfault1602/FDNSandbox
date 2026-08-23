@@ -1,7 +1,5 @@
 #include "app.h"
 
-#include <audio_utils/fft_utils.h>
-
 #include "presets.h"
 #include "settings.h"
 #include "theme.h"
@@ -11,38 +9,18 @@
 #include <quill/LogMacros.h>
 
 #include <chrono>
+#include <cassert>
 #include <stdexcept>
-
-namespace
-{
-audio_utils::analysis::STFTOptions MakeDefaultStftOptions()
-{
-    return {
-#ifndef NDEBUG
-        .fft_size = 1024,
-        .overlap = 300,
-        .window_size = 1024,
-#else
-        .fft_size = 2048,
-        .overlap = 400,
-        .window_size = 512,
-#endif
-        .window_type = audio_utils::FFTWindowType::Hann,
-        .samplerate = Settings::Instance().SampleRate(),
-    };
-}
-} // namespace
 
 FDNToolboxApp::FDNToolboxApp(float ui_scale)
     : audio_engine_({.sample_rate = Settings::Instance().SampleRate()})
-    , fdn_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
+    , fdn_session_(presets::GetDefaultFDNConfig())
+    , analysis_workspace_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
     , optimization_gui_(Settings::Instance().GetLogger())
     , save_ir_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
     , load_config_browser(0)
     , save_config_browser(ImGuiFileBrowserFlags_EnterNewFilename | ImGuiFileBrowserFlags_CreateNewDir)
     , load_rir_browser(0)
-    , stft_options_(MakeDefaultStftOptions())
-    , rir_analyzer_(Settings::Instance().SampleRate(), Settings::Instance().GetLogger())
 {
     LOG_INFO(Settings::Instance().GetLogger(), "Starting FDN Toolbox");
 
@@ -61,11 +39,6 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
     load_rir_browser.SetTitle("Load RIR File");
     load_rir_browser.SetTypeFilters({".wav"});
 
-    fdn_config_ = presets::GetDefaultFDNConfig();
-    fdn_config_A_ = presets::GetDefaultFDNConfig();
-    fdn_config_B_ = presets::GetDefaultFDNConfig();
-
-    gui_fdn_ = presets::CreateDefaultFDN();
     UpdateFDN();
 
     StartAudioStream();
@@ -168,19 +141,40 @@ void FDNToolboxApp::UpdateFDN()
 {
     LOG_INFO(Settings::Instance().GetLogger(), "Configuration changed, updating FDN...");
     auto start = std::chrono::high_resolution_clock::now();
-    fdn_config_.sample_rate = Settings::Instance().SampleRateAs<float>();
-
-    gui_fdn_ = sfFDN::CreateFDNFromConfig(fdn_config_);
-    gui_fdn_->SetDirectGain(0.f);
-
-    // Need to use CloneFDN() here because CreateFDNFromConfig is not always deterministic (e.g. when using random
-    // matrices)
-    fdn_analyzer_.SetFDN(gui_fdn_->CloneFDN());
-    ++submitted_fdn_generation_;
-    audio_engine_.TryInstallFdn(submitted_fdn_generation_, gui_fdn_->CloneFDN());
-    notification_center_.ClearCritical("fdn-instability");
+    auto commit = fdn_session_.Commit(Settings::Instance().SampleRateAs<float>());
+    if (!commit)
+    {
+        ReportFdnBuildError(commit.error());
+        return;
+    }
+    PublishFdnCommit(std::move(*commit));
 
     auto end = std::chrono::high_resolution_clock::now();
     const std::chrono::duration<double, std::milli> duration = end - start;
     LOG_INFO(Settings::Instance().GetLogger(), "FDN updated in {} milliseconds", duration.count());
+}
+
+void FDNToolboxApp::PublishFdnCommit(fdn_sandbox::session::FdnCommit commit)
+{
+    const std::uint64_t generation = commit.generation;
+    if (!audio_engine_.TryInstallFdn(generation, std::move(commit.audio_fdn)))
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "Failed to publish FDN generation {}", generation);
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-publication-failed",
+                                  "Failed to update FDN", "The audio engine rejected the new FDN.", 6.0);
+        return;
+    }
+
+    analysis_workspace_.InstallGeneratedFdn(std::move(commit.analysis_fdn));
+    const bool marked_accepted = fdn_session_.MarkAccepted(generation);
+    assert(marked_accepted);
+    static_cast<void>(marked_accepted);
+    notification_center_.ClearCritical("fdn-instability");
+}
+
+void FDNToolboxApp::ReportFdnBuildError(const fdn_sandbox::session::FdnBuildError& error)
+{
+    LOG_ERROR(Settings::Instance().GetLogger(), "Failed to build FDN: {}", error.message);
+    notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-build-failed",
+                              "Failed to build FDN", error.message, 6.0);
 }

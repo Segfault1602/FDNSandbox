@@ -8,12 +8,15 @@
 
 #include <bitset>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
 namespace fdn_analysis
 {
 
+// Result spans borrow analyzer-owned storage. Reacquire them after source replacement,
+// invalidation, or any getter that may recompute the same analysis.
 struct SpectrogramData
 {
     std::span<const float> data;
@@ -68,19 +71,18 @@ struct EchoDensityData
     float mixing_time;
 };
 
-enum class AnalysisType : uint8_t
+enum class IRAnalysisType : uint8_t
 {
-    ImpulseResponse = 0,
-    Spectrogram = 1,
-    Spectrum = 2,
-    Autocorrelation = 3,
-    EnergyDecayCurve = 4,
-    EnergyDecayRelief = 5,
-    Cepstrum = 6,
-    EchoDensity = 7,
-    T60s = 8,
-    AnalysisTypeCount = 9
+    Spectrogram,
+    Spectrum,
+    Autocorrelation,
+    EnergyDecayCurve,
+    EnergyDecayRelief,
+    Cepstrum,
+    EchoDensity,
+    T60s
 };
+inline constexpr size_t kIRAnalysisTypeCount = 8;
 
 class IRAnalyzer
 {
@@ -111,12 +113,15 @@ class IRAnalyzer
 
     EchoDensityData GetEchoDensityData(uint32_t window_size_ms, uint32_t hop_size_ms);
 
-    void RequestAnalysis(AnalysisType type)
-    {
-        analysis_flags_.set(static_cast<size_t>(type));
-    }
+    void Invalidate(IRAnalysisType type);
 
   private:
+    struct T60CacheKey
+    {
+        float decay_db_start;
+        float decay_db_end;
+    };
+
     uint32_t samplerate_;
     quill::Logger* logger_;
 
@@ -127,6 +132,8 @@ class IRAnalyzer
     std::vector<float> spectrogram_data_;
     uint32_t spectrogram_bin_count_{0};
     uint32_t spectrogram_frame_count_{0};
+    std::optional<audio_utils::analysis::STFTOptions> spectrogram_options_;
+    bool spectrogram_mel_scale_{false};
 
     std::vector<float> spectrum_data_;
     std::vector<float> frequency_bins_;
@@ -152,6 +159,7 @@ class IRAnalyzer
 
     audio_utils::analysis::EstimateT60Results overall_t60_;
     std::vector<float> t60_octaves_;
+    std::optional<T60CacheKey> t60_cache_key_;
 
     std::vector<float> echo_density_;
     std::vector<float> echo_density_indices_;
@@ -159,6 +167,6 @@ class IRAnalyzer
     uint32_t echo_density_hop_size_ms_{10};
     float mixing_time_{0.0f};
 
-    std::bitset<static_cast<size_t>(AnalysisType::AnalysisTypeCount)> analysis_flags_ = 0;
+    std::bitset<kIRAnalysisTypeCount> analysis_flags_ = 0;
 };
 } // namespace fdn_analysis

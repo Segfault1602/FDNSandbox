@@ -131,7 +131,7 @@ void FDNToolboxApp::DrawAudioMixControls()
 
 void FDNToolboxApp::DrawConvolutionControls()
 {
-    if (!rir_analyzer_.GetImpulseResponse().empty())
+    if (analysis_workspace_.HasReference())
     {
         int selected_reverb_engine =
             audio_engine_.GetReverbEngine() == fdn_sandbox::audio::ReverbEngine::Fdn ? 0 : 1;
@@ -159,6 +159,7 @@ void FDNToolboxApp::UpdateUiTelemetry()
     constexpr float kPeakReleaseDbPerSecond = 20.0f;
     const float delta_time = ImGui::GetIO().DeltaTime;
     const fdn_sandbox::audio::AudioTelemetry telemetry = audio_engine_.ReadTelemetry();
+    fdn_session_.ObserveActiveGeneration(telemetry.active_fdn_generation);
     const float rms_value = telemetry.rms;
     const float latest_peak = audio_engine_.ConsumePeak();
 

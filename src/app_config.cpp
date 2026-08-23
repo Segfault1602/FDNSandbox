@@ -157,20 +157,21 @@ FDNToolboxApp::StructureSectionResult FDNToolboxApp::DrawStructureSection(uint32
 
     constexpr uint32_t kNMin = 4;
     constexpr uint32_t kNMax = 32;
-    uint32_t fdn_size = fdn_config_.fdn_size;
+    auto& fdn_config = fdn_session_.Draft();
+    uint32_t fdn_size = fdn_config.fdn_size;
     result.fdn_size_changed =
         ImGui::SliderScalar("N", ImGuiDataType_U32, &fdn_size, &kNMin, &kNMax, nullptr, ImGuiSliderFlags_AlwaysClamp);
     if (result.fdn_size_changed)
     {
-        utils::ResizeFDNConfig(fdn_config_, fdn_size);
+        utils::ResizeFDNConfig(fdn_config, fdn_size);
     }
     result.config_changed |= result.fdn_size_changed;
-    fdn_config_.fdn_size = fdn_size;
+    fdn_config.fdn_size = fdn_size;
 
     static bool transpose = false;
     if (ImGui::Checkbox("Transpose", &transpose))
     {
-        fdn_config_.transposed = transpose;
+        fdn_config.transposed = transpose;
         result.config_changed = true;
     }
     fdn_sandbox::theme::EndSection();
@@ -188,9 +189,9 @@ void FDNToolboxApp::DrawVisualOverviewSection(bool fdn_size_changed, int max_del
                                     "Inspect gain distribution, delay lengths, and the active feedback matrix.");
     if (!fdn_size_changed)
     {
-        DrawInputOutputGainsPlot(fdn_config_, gui_fdn_.get());
-        DrawDelaysPlot(fdn_config_, max_delay);
-        DrawFeedbackMatrixPlot(fdn_config_, gui_fdn_.get());
+        DrawInputOutputGainsPlot(fdn_session_.Draft(), fdn_session_.Preview());
+        DrawDelaysPlot(fdn_session_.Draft(), max_delay);
+        DrawFeedbackMatrixPlot(fdn_session_.Draft(), fdn_session_.Preview());
     }
     fdn_sandbox::theme::EndSection();
 }
@@ -204,9 +205,10 @@ bool FDNToolboxApp::DrawInputStageSection()
     fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
                                     fdn_sandbox::theme::ColorRole::TextSecondary,
                                     "Set input gains and processors applied before the feedback loop.");
-    bool changed = DrawFDNOptions(fdn_config_.input_block_config.parallel_gains_config, fdn_config_);
-    changed |= DrawSingleChannelProcessorList(fdn_config_.input_block_config.single_channel_processors, fdn_config_);
-    changed |= DrawMultiChannelProcessorList(fdn_config_.input_block_config.multichannel_processors, fdn_config_);
+    auto& fdn_config = fdn_session_.Draft();
+    bool changed = DrawFDNOptions(fdn_config.input_block_config.parallel_gains_config, fdn_config);
+    changed |= DrawSingleChannelProcessorList(fdn_config.input_block_config.single_channel_processors, fdn_config);
+    changed |= DrawMultiChannelProcessorList(fdn_config.input_block_config.multichannel_processors, fdn_config);
     fdn_sandbox::theme::EndSection();
     return changed;
 }
@@ -220,7 +222,8 @@ bool FDNToolboxApp::DrawDelayNetworkSection()
     fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
                                     fdn_sandbox::theme::ColorRole::TextSecondary,
                                     "Configure delay lengths and interpolation for each feedback path.");
-    const bool changed = DrawFDNOptions(fdn_config_.delay_bank_config, fdn_config_);
+    auto& fdn_config = fdn_session_.Draft();
+    const bool changed = DrawFDNOptions(fdn_config.delay_bank_config, fdn_config);
     fdn_sandbox::theme::EndSection();
     return changed;
 }
@@ -236,13 +239,14 @@ bool FDNToolboxApp::DrawFeedbackMatrixSection()
                                     "Choose the matrix topology and whether it is implemented as cascaded stages.");
 
     bool changed = false;
-    bool is_cascaded = std::holds_alternative<sfFDN::CascadedFeedbackMatrixOptions>(fdn_config_.feedback_matrix_config);
+    auto& fdn_config = fdn_session_.Draft();
+    bool is_cascaded = std::holds_alternative<sfFDN::CascadedFeedbackMatrixOptions>(fdn_config.feedback_matrix_config);
     if (ImGui::Checkbox("Cascaded", &is_cascaded))
     {
         changed = true;
-        fdn_config_.feedback_matrix_config = ConvertFeedbackMatrix(fdn_config_.feedback_matrix_config, is_cascaded);
+        fdn_config.feedback_matrix_config = ConvertFeedbackMatrix(fdn_config.feedback_matrix_config, is_cascaded);
     }
-    changed |= DrawFDNOptions(fdn_config_.feedback_matrix_config, fdn_config_);
+    changed |= DrawFDNOptions(fdn_config.feedback_matrix_config, fdn_config);
     fdn_sandbox::theme::EndSection();
     return changed;
 }
@@ -257,9 +261,10 @@ bool FDNToolboxApp::DrawLoopFiltersSection()
                                     fdn_sandbox::theme::ColorRole::TextSecondary,
                                     "Shape decay independently or apply a shared attenuation profile.");
 
-    assert(fdn_config_.attenuation_filter_bank_config.has_value());
-    bool filter_bank_changed = utils::NormalizeAttenuationFilterBank(fdn_config_);
-    auto filter_bank = fdn_config_.attenuation_filter_bank_config.value();
+    auto& fdn_config = fdn_session_.Draft();
+    assert(fdn_config.attenuation_filter_bank_config.has_value());
+    bool filter_bank_changed = utils::NormalizeAttenuationFilterBank(fdn_config);
+    auto filter_bank = fdn_config.attenuation_filter_bank_config.value();
     auto shared_filter = filter_bank.filter_configs.front();
 
     static bool independent_t60s = false;
@@ -268,10 +273,10 @@ bool FDNToolboxApp::DrawLoopFiltersSection()
 
     if (!independent_t60s)
     {
-        const bool shared_filter_changed = DrawFDNOptions(shared_filter, fdn_config_);
+        const bool shared_filter_changed = DrawFDNOptions(shared_filter, fdn_config);
         if (shared_filter_changed || filter_type_changed || independence_changed)
         {
-            FillAttenuationFilterBank(filter_bank, shared_filter, fdn_config_.fdn_size);
+            FillAttenuationFilterBank(filter_bank, shared_filter, fdn_config.fdn_size);
             filter_bank_changed = true;
         }
     }
@@ -279,22 +284,22 @@ bool FDNToolboxApp::DrawLoopFiltersSection()
     {
         if (filter_type_changed)
         {
-            FillAttenuationFilterBank(filter_bank, shared_filter, fdn_config_.fdn_size);
+            FillAttenuationFilterBank(filter_bank, shared_filter, fdn_config.fdn_size);
             filter_bank_changed = true;
         }
-        for (uint32_t i = 0; i < fdn_config_.fdn_size; ++i)
+        for (uint32_t i = 0; i < fdn_config.fdn_size; ++i)
         {
             ImGui::PushID(static_cast<int>(i));
-            filter_bank_changed |= DrawFDNOptions(filter_bank.filter_configs[i], fdn_config_);
+            filter_bank_changed |= DrawFDNOptions(filter_bank.filter_configs[i], fdn_config);
             ImGui::PopID();
         }
     }
 
     if (filter_bank_changed)
     {
-        fdn_config_.attenuation_filter_bank_config = filter_bank;
+        fdn_config.attenuation_filter_bank_config = filter_bank;
     }
-    const bool processors_changed = DrawMultiChannelProcessorList(fdn_config_.loop_filter_configs, fdn_config_);
+    const bool processors_changed = DrawMultiChannelProcessorList(fdn_config.loop_filter_configs, fdn_config);
     fdn_sandbox::theme::EndSection();
     return filter_bank_changed || processors_changed;
 }
@@ -308,9 +313,10 @@ bool FDNToolboxApp::DrawOutputStageSection()
     fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
                                     fdn_sandbox::theme::ColorRole::TextSecondary,
                                     "Set output gains and processors applied after the feedback loop.");
-    bool changed = DrawFDNOptions(fdn_config_.output_block_config.parallel_gains_config, fdn_config_);
-    changed |= DrawSingleChannelProcessorList(fdn_config_.output_block_config.single_channel_processors, fdn_config_);
-    changed |= DrawMultiChannelProcessorList(fdn_config_.output_block_config.multichannel_processors, fdn_config_);
+    auto& fdn_config = fdn_session_.Draft();
+    bool changed = DrawFDNOptions(fdn_config.output_block_config.parallel_gains_config, fdn_config);
+    changed |= DrawSingleChannelProcessorList(fdn_config.output_block_config.single_channel_processors, fdn_config);
+    changed |= DrawMultiChannelProcessorList(fdn_config.output_block_config.multichannel_processors, fdn_config);
     fdn_sandbox::theme::EndSection();
     return changed;
 }
@@ -324,7 +330,8 @@ bool FDNToolboxApp::DrawToneCorrectionSection()
     fdn_sandbox::theme::TextWrapped(fdn_sandbox::theme::FontRole::Description,
                                     fdn_sandbox::theme::ColorRole::TextSecondary,
                                     "Apply final single-channel tone-correction processing.");
-    const bool changed = DrawSingleChannelProcessorList(fdn_config_.tone_correction_filters, fdn_config_);
+    auto& fdn_config = fdn_session_.Draft();
+    const bool changed = DrawSingleChannelProcessorList(fdn_config.tone_correction_filters, fdn_config);
     fdn_sandbox::theme::EndSection();
     return changed;
 }

@@ -134,11 +134,11 @@ void FDNToolboxApp::DrawOptionsMenu(bool& show_audio_config_window)
     ImGui::Separator();
     if (ImGui::MenuItem("Save current to B"))
     {
-        fdn_config_B_ = fdn_config_;
+        fdn_session_.SaveTo(fdn_sandbox::session::FdnSlot::B);
     }
     if (ImGui::MenuItem("Save current to A"))
     {
-        fdn_config_A_ = fdn_config_;
+        fdn_session_.SaveTo(fdn_sandbox::session::FdnSlot::A);
     }
     ImGui::EndMenu();
 }
@@ -158,22 +158,22 @@ void FDNToolboxApp::DrawViewMenu()
 
 void FDNToolboxApp::DrawConfigurationSwitcher()
 {
-    if (!FancyButtons("A", "B", selected_config_slot_))
+    uint32_t selected_config_slot =
+        fdn_session_.ActiveSlot() == fdn_sandbox::session::FdnSlot::A ? 0U : 1U;
+    if (!FancyButtons("A", "B", selected_config_slot))
     {
         return;
     }
 
-    if (selected_config_slot_ == 0)
+    const auto slot = selected_config_slot == 0 ? fdn_sandbox::session::FdnSlot::A
+                                                : fdn_sandbox::session::FdnSlot::B;
+    auto commit = fdn_session_.SwitchTo(slot, Settings::Instance().SampleRateAs<float>());
+    if (!commit)
     {
-        fdn_config_B_ = fdn_config_;
-        fdn_config_ = fdn_config_A_;
+        ReportFdnBuildError(commit.error());
+        return;
     }
-    else
-    {
-        fdn_config_A_ = fdn_config_;
-        fdn_config_ = fdn_config_B_;
-    }
-    UpdateFDN();
+    PublishFdnCommit(std::move(*commit));
 }
 
 void FDNToolboxApp::DrawFrameRateStatus()
@@ -234,7 +234,7 @@ void FDNToolboxApp::SaveSelectedImpulseResponse()
     {
         filename += ".wav";
     }
-    if (utils::WriteAudioFile(filename, fdn_analyzer_.GetImpulseResponse(),
+    if (utils::WriteAudioFile(filename, analysis_workspace_.Generated().GetImpulseResponse(),
                               static_cast<int>(Settings::Instance().SampleRate())))
     {
         notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "ir-saved", "Impulse response saved",
@@ -290,19 +290,31 @@ void FDNToolboxApp::LoadSelectedRIR()
         load_rir_browser.ClearSelected();
         return;
     }
+    if (buffer.empty())
+    {
+        LOG_ERROR(Settings::Instance().GetLogger(), "RIR file contains no audio samples: {}", filename);
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "rir-empty", "Invalid RIR",
+                                  "The selected file contains no audio samples.", 6.0);
+        load_rir_browser.ClearSelected();
+        return;
+    }
 
     LOG_INFO(Settings::Instance().GetLogger(), "Loaded RIR file: {} ({} Hz, {} channels, {} samples)", filename,
              file_sample_rate, file_num_channels, buffer.size());
-    loaded_rir_filename_ = filename;
     auto convolution_reverb =
         std::make_unique<sfFDN::PartitionedConvolver>(fdn_sandbox::audio::kSystemBlockSize, buffer);
     LOG_INFO(Settings::Instance().GetLogger(), "Created PartitionedConvolver with {}",
              convolution_reverb->GetShortInfo());
-    rir_analyzer_.SetImpulseResponse(std::move(buffer));
+    analysis_workspace_.SetReferenceIr(
+        std::move(buffer),
+        fdn_sandbox::analysis::ReferenceIrMetadata{
+            .filename = filename,
+            .analysis_sample_rate = static_cast<std::uint32_t>(file_sample_rate),
+        });
     audio_engine_.TryInstallConvolver(std::move(convolution_reverb));
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "rir-loaded", "RIR loaded",
                               std::format("{} ({} samples)", std::filesystem::path(filename).filename().string(),
-                                          rir_analyzer_.GetImpulseResponseSize()));
+                                          analysis_workspace_.Reference().GetImpulseResponseSize()));
     load_rir_browser.ClearSelected();
 }
 void FDNToolboxApp::DrawSettingsWindow()
@@ -322,16 +334,17 @@ void FDNToolboxApp::DrawSettingsWindow()
     constexpr int kColOffset = 100;
 
     constexpr std::array kSpectrogramTypes = {"STFT", "Mel"};
-    static int selected_spectrogram_type = static_cast<int>(spectrogram_type_);
+    auto spectrogram_settings = analysis_workspace_.GetSpectrogramSettings();
+    static int selected_spectrogram_type = static_cast<int>(spectrogram_settings.scale);
     ImGui::Text("Type:");
     ImGui::SameLine(kColOffset);
     ImGui::SetNextItemWidth(100);
     if (ImGui::Combo("##Type", &selected_spectrogram_type, kSpectrogramTypes.data(),
                      static_cast<int>(kSpectrogramTypes.size())))
     {
-        spectrogram_type_ = static_cast<SpectrogramType>(selected_spectrogram_type);
-        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
-        rir_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+        spectrogram_settings.scale =
+            static_cast<fdn_sandbox::analysis::SpectrogramScale>(selected_spectrogram_type);
+        analysis_workspace_.SetSpectrogramSettings(spectrogram_settings);
     }
     constexpr std::array kFFTSizeOptions = {"512", "1024", "2048", "4096", "8192"};
     constexpr std::array kWindowSizeOptions = {"256", "512", "1024", "2048", "4096", "8192"};
@@ -345,15 +358,15 @@ void FDNToolboxApp::DrawSettingsWindow()
     if (ImGui::Combo("##FFTSize", &selected_fft_size_index, kFFTSizeOptions.data(),
                      static_cast<int>(kFFTSizeOptions.size())))
     {
-        stft_options_.fft_size = 512U * (1U << selected_fft_size_index);
-        if (stft_options_.fft_size < stft_options_.window_size)
+        spectrogram_settings.stft.fft_size = 512U * (1U << selected_fft_size_index);
+        if (spectrogram_settings.stft.fft_size < spectrogram_settings.stft.window_size)
         {
-            stft_options_.window_size = stft_options_.fft_size;
-            stft_options_.overlap = static_cast<uint32_t>(static_cast<float>(stft_options_.window_size) * overlap);
+            spectrogram_settings.stft.window_size = spectrogram_settings.stft.fft_size;
+            spectrogram_settings.stft.overlap =
+                static_cast<uint32_t>(static_cast<float>(spectrogram_settings.stft.window_size) * overlap);
             selected_window_size_index = selected_fft_size_index + 1;
         }
-
-        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+        analysis_workspace_.SetSpectrogramSettings(spectrogram_settings);
     }
 
     ImGui::Text("Window Size:");
@@ -362,14 +375,15 @@ void FDNToolboxApp::DrawSettingsWindow()
     if (ImGui::Combo("##WindowSize", &selected_window_size_index, kWindowSizeOptions.data(),
                      static_cast<int>(kWindowSizeOptions.size())))
     {
-        stft_options_.window_size = 256U * (1U << selected_window_size_index);
-        stft_options_.overlap = static_cast<uint32_t>(static_cast<float>(stft_options_.window_size) * overlap);
-        if (stft_options_.window_size > stft_options_.fft_size)
+        spectrogram_settings.stft.window_size = 256U * (1U << selected_window_size_index);
+        spectrogram_settings.stft.overlap =
+            static_cast<uint32_t>(static_cast<float>(spectrogram_settings.stft.window_size) * overlap);
+        if (spectrogram_settings.stft.window_size > spectrogram_settings.stft.fft_size)
         {
-            stft_options_.fft_size = stft_options_.window_size;
+            spectrogram_settings.stft.fft_size = spectrogram_settings.stft.window_size;
             selected_fft_size_index = selected_window_size_index - 1;
         }
-        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+        analysis_workspace_.SetSpectrogramSettings(spectrogram_settings);
     }
 
     ImGui::Text("Overlap:");
@@ -377,8 +391,9 @@ void FDNToolboxApp::DrawSettingsWindow()
     ImGui::SetNextItemWidth(100);
     if (ImGui::SliderFloat("##Overlap", &overlap, 0.01f, 0.95f, "%.2f"))
     {
-        stft_options_.overlap = static_cast<uint32_t>(static_cast<float>(stft_options_.window_size) * overlap);
-        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+        spectrogram_settings.stft.overlap =
+            static_cast<uint32_t>(static_cast<float>(spectrogram_settings.stft.window_size) * overlap);
+        analysis_workspace_.SetSpectrogramSettings(spectrogram_settings);
     }
 
     ImGui::Text("Window Type:");
@@ -387,8 +402,8 @@ void FDNToolboxApp::DrawSettingsWindow()
     ImGui::SetNextItemWidth(100);
     if (ImGui::Combo("##WindowType", &selected_window_type, "Rectangular\0Hamming\0Hann\0Blackman\0"))
     {
-        stft_options_.window_type = static_cast<audio_utils::FFTWindowType>(selected_window_type);
-        fdn_analyzer_.RequestAnalysis(fdn_analysis::AnalysisType::Spectrogram);
+        spectrogram_settings.stft.window_type = static_cast<audio_utils::FFTWindowType>(selected_window_type);
+        analysis_workspace_.SetSpectrogramSettings(spectrogram_settings);
     }
 
     ImGui::SeparatorText("Style Settings");
@@ -424,7 +439,7 @@ void FDNToolboxApp::DrawOptimizationWindow()
         return;
     }
 
-    if (optimization_gui_.Draw(fdn_config_, rir_analyzer_.GetImpulseResponse()))
+    if (optimization_gui_.Draw(fdn_session_.Draft(), analysis_workspace_.Reference().GetImpulseResponse()))
     {
         UpdateFDN();
     }
@@ -441,9 +456,9 @@ void FDNToolboxApp::DrawFDNInfoWindow()
 
     const std::string matrix_name =
         std::visit([](const auto& matrix_options) { return utils::GetMatrixName(matrix_options.type); },
-                   fdn_config_.feedback_matrix_config);
+                   fdn_session_.Draft().feedback_matrix_config);
 
-    const auto& delays = fdn_config_.delay_bank_config.delays;
+    const auto& delays = fdn_session_.Draft().delay_bank_config.delays;
     float min_delay = 0.0f;
     float max_delay = 0.0f;
     if (!delays.empty())
@@ -453,8 +468,8 @@ void FDNToolboxApp::DrawFDNInfoWindow()
         max_delay = *max_it;
     }
 
-    const auto t60_data = fdn_analyzer_.GetT60Data(-5.0f, -50.0f);
-    const auto echo_density_data = fdn_analyzer_.GetEchoDensityData(25, 10);
+    const auto t60_data = analysis_workspace_.Generated().GetT60Data(-5.0f, -50.0f);
+    const auto echo_density_data = analysis_workspace_.Generated().GetEchoDensityData(25, 10);
     const auto sample_rate = Settings::Instance().SampleRateAs<float>();
 
     if (ImGui::BeginTable("##FDNSummary", 2,
@@ -468,7 +483,7 @@ void FDNToolboxApp::DrawFDNInfoWindow()
             ImGui::TextUnformatted(value.c_str());
         };
 
-        draw_row("FDN Size", std::to_string(fdn_config_.fdn_size));
+        draw_row("FDN Size", std::to_string(fdn_session_.Draft().fdn_size));
         draw_row("Feedback Matrix", matrix_name);
         draw_row("Delay Count", std::to_string(delays.size()));
         draw_row("Delay Range (samples)", delays.empty() ? "--" : std::format("{:.0f} - {:.0f}", min_delay, max_delay));
@@ -486,7 +501,7 @@ void FDNToolboxApp::DrawFDNInfoWindow()
         ImGui::EndTable();
     }
 
-    const nlohmann::json json_config = fdn_config_;
+    const nlohmann::json json_config = fdn_session_.Draft();
     std::string json_str = json_config.dump(4); // Pretty print with 4
     if (ImGui::CollapsingHeader("Raw Configuration (JSON)"))
     {

@@ -1,7 +1,5 @@
 #include "presets.h"
 
-#include <memory>
-
 #include <sffdn/sffdn.h>
 
 #include "settings.h"
@@ -39,12 +37,6 @@ sfFDN::FDNConfig GetDefaultFDNConfig()
     config.attenuation_filter_bank_config = attenuation_filter_bank_options;
 
     return config;
-}
-
-std::unique_ptr<sfFDN::FDN> CreateDefaultFDN()
-{
-    // return CreateFDNFromConfig(GetDefaultFDNConfig(), Settings::Instance().SampleRate());
-    return nullptr;
 }
 
 } // namespace presets

@@ -118,13 +118,14 @@ void FDNToolboxApp::DrawStatusBar()
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
-    if (loaded_rir_filename_.empty())
+    if (!analysis_workspace_.HasReference())
     {
         ImGui::TextDisabled("No RIR");
     }
     else
     {
-        const std::string rir_name = std::filesystem::path(loaded_rir_filename_).filename().string();
+        const std::string rir_name =
+            std::filesystem::path(analysis_workspace_.ReferenceMetadata()->filename).filename().string();
         ImGui::Text("RIR: %s", rir_name.c_str());
     }
 

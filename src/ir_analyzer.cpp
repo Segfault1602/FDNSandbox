@@ -23,6 +23,13 @@ size_t ClampEarlyIRSampleCount(const EarlyIRSampleCountInput& input)
     return std::min(static_cast<size_t>(sample_count), input.impulse_size);
 }
 
+bool SameStftOptions(const audio_utils::analysis::STFTOptions& lhs,
+                     const audio_utils::analysis::STFTOptions& rhs)
+{
+    return lhs.fft_size == rhs.fft_size && lhs.overlap == rhs.overlap && lhs.window_size == rhs.window_size &&
+           lhs.window_type == rhs.window_type && lhs.samplerate == rhs.samplerate;
+}
+
 struct Stopwatch
 {
     Stopwatch()
@@ -62,7 +69,42 @@ void IRAnalyzer::SetImpulseResponse(std::vector<float>&& ir)
             static_cast<float>(i) / static_cast<float>(samplerate_); // Convert sample index to time in seconds
     }
 
+    spectrogram_data_.clear();
+    spectrogram_bin_count_ = 0;
+    spectrogram_frame_count_ = 0;
+    spectrogram_options_.reset();
+    spectrum_data_.clear();
+    frequency_bins_.clear();
+    spectrum_peaks_.clear();
+    peaks_freqs_.clear();
+    cepstrum_data_.clear();
+    autocorrelation_data_.clear();
+    spectral_autocorrelation_data_.clear();
+    energy_decay_curve_.clear();
+    for (auto& octave : edc_octaves_)
+    {
+        octave.clear();
+    }
+    octave_band_frequencies_.clear();
+    edr_data_.clear();
+    edr_bin_count_ = 0;
+    edr_frame_count_ = 0;
+    overall_t60_ = {};
+    t60_octaves_.clear();
+    t60_cache_key_.reset();
+    echo_density_.clear();
+    echo_density_indices_.clear();
+    mixing_time_ = 0.0f;
     analysis_flags_.set();
+}
+
+void IRAnalyzer::Invalidate(IRAnalysisType type)
+{
+    analysis_flags_.set(static_cast<size_t>(type));
+    if (type == IRAnalysisType::EnergyDecayCurve)
+    {
+        analysis_flags_.set(static_cast<size_t>(IRAnalysisType::T60s));
+    }
 }
 
 [[nodiscard]] uint32_t IRAnalyzer::GetImpulseResponseSize() const
@@ -72,7 +114,6 @@ void IRAnalyzer::SetImpulseResponse(std::vector<float>&& ir)
 
 std::span<const float> IRAnalyzer::GetImpulseResponse()
 {
-    analysis_flags_.reset(static_cast<size_t>(AnalysisType::ImpulseResponse));
     return impulse_response_;
 }
 
@@ -88,7 +129,11 @@ std::span<const float> IRAnalyzer::GetTimeData()
 
 SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::STFTOptions stft_options, bool mel_scale)
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrogram)) && !GetImpulseResponse().empty())
+    const bool options_changed =
+        !spectrogram_options_ || !SameStftOptions(*spectrogram_options_, stft_options) ||
+        spectrogram_mel_scale_ != mel_scale;
+    if ((analysis_flags_.test(static_cast<size_t>(IRAnalysisType::Spectrogram)) || options_changed) &&
+        !GetImpulseResponse().empty())
     {
         const Stopwatch stopwatch;
         constexpr size_t kNMels = 128;
@@ -118,8 +163,10 @@ SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::STFTOptions st
 
         spectrogram_bin_count_ = result.num_bins;
         spectrogram_frame_count_ = result.num_frames;
+        spectrogram_options_ = stft_options;
+        spectrogram_mel_scale_ = mel_scale;
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::Spectrogram));
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::Spectrogram));
         LOG_INFO(logger_, "Computing spectrogram took {} ms", stopwatch.ElapsedMs());
     }
 
@@ -129,7 +176,8 @@ SpectrogramData IRAnalyzer::GetSpectrogram(audio_utils::analysis::STFTOptions st
 
 SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Spectrum)) || early_rir_time != spectrum_early_rir_time_)
+    if (analysis_flags_.test(static_cast<size_t>(IRAnalysisType::Spectrum)) ||
+        early_rir_time != spectrum_early_rir_time_)
     {
         const Stopwatch stopwatch;
         spectrum_early_rir_time_ = early_rir_time;
@@ -176,7 +224,7 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
             }
         }
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::Spectrum));
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::Spectrum));
         LOG_INFO(logger_, "Computing spectrum took {} ms", stopwatch.ElapsedMs());
 
         // Compute Spectral Flatness for fun
@@ -200,7 +248,8 @@ SpectrumData IRAnalyzer::GetSpectrum(float early_rir_time)
 
 CepstrumData IRAnalyzer::GetCepstrum(float early_rir_time)
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Cepstrum)) || early_rir_time != cepstrum_early_rir_time_)
+    if (analysis_flags_.test(static_cast<size_t>(IRAnalysisType::Cepstrum)) ||
+        early_rir_time != cepstrum_early_rir_time_)
     {
         const Stopwatch stopwatch;
         cepstrum_early_rir_time_ = early_rir_time;
@@ -220,7 +269,7 @@ CepstrumData IRAnalyzer::GetCepstrum(float early_rir_time)
         // Only keep the first half of the cepstrum (real cepstrum is symmetric)
         cepstrum_data_.resize(nfft / 2);
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::Cepstrum));
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::Cepstrum));
         LOG_INFO(logger_, "Computing cepstrum took {} ms", stopwatch.ElapsedMs());
     }
 
@@ -229,7 +278,7 @@ CepstrumData IRAnalyzer::GetCepstrum(float early_rir_time)
 
 AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::Autocorrelation)) ||
+    if (analysis_flags_.test(static_cast<size_t>(IRAnalysisType::Autocorrelation)) ||
         early_rir_time != autocorrelation_early_rir_time_)
     {
         const Stopwatch stopwatch;
@@ -252,7 +301,7 @@ AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
 
         spectral_autocorrelation_data_ = audio_utils::analysis::Autocorrelation(spectrum_data);
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::Autocorrelation));
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::Autocorrelation));
         LOG_INFO(logger_, "Computing autocorrelation took {} ms", stopwatch.ElapsedMs());
     }
 
@@ -264,7 +313,7 @@ AutocorrelationData IRAnalyzer::GetAutocorrelation(float early_rir_time)
 
 EnergyDecayCurveData IRAnalyzer::GetEnergyDecayCurveData()
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EnergyDecayCurve)))
+    if (analysis_flags_.test(static_cast<size_t>(IRAnalysisType::EnergyDecayCurve)))
     {
         const Stopwatch stopwatch;
         energy_decay_curve_ = audio_utils::analysis::EnergyDecayCurve(GetImpulseResponse(), true);
@@ -276,7 +325,7 @@ EnergyDecayCurveData IRAnalyzer::GetEnergyDecayCurveData()
             octave_band_frequencies_[i] = octave_band_frequencies[i];
         }
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::EnergyDecayCurve));
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::EnergyDecayCurve));
         LOG_INFO(logger_, "Analyzing energy decay curve took {} ms", stopwatch.ElapsedMs());
     }
 
@@ -294,7 +343,7 @@ EnergyDecayCurveData IRAnalyzer::GetEnergyDecayCurveData()
 
 EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EnergyDecayRelief)))
+    if (analysis_flags_.test(static_cast<size_t>(IRAnalysisType::EnergyDecayRelief)))
     {
         const Stopwatch stopwatch;
 
@@ -305,7 +354,7 @@ EnergyDecayReliefData IRAnalyzer::GetEnergyDecayReliefData()
         edr_frame_count_ = edr_data.num_frames;
         edr_hop_size_ = options.hop_size;
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::EnergyDecayRelief));
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::EnergyDecayRelief));
         LOG_INFO(logger_, "Analyzing energy decay relief took {} ms", stopwatch.ElapsedMs());
     }
 
@@ -324,7 +373,14 @@ T60Data IRAnalyzer::GetT60Data(float decay_db_start, float decay_db_end)
         throw std::invalid_argument("decay_db_start must be greater than decay_db_end");
     }
 
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::T60s)))
+    if (GetImpulseResponse().empty())
+    {
+        return {};
+    }
+
+    const bool bounds_changed = !t60_cache_key_ || t60_cache_key_->decay_db_start != decay_db_start ||
+                                t60_cache_key_->decay_db_end != decay_db_end;
+    if (analysis_flags_.test(static_cast<size_t>(IRAnalysisType::T60s)) || bounds_changed)
     {
         const Stopwatch stopwatch;
         auto edc_data = GetEnergyDecayCurveData();
@@ -345,7 +401,8 @@ T60Data IRAnalyzer::GetT60Data(float decay_db_start, float decay_db_end)
             t60_octaves_.push_back(t60_result.t60);
         }
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::T60s));
+        t60_cache_key_ = T60CacheKey{.decay_db_start = decay_db_start, .decay_db_end = decay_db_end};
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::T60s));
         LOG_INFO(logger_, "Analyzing T60 took {} ms", stopwatch.ElapsedMs());
     }
 
@@ -355,7 +412,7 @@ T60Data IRAnalyzer::GetT60Data(float decay_db_start, float decay_db_end)
 
 EchoDensityData IRAnalyzer::GetEchoDensityData(uint32_t window_size_ms, uint32_t hop_size_ms)
 {
-    if (analysis_flags_.test(static_cast<size_t>(AnalysisType::EchoDensity)) ||
+    if (analysis_flags_.test(static_cast<size_t>(IRAnalysisType::EchoDensity)) ||
         (echo_density_window_size_ms_ != window_size_ms || echo_density_hop_size_ms_ != hop_size_ms))
     {
         const Stopwatch stopwatch;
@@ -380,7 +437,7 @@ EchoDensityData IRAnalyzer::GetEchoDensityData(uint32_t window_size_ms, uint32_t
             idx /= static_cast<float>(samplerate_);
         }
 
-        analysis_flags_.reset(static_cast<size_t>(AnalysisType::EchoDensity));
+        analysis_flags_.reset(static_cast<size_t>(IRAnalysisType::EchoDensity));
         LOG_INFO(logger_, "Analyzing echo density took {} ms", stopwatch.ElapsedMs());
     }
 

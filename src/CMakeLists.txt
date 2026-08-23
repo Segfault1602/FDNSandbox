@@ -1,5 +1,5 @@
 # ====== Headless core logic ======
-add_library(fdn_sandbox_core STATIC presets.cpp)
+add_library(fdn_sandbox_core STATIC presets.cpp session/fdn_session.cpp)
 add_library(fdn_sandbox::core ALIAS fdn_sandbox_core)
 
 target_include_directories(fdn_sandbox_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -12,7 +12,7 @@ target_link_libraries(
 )
 
 # ====== Headless analysis logic ======
-add_library(fdn_sandbox_analysis STATIC fdn_analyzer.cpp ir_analyzer.cpp)
+add_library(fdn_sandbox_analysis STATIC analysis/analysis_workspace.cpp fdn_analyzer.cpp ir_analyzer.cpp)
 add_library(fdn_sandbox::analysis ALIAS fdn_sandbox_analysis)
 
 target_include_directories(fdn_sandbox_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

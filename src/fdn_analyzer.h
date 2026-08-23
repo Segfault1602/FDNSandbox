@@ -17,6 +17,7 @@
 namespace fdn_analysis
 {
 
+// Result spans borrow analyzer-owned storage and must be reacquired after recomputation.
 struct FilterData
 {
     std::vector<std::span<const float>> mag_responses;
@@ -30,10 +31,10 @@ struct FilterData
 
 enum class FDNAnalysisType : uint8_t
 {
-    ImpulseResponse = 0,
-    FilterResponse = 1,
-    FDNAnalysisTypeCount = 2
+    ImpulseResponse,
+    FilterResponse
 };
+inline constexpr size_t kFDNAnalysisTypeCount = 2;
 
 class FDNAnalyzer
 {
@@ -67,9 +68,9 @@ class FDNAnalyzer
 
     EchoDensityData GetEchoDensityData(uint32_t window_size_ms, uint32_t hop_size_ms);
 
-    void RequestAnalysis(AnalysisType type)
+    void Invalidate(IRAnalysisType type)
     {
-        analysis_flags_.set(static_cast<size_t>(type));
+        ir_analyzer_.Invalidate(type);
     }
 
   private:
@@ -88,6 +89,6 @@ class FDNAnalyzer
     std::vector<float> tc_filter_phase_response_;
     std::vector<float> filter_freq_bins_;
 
-    std::bitset<static_cast<size_t>(FDNAnalysisType::FDNAnalysisTypeCount)> analysis_flags_ = 0;
+    std::bitset<kFDNAnalysisTypeCount> analysis_flags_ = 0;
 };
 } // namespace fdn_analysis

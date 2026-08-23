@@ -35,7 +35,7 @@ void FDNToolboxApp::ProcessNotifications()
                 6.0);
             break;
         case fdn_sandbox::audio::AudioEventKind::FdnInstability:
-            if (audio_event.generation >= submitted_fdn_generation_ && audio_event.generation != 0)
+            if (fdn_session_.ShouldReportInstability(audio_event.generation))
             {
                 notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-instability",
                                           "FDN instability",
