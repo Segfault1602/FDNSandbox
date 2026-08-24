@@ -8,6 +8,24 @@ include(FetchContent)
 
 # Below is the list of third-party dependencies fetched via CPM.cmake
 
+function(fdn_sandbox_apply_cpp_runtime_options target_name)
+    if(NOT TARGET ${target_name})
+        return()
+    endif()
+
+    if(FDN_SANDBOX_USE_SANITIZER AND CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+        target_compile_options(${target_name} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
+    endif()
+
+    if(LIBCPP AND FDN_SANDBOX_ENABLE_HARDENING)
+        target_compile_definitions(
+            ${target_name}
+            PRIVATE $<$<CONFIG:Debug>:_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG>
+                    $<$<CONFIG:RelWithDebInfo>:_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG>
+        )
+    endif()
+endfunction()
+
 FetchContent_Declare(CPM GIT_REPOSITORY https://github.com/cpm-cmake/CPM.cmake GIT_TAG v0.42.1)
 FetchContent_MakeAvailable(CPM)
 include(${cpm_SOURCE_DIR}/cmake/CPM.cmake)
@@ -56,7 +74,7 @@ cpmaddpackage(
     NAME
     libsndfile
     GIT_TAG
-    master
+    ${FDN_SANDBOX_LIBSNDFILE_REVISION}
     GIT_REPOSITORY
     "https://github.com/libsndfile/libsndfile"
     OPTIONS
@@ -70,6 +88,19 @@ cpmaddpackage(
     "ENABLE_CPACK OFF"
     "ENABLE_PACKAGE_CONFIG OFF"
     "INSTALL_PKGCONFIG_MODULE OFF"
+)
+
+cpmaddpackage(
+    NAME
+    libsamplerate
+    GIT_TAG
+    ${FDN_SANDBOX_LIBSAMPLERATE_REVISION}
+    GIT_REPOSITORY
+    "https://github.com/libsndfile/libsamplerate"
+    OPTIONS
+    "BUILD_PROGRAMS OFF"
+    "BUILD_EXAMPLES OFF"
+    "BUILD_TESTING OFF"
 )
 
 cpmaddpackage("gh:nlohmann/json@3.12.0")
@@ -93,7 +124,7 @@ cpmaddpackage(
     NAME
     implot
     GIT_TAG
-    master
+    ${FDN_SANDBOX_IMPLOT_REVISION}
     GITHUB_REPOSITORY
     epezent/implot
     DOWNLOAD_ONLY
@@ -104,7 +135,7 @@ cpmaddpackage(
     NAME
     implot3d
     GIT_TAG
-    main
+    ${FDN_SANDBOX_IMPLOT3D_REVISION}
     GITHUB_REPOSITORY
     brenocq/implot3d
     DOWNLOAD_ONLY
@@ -115,7 +146,7 @@ cpmaddpackage(
     NAME
     imgui-filebrowser
     GIT_TAG
-    master
+    ${FDN_SANDBOX_IMGUI_FILEBROWSER_REVISION}
     GITHUB_REPOSITORY
     AirGuanZ/imgui-filebrowser
     DOWNLOAD_ONLY
@@ -169,7 +200,7 @@ target_include_directories(
            ${implot_SOURCE_DIR}
            ${imgui-filebrowser_SOURCE_DIR}
 )
-target_compile_definitions(imgui PUBLIC -DIMGUI_USER_CONFIG="${CMAKE_SOURCE_DIR}/src/app_imconfig.h")
+target_compile_definitions(imgui PUBLIC IMGUI_USER_CONFIG="${PROJECT_SOURCE_DIR}/src/app_imconfig.h")
 
 target_link_libraries(imgui PRIVATE freetype)
 
@@ -204,8 +235,12 @@ else()
 endif()
 
 cpmaddpackage(
-    URI
-    "gh:Segfault1602/audio_utils#main"
+    NAME
+    audio_utils
+    GITHUB_REPOSITORY
+    Segfault1602/audio_utils
+    GIT_TAG
+    ${FDN_SANDBOX_AUDIO_UTILS_REVISION}
     OPTIONS
     "AUDIO_UTILS_USE_RTAUDIO ON"
     "AUDIO_UTILS_USE_SNDFILE ON"
@@ -213,14 +248,22 @@ cpmaddpackage(
     "AUDIO_UTILS_USE_SANITIZER OFF"
 )
 
+if(APPLE AND TARGET rtaudio AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(rtaudio PRIVATE -Wno-elaborated-enum-base)
+endif()
+
+fdn_sandbox_apply_cpp_runtime_options(rtaudio)
+fdn_sandbox_apply_cpp_runtime_options(audio_utils)
+
 cpmaddpackage(
     NAME
     sfFDN
     GIT_REPOSITORY
     https://github.com/Segfault1602/sfFDN.git
     GIT_TAG
-    develop
+    ${FDN_SANDBOX_SFFDN_REVISION}
 )
+fdn_sandbox_apply_cpp_runtime_options(sfFDN.sfFDN)
 
 cpmaddpackage(
     NAME
@@ -228,8 +271,9 @@ cpmaddpackage(
     GIT_REPOSITORY
     "https://github.com/Segfault1602/fdn_opt.git"
     GIT_TAG
-    main
+    ${FDN_SANDBOX_FDN_OPT_REVISION}
 )
+fdn_sandbox_apply_cpp_runtime_options(fdn_optimization)
 
 message(STATUS "Found audio_utils: ${audio_utils_SOURCE_DIR}")
 message(STATUS "Found sfFDN: ${sfFDN_SOURCE_DIR}")

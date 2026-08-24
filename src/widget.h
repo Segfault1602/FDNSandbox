@@ -60,6 +60,6 @@ bool DrawEarlyRIRPicker(std::span<const float> impulse_response, std::span<const
 // bool DrawInputVelvetNoiseDecorrelatorMultiChannel(sfFDN::VelvetNoiseDecorrelatorConfig& config,
 //                                                   uint32_t& selected_sequence, bool force_update);
 // bool DrawInputSeriesSchroederAllpassWidget(sfFDN::SchroederAllpassConfig& config, bool force_update);
-// bool DrawExtraSchroederAllpassWidget(sfFDN::SchroederAllpassConfig& config, uint32_t channel_count, bool
-// force_update); bool DrawTimeVaryingDelayWidget(sfFDN::TimeVaryingDelayConfig& config, uint32_t channel_count, bool
-// force_update); bool DrawDiffuserWidget(sfFDN::FDNConfig& config, bool force_update);
+// bool DrawExtraSchroederAllpassWidget(sfFDN::SchroederAllpassConfig& config, uint32_t channel_count,
+//                                      bool force_update);
+// bool DrawDiffuserWidget(sfFDN::FDNConfig& config, bool force_update);

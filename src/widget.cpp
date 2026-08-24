@@ -1137,69 +1137,6 @@ bool DrawExtraSchroederAllpassWidget(sfFDN::SchroederAllpassConfig& config, uint
     return config_changed;
 }
 
-bool DrawTimeVaryingDelayWidget(sfFDN::TimeVaryingDelayConfig& config, uint32_t channel_count, bool force_update)
-{
-    bool config_changed = force_update;
-
-    config.lfo_amplitudes.resize(channel_count, 0.0f);
-    config.lfo_frequencies.resize(channel_count, 0.0f);
-    config.lfo_initial_phases.resize(channel_count, 0.0f);
-
-    std::string id_suffix = std::format("##{}", static_cast<const void*>(&config));
-
-    constexpr std::array<const char*, 2> kInterpolationTypesString = {"Linear", "Allpass"};
-    static int selected_interpolation_type = static_cast<int>(config.interp_type);
-    if (ImGui::BeginCombo(("Interpolation Type" + id_suffix).c_str(),
-                          kInterpolationTypesString[selected_interpolation_type]))
-    {
-        for (int i = 0; i < kInterpolationTypesString.size(); i++)
-        {
-            bool is_selected = (selected_interpolation_type == i);
-            if (ImGui::Selectable(kInterpolationTypesString[i], is_selected))
-            {
-                selected_interpolation_type = i;
-                config.interp_type = static_cast<sfFDN::DelayInterpolationType>(i);
-                config_changed = true;
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    if (ImGui::BeginTable("##TimeVaryingDelayTable", 3))
-    {
-        ImGui::TableSetupColumn("Channel", ImGuiTableColumnFlags_WidthFixed, 75.0f);
-        ImGui::TableSetupColumn("Amplitude (samples)", ImGuiTableColumnFlags_WidthFixed, 150.0f);
-        ImGui::TableSetupColumn("Frequency (Hz)", ImGuiTableColumnFlags_WidthFixed, 150.0f);
-
-        ImGui::TableHeadersRow();
-
-        for (uint32_t channel = 0; channel < channel_count; ++channel)
-        {
-            ImGui::TableNextRow();
-
-            ImGui::TableSetColumnIndex(0);
-            ImGui::Text("%d", channel + 1);
-
-            ImGui::TableSetColumnIndex(1);
-            ImGui::PushID(channel * 2 + 0);
-            config_changed |=
-                ImGui::SliderFloat(("##LFOAmp" + id_suffix).c_str(), &config.lfo_amplitudes[channel], 0.f, 100.f);
-            ImGui::PopID();
-
-            ImGui::TableSetColumnIndex(2);
-            ImGui::PushID(channel * 2 + 1);
-            float freq_hz = config.lfo_frequencies[channel] * Settings::Instance().SampleRate();
-            config_changed |= ImGui::SliderFloat(("##LFOFreq" + id_suffix).c_str(), &freq_hz, 0.01f, 5.f, "%.2f Hz");
-            config.lfo_frequencies[channel] = freq_hz / Settings::Instance().SampleRate();
-            ImGui::PopID();
-        }
-
-        ImGui::EndTable();
-    }
-
-    return config_changed;
-}
-
 bool DrawDiffuserWidget(sfFDN::FDNConfig& config, bool force_update)
 {
     bool config_changed = force_update;

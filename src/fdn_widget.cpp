@@ -7,6 +7,7 @@
 #include <functional>
 #include <imgui.h>
 #include <implot.h>
+#include <limits>
 
 #include <imfilebrowser.h>
 
@@ -105,7 +106,7 @@ std::optional<std::vector<float>> ReadMatrixFromClipboard(uint32_t matrix_size)
     return matrix;
 }
 
-FDNDelayRange& GetDelayRange(FDNWidgetState& state, const sfFDN::DelayBankOptions& config)
+FDNDelayRange& GetDelayRange(FDNWidgetState& state)
 {
     auto& ranges = state.delay_widget.ranges;
     if (ranges.size() > 100)
@@ -113,7 +114,7 @@ FDNDelayRange& GetDelayRange(FDNWidgetState& state, const sfFDN::DelayBankOption
         ranges.clear();
     }
 
-    return ranges.try_emplace(&config).first->second;
+    return ranges.try_emplace(ImGui::GetID("##DelayRangeState")).first->second;
 }
 
 bool EnsureDelayCount(sfFDN::DelayBankOptions& config, uint32_t fdn_size)
@@ -127,23 +128,24 @@ bool EnsureDelayCount(sfFDN::DelayBankOptions& config, uint32_t fdn_size)
     return true;
 }
 
-bool DrawDelayInterpolationType(sfFDN::DelayBankOptions& config)
+bool DrawDelayInterpolationType(sfFDN::DelayInterpolationType& interpolation_type, bool allow_none)
 {
-    int interpolation_type = static_cast<int>(config.interpolation_type);
-    const std::string preview_value = utils::GetDelayInterpolationTypeName(interpolation_type);
+    int selected_type = static_cast<int>(interpolation_type);
+    const std::string preview_value = utils::GetDelayInterpolationTypeName(selected_type);
     if (!ImGui::BeginCombo("Interpolation Type", preview_value.c_str()))
     {
         return false;
     }
 
     bool config_changed = false;
-    for (int index = 0; index < static_cast<int>(sfFDN::DelayInterpolationType::Count); ++index)
+    const int first_type = allow_none ? 0 : static_cast<int>(sfFDN::DelayInterpolationType::Linear);
+    for (int index = first_type; index < static_cast<int>(sfFDN::DelayInterpolationType::Count); ++index)
     {
-        const bool is_selected = interpolation_type == index;
+        const bool is_selected = selected_type == index;
         if (ImGui::Selectable(utils::GetDelayInterpolationTypeName(index).c_str(), is_selected))
         {
-            interpolation_type = index;
-            config.interpolation_type = static_cast<sfFDN::DelayInterpolationType>(interpolation_type);
+            selected_type = index;
+            interpolation_type = static_cast<sfFDN::DelayInterpolationType>(selected_type);
             config_changed = true;
         }
     }
@@ -156,7 +158,7 @@ void DrawDelayRange(FDNDelayRange& range, uint32_t block_size)
     const int block_size_i = static_cast<int>(block_size);
     ImGui::DragIntRange2("Delay Range", &range.minimum, &range.maximum, 1, block_size_i, 0, "%d samples", "%d samples",
                          ImGuiSliderFlags_AlwaysClamp);
-    range.minimum = std::max(range.minimum, 0);
+    range.minimum = std::max(range.minimum, block_size_i);
     range.maximum = std::max(range.maximum, range.minimum + 1);
 }
 
@@ -179,8 +181,7 @@ bool DrawDelayToolbar(bool& make_prime)
     return config_changed;
 }
 
-bool DrawDelayPresetsPopup(sfFDN::DelayBankOptions& config, const sfFDN::FDNConfig& fdn_config,
-                           const FDNDelayRange& range)
+bool DrawDelayPresetsPopup(std::vector<float>& delays, uint32_t channel_count, const FDNDelayRange& range)
 {
     if (!ImGui::BeginPopup("Delay Presets"))
     {
@@ -192,8 +193,8 @@ bool DrawDelayPresetsPopup(sfFDN::DelayBankOptions& config, const sfFDN::FDNConf
     {
         if (ImGui::Selectable(utils::GetDelayLengthTypeName(index).c_str()))
         {
-            config.delays =
-                sfFDN::GetDelayLengths(fdn_config.fdn_size, static_cast<float>(range.minimum),
+            delays =
+                sfFDN::GetDelayLengths(channel_count, static_cast<float>(range.minimum),
                                        static_cast<float>(range.maximum), static_cast<sfFDN::DelayLengthType>(index));
             config_changed = true;
         }
@@ -231,14 +232,15 @@ bool DrawDelayOrderingPopup(std::span<float> delays)
     return config_changed;
 }
 
-bool DrawDelaySliders(sfFDN::DelayBankOptions& config, const FDNDelayRange& range)
+bool DrawDelaySliders(std::span<float> delays, sfFDN::DelayInterpolationType interpolation_type,
+                      const FDNDelayRange& range)
 {
     bool config_changed = false;
-    for (const size_t index : std::views::iota(size_t{0}, config.delays.size()))
+    for (const size_t index : std::views::iota(size_t{0}, delays.size()))
     {
-        float& delay = config.delays[index];
+        float& delay = delays[index];
         const std::string label = "Delay " + std::to_string(index);
-        if (config.interpolation_type == sfFDN::DelayInterpolationType::None)
+        if (interpolation_type == sfFDN::DelayInterpolationType::None)
         {
             int delay_samples = static_cast<int>(delay);
             config_changed |= ImGui::SliderInt(label.c_str(), &delay_samples, range.minimum, range.maximum);
@@ -257,6 +259,72 @@ void MakeDelaysPrime(std::span<float> delays)
     std::ranges::transform(delays, delays.begin(), [](float delay) {
         return static_cast<float>(utils::GetClosestPrime(static_cast<uint32_t>(delay)));
     });
+}
+
+struct TimeVaryingDelayTableResult
+{
+    bool changed = false;
+    bool delays_changed = false;
+};
+
+TimeVaryingDelayTableResult DrawTimeVaryingDelayTable(sfFDN::DelayBankTimeVaryingOptions& config,
+                                                      const sfFDN::FDNConfig& fdn_config, const FDNDelayRange& range)
+{
+    TimeVaryingDelayTableResult result;
+    if (!ImGui::BeginTable("##TimeVaryingDelayBank", 5,
+                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
+                               ImGuiTableFlags_ScrollY,
+                           ImVec2(0.0f, 360.0f)))
+    {
+        return result;
+    }
+
+    ImGui::TableSetupColumn("Channel", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("Base Delay");
+    ImGui::TableSetupColumn("Amplitude");
+    ImGui::TableSetupColumn("Frequency");
+    ImGui::TableSetupColumn("Phase");
+    ImGui::TableHeadersRow();
+
+    constexpr float kMaximumFrequencyHz = 20.0f;
+    for (size_t index = 0; index < config.delays.size(); ++index)
+    {
+        auto& modulation = config.time_varying_config[index];
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%zu", index + 1);
+
+        ImGui::TableSetColumnIndex(1);
+        const bool delay_changed =
+            ImGui::DragFloat("##Delay", &config.delays[index], 1.0f, static_cast<float>(range.minimum),
+                             static_cast<float>(range.maximum), "%.2f samples", ImGuiSliderFlags_AlwaysClamp);
+        result.changed |= delay_changed;
+        result.delays_changed |= delay_changed;
+
+        ImGui::TableSetColumnIndex(2);
+        const float maximum_amplitude = std::max(0.0f, config.delays[index] - 1.0f);
+        result.changed |= ImGui::DragFloat("##Amplitude", &modulation.amplitude, 0.1f, 0.0f, maximum_amplitude,
+                                           "%.2f samples", ImGuiSliderFlags_AlwaysClamp);
+
+        ImGui::TableSetColumnIndex(3);
+        float frequency_hz = modulation.frequency * fdn_config.sample_rate;
+        if (ImGui::DragFloat("##Frequency", &frequency_hz, 0.01f, 0.0f, kMaximumFrequencyHz, "%.2f Hz",
+                             ImGuiSliderFlags_AlwaysClamp))
+        {
+            modulation.frequency = fdn_config.sample_rate > 0.0f ? frequency_hz / fdn_config.sample_rate : 0.0f;
+            result.changed = true;
+        }
+
+        ImGui::TableSetColumnIndex(4);
+        result.changed |= ImGui::DragFloat("##Phase", &modulation.initial_phase, 0.01f, 0.0f, 1.0f, "%.3f",
+                                           ImGuiSliderFlags_AlwaysClamp);
+        ImGui::PopID();
+    }
+
+    ImGui::EndTable();
+    return result;
 }
 
 bool DrawTimeVaryingGains(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig& fdn_config)
@@ -523,15 +591,15 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayOptions& config) const
 bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config) const
 {
     bool config_changed = EnsureDelayCount(config, fdn_config.fdn_size);
-    config_changed |= DrawDelayInterpolationType(config);
+    config_changed |= DrawDelayInterpolationType(config.interpolation_type, true);
 
-    FDNDelayRange& range = GetDelayRange(state, config);
+    FDNDelayRange& range = GetDelayRange(state);
     DrawDelayRange(range, fdn_config.block_size);
 
     config_changed |= DrawDelayToolbar(state.delay_widget.make_prime);
-    config_changed |= DrawDelayPresetsPopup(config, fdn_config, range);
+    config_changed |= DrawDelayPresetsPopup(config.delays, fdn_config.fdn_size, range);
     config_changed |= DrawDelayOrderingPopup(config.delays);
-    config_changed |= DrawDelaySliders(config, range);
+    config_changed |= DrawDelaySliders(config.delays, config.interpolation_type, range);
 
     if (config_changed && state.delay_widget.make_prime)
     {
@@ -545,13 +613,32 @@ bool FDNWidgetVisitor::operator()(sfFDN::DelayBankOptions& config) const
 
 bool FDNWidgetVisitor::operator()(sfFDN::DelayBankTimeVaryingOptions& config) const
 {
-    bool config_changed = false;
+    bool config_changed = utils::NormalizeTimeVaryingDelayBank(
+        config, {.channel_count = fdn_config.fdn_size, .sample_rate = fdn_config.sample_rate, .new_delay = 512.0f});
+    config_changed |= DrawDelayInterpolationType(config.interpolation_type, false);
 
-    if (config.delays.size() != fdn_config.fdn_size)
+    FDNDelayRange& range = GetDelayRange(state);
+    DrawDelayRange(range, 1);
+
+    const bool toolbar_changed = DrawDelayToolbar(state.delay_widget.make_prime);
+    config_changed |= toolbar_changed;
+    bool delays_changed = toolbar_changed && state.delay_widget.make_prime;
+    delays_changed |= DrawDelayPresetsPopup(config.delays, fdn_config.fdn_size, range);
+    delays_changed |= DrawDelayOrderingPopup(config.delays);
+
+    const TimeVaryingDelayTableResult table_result = DrawTimeVaryingDelayTable(config, fdn_config, range);
+    config_changed |= table_result.changed || delays_changed;
+    delays_changed |= table_result.delays_changed;
+
+    if (delays_changed && state.delay_widget.make_prime)
     {
-        config.delays.resize(fdn_config.fdn_size, 512.f);
+        MakeDelaysPrime(config.delays);
         config_changed = true;
     }
+
+    config_changed |= utils::NormalizeTimeVaryingDelayBank(
+        config, {.channel_count = fdn_config.fdn_size, .sample_rate = fdn_config.sample_rate, .new_delay = 512.0f});
+    ImGui::TextDisabled("Maximum delay: %u samples", config.max_delay);
 
     return config_changed;
 }
@@ -1122,6 +1209,14 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
 
             ImGui::Text("%s %zu", utils::GetProcessorName(processor).c_str(), i + 1);
 
+            if (std::holds_alternative<sfFDN::DelayBankTimeVaryingOptions>(processor) &&
+                ImGui::IsPopupOpen("edit_processor_popup"))
+            {
+                constexpr float kEditorMinimumWidth = 760.0f;
+                constexpr float kMaximumWindowSize = std::numeric_limits<float>::max();
+                ImGui::SetNextWindowSizeConstraints(ImVec2(kEditorMinimumWidth, 0.0f),
+                                                    ImVec2(kMaximumWindowSize, kMaximumWindowSize));
+            }
             if (ImGui::BeginPopup("edit_processor_popup", ImGuiWindowFlags_AlwaysAutoResize))
             {
                 config_changed |= DrawFDNOptions(processor, fdn_config, state);
@@ -1157,8 +1252,8 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
 std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProcessorPopup(
     const sfFDN::FDNConfig& fdn_config)
 {
-    const std::array multi_channel_processor_names = {"Delays", "Schroeder Allpass", "Feedback Matrix",
-                                                      "Velvet Noise Decorrelator"};
+    const std::array multi_channel_processor_names = {"Delay Bank", "Time-Varying Delay Bank", "Schroeder Allpass",
+                                                      "Feedback Matrix", "Velvet Noise Decorrelator"};
     std::optional<sfFDN::multi_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("multi_channel_processor_popup"))
     {
@@ -1178,6 +1273,10 @@ std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProce
                     break;
                 }
                 case 1:
+                    new_processor.emplace(
+                        utils::MakeTimeVaryingDelayBank(fdn_config.fdn_size, fdn_config.sample_rate, 512.0f));
+                    break;
+                case 2:
                 {
                     auto schroeder_options = sfFDN::MultichannelSchroederAllpassSectionOptions{
                         .sections = std::vector<sfFDN::SchroederAllpassSectionOptions>(
@@ -1186,10 +1285,10 @@ std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProce
                     new_processor.emplace(schroeder_options);
                     break;
                 }
-                case 2:
+                case 3:
                     new_processor.emplace(sfFDN::ScalarFeedbackMatrixOptions{.matrix_size = fdn_config.fdn_size});
                     break;
-                case 3:
+                case 4:
                     new_processor.emplace(sfFDN::MultichannelFirOptions{
                         .coeffs = std::vector<std::vector<float>>(fdn_config.fdn_size, std::vector<float>{1.f})});
                     break;

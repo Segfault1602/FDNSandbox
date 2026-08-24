@@ -20,7 +20,7 @@ struct FDNDelayRange
 
 struct FDNDelayWidgetState
 {
-    std::map<const sfFDN::DelayBankOptions*, FDNDelayRange> ranges;
+    std::map<ImGuiID, FDNDelayRange> ranges;
     bool make_prime = false;
 };
 

@@ -6,11 +6,19 @@
 #include <quill/LogMacros.h>
 #include <sndfile.h>
 
+#include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <complex>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <numbers>
+#include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -356,6 +364,36 @@ sfFDN::ModulationOptions MakeDefaultGainModulation(uint32_t channel_index, uint3
             channel_count > 0 ? static_cast<float>(channel_index) / static_cast<float>(channel_count) : 0.0f,
     };
 }
+
+sfFDN::ModulationOptions MakeDefaultDelayModulation(uint32_t channel_index, uint32_t channel_count, float sample_rate,
+                                                    float base_delay)
+{
+    constexpr float kDefaultFrequencyHz = 0.25f;
+    constexpr float kDefaultAmplitude = 10.0f;
+
+    return sfFDN::ModulationOptions{
+        .frequency = sample_rate > 0.0f ? kDefaultFrequencyHz / sample_rate : 0.0f,
+        .amplitude = std::min(kDefaultAmplitude, std::max(0.0f, base_delay - 1.0f)),
+        .initial_phase =
+            channel_count > 0 ? static_cast<float>(channel_index) / static_cast<float>(channel_count) : 0.0f,
+    };
+}
+
+uint32_t RequiredMaximumDelay(const sfFDN::DelayBankTimeVaryingOptions& config)
+{
+    constexpr uint32_t kAlignment = 64;
+    constexpr uint32_t kSafetyMargin = 64;
+    double maximum_delay = 1.0;
+    for (const auto& [delay, modulation] : std::views::zip(config.delays, config.time_varying_config))
+    {
+        maximum_delay = std::max(maximum_delay, static_cast<double>(delay + modulation.amplitude));
+    }
+
+    const auto maximum_supported =
+        static_cast<double>(std::numeric_limits<uint32_t>::max() - kSafetyMargin - (kAlignment - 1));
+    const auto required = static_cast<uint32_t>(std::ceil(std::min(maximum_delay, maximum_supported))) + kSafetyMargin;
+    return ((required + kAlignment - 1) / kAlignment) * kAlignment;
+}
 } // namespace
 
 void ResizeParallelGainsOptions(sfFDN::ParallelGainsOptions& config, ParallelGainsResizeOptions options)
@@ -398,6 +436,92 @@ void SetTimeVaryingGainsEnabled(sfFDN::ParallelGainsOptions& config, bool enable
     }
 }
 
+bool NormalizeTimeVaryingDelayBank(sfFDN::DelayBankTimeVaryingOptions& config,
+                                   TimeVaryingDelayBankNormalizeOptions options)
+{
+    bool changed = false;
+    const float new_delay = std::isfinite(options.new_delay) ? std::max(1.0f, options.new_delay) : 512.0f;
+
+    const size_t previous_delay_count = config.delays.size();
+    if (previous_delay_count != options.channel_count)
+    {
+        config.delays.resize(options.channel_count, new_delay);
+        changed = true;
+    }
+
+    for (float& delay : config.delays)
+    {
+        const float normalized = std::isfinite(delay) ? std::max(1.0f, delay) : new_delay;
+        changed |= normalized != delay;
+        delay = normalized;
+    }
+
+    const size_t previous_modulation_count = config.time_varying_config.size();
+    if (previous_modulation_count != options.channel_count)
+    {
+        config.time_varying_config.resize(options.channel_count);
+        changed = true;
+    }
+
+    for (size_t index = 0; index < config.time_varying_config.size(); ++index)
+    {
+        auto& modulation = config.time_varying_config[index];
+        if (index >= previous_modulation_count)
+        {
+            modulation = MakeDefaultDelayModulation(static_cast<uint32_t>(index), options.channel_count,
+                                                    options.sample_rate, config.delays[index]);
+            continue;
+        }
+
+        const float maximum_frequency = options.sample_rate > 0.0f ? 20.0f / options.sample_rate : 0.0f;
+        const float normalized_frequency =
+            std::isfinite(modulation.frequency) ? std::clamp(modulation.frequency, 0.0f, maximum_frequency) : 0.0f;
+        const float normalized_amplitude =
+            std::isfinite(modulation.amplitude)
+                ? std::clamp(modulation.amplitude, 0.0f, std::max(0.0f, config.delays[index] - 1.0f))
+                : 0.0f;
+        const float normalized_phase =
+            std::isfinite(modulation.initial_phase) ? std::clamp(modulation.initial_phase, 0.0f, 1.0f) : 0.0f;
+
+        changed |= normalized_frequency != modulation.frequency;
+        changed |= normalized_amplitude != modulation.amplitude;
+        changed |= normalized_phase != modulation.initial_phase;
+        modulation.frequency = normalized_frequency;
+        modulation.amplitude = normalized_amplitude;
+        modulation.initial_phase = normalized_phase;
+    }
+
+    if (config.interpolation_type != sfFDN::DelayInterpolationType::Linear &&
+        config.interpolation_type != sfFDN::DelayInterpolationType::Allpass &&
+        config.interpolation_type != sfFDN::DelayInterpolationType::Lagrange)
+    {
+        config.interpolation_type = sfFDN::DelayInterpolationType::Linear;
+        changed = true;
+    }
+
+    const uint32_t required_maximum_delay = RequiredMaximumDelay(config);
+    if (config.max_delay != required_maximum_delay)
+    {
+        config.max_delay = required_maximum_delay;
+        changed = true;
+    }
+
+    return changed;
+}
+
+sfFDN::DelayBankTimeVaryingOptions MakeTimeVaryingDelayBank(uint32_t channel_count, float sample_rate, float base_delay)
+{
+    sfFDN::DelayBankTimeVaryingOptions config{
+        .delays = std::vector<float>(channel_count, base_delay),
+        .max_delay = 0,
+        .interpolation_type = sfFDN::DelayInterpolationType::Linear,
+        .time_varying_config = {},
+    };
+    NormalizeTimeVaryingDelayBank(
+        config, {.channel_count = channel_count, .sample_rate = sample_rate, .new_delay = base_delay});
+    return config;
+}
+
 namespace
 {
 void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size,
@@ -421,7 +545,10 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
                 }
             },
             [new_size](sfFDN::DelayBankOptions& config) { config.delays.resize(new_size, 512.f); },
-            [new_size](sfFDN::DelayBankTimeVaryingOptions& config) { config.delays.resize(new_size, 512.f); },
+            [new_size, sample_rate](sfFDN::DelayBankTimeVaryingOptions& config) {
+                NormalizeTimeVaryingDelayBank(
+                    config, {.channel_count = new_size, .sample_rate = sample_rate, .new_delay = 512.0f});
+            },
             [new_size](sfFDN::CascadedFeedbackMatrixOptions& config) { config.matrix_size = new_size; },
             [new_size](sfFDN::ScalarFeedbackMatrixOptions& config) {
                 config.matrix_size = new_size;

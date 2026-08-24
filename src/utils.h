@@ -99,6 +99,18 @@ void ResizeParallelGainsOptions(sfFDN::ParallelGainsOptions& config, ParallelGai
 void SetTimeVaryingGainsEnabled(sfFDN::ParallelGainsOptions& config, bool enabled, uint32_t channel_count,
                                 float sample_rate);
 
+struct TimeVaryingDelayBankNormalizeOptions
+{
+    uint32_t channel_count;
+    float sample_rate;
+    float new_delay = 512.0f;
+};
+
+bool NormalizeTimeVaryingDelayBank(sfFDN::DelayBankTimeVaryingOptions& config,
+                                   TimeVaryingDelayBankNormalizeOptions options);
+sfFDN::DelayBankTimeVaryingOptions MakeTimeVaryingDelayBank(uint32_t channel_count, float sample_rate,
+                                                            float base_delay = 512.0f);
+
 struct Span2D
 {
     std::span<float> data;
