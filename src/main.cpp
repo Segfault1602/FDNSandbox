@@ -71,6 +71,10 @@ int main()
             // clear/overwrite your copy of the keyboard data. Generally you may always pass all inputs to dear imgui,
             // and hide them from your application based on those two flags.
             glfwPollEvents();
+            if (glfwWindowShouldClose(window))
+            {
+                break;
+            }
             if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0)
             {
                 ImGui_ImplGlfw_Sleep(10);
