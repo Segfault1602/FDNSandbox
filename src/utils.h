@@ -126,6 +126,13 @@ struct Span2D
 void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size);
 bool NormalizeAttenuationFilterBank(sfFDN::FDNConfig& config);
 
+/// Reports whether every channel in the bank shares the same attenuation response.
+///
+/// Only the decay-shaping parameters are compared. Each channel's `delay` is set from the delay
+/// bank and so legitimately differs, and `sample_rate` is uniform by construction; including either
+/// would report every bank as heterogeneous.
+bool IsAttenuationFilterBankHomogeneous(const sfFDN::AttenuationFilterBankOptions& filter_bank);
+
 std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& processor_variant);
 std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& processor_variant);
 

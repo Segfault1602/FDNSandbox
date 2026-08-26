@@ -35,8 +35,11 @@ struct FDNWidgetState
     int schroeder_delay_maximum = 1000;
     int multichannel_schroeder_delay_minimum = 1;
     int multichannel_schroeder_delay_maximum = 1500;
-    bool show_three_band_designer = false;
-    bool show_ten_band_designer = false;
+    // Identifies which filter editor owns the (single, shared) designer window. Zero means closed.
+    // A plain bool would make every channel in an independent filter bank open the same window in
+    // the same frame, since the designers use fixed window names.
+    ImGuiID three_band_designer_owner = 0;
+    ImGuiID ten_band_designer_owner = 0;
     ThreeBandDesignerState three_band_designer;
     FilterDesignerState ten_band_designer;
     std::map<std::ptrdiff_t, int> fir_filter_types;

@@ -849,15 +849,34 @@ bool FDNWidgetVisitor::operator()(sfFDN::ThreeBandFilterOptions& config) const
     config_changed |=
         ImGui::DragFloat2("Cutoff", config.freqs.data(), 1.f, 125.f, 16000.f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp);
 
+    const ImGuiID designer_id = ImGui::GetID("three_band_designer");
     if (ImGui::Button("Edit"))
     {
-        state.show_three_band_designer = true;
+        state.three_band_designer_owner = designer_id;
+
+        // The designer drives its plot purely from its own draggable state and never reads the
+        // config back, so it must be seeded on open. Without this it would show whichever channel
+        // was dragged last and overwrite this channel with those values on the first drag.
+        auto& designer = state.three_band_designer;
+        for (size_t band = 0; band < config.t60s.size(); ++band)
+        {
+            designer.t60s_draggable[band] = config.t60s[band];
+        }
+        for (size_t edge = 0; edge < config.freqs.size(); ++edge)
+        {
+            designer.frequencies_draggable[edge] = config.freqs[edge];
+        }
     }
 
-    if (state.show_three_band_designer)
+    if (state.three_band_designer_owner == designer_id)
     {
-        config_changed |= Draw3BandDesigner({.t60s = config.t60s, .frequencies = config.freqs},
-                                            state.show_three_band_designer, state.three_band_designer);
+        bool keep_open = true;
+        config_changed |=
+            Draw3BandDesigner({.t60s = config.t60s, .frequencies = config.freqs}, keep_open, state.three_band_designer);
+        if (!keep_open)
+        {
+            state.three_band_designer_owner = 0;
+        }
     }
 
     config.freqs[0] = std::clamp(config.freqs[0], 125.f, 8000.f);
@@ -894,14 +913,20 @@ bool FDNWidgetVisitor::operator()(sfFDN::TenBandFilterOptions& config) const
     ImGui::PopItemWidth();
     ImGui::NewLine();
 
+    const ImGuiID designer_id = ImGui::GetID("ten_band_designer");
     if (ImGui::Button("Edit"))
     {
-        state.show_ten_band_designer = true;
+        state.ten_band_designer_owner = designer_id;
     }
 
-    if (state.show_ten_band_designer)
+    if (state.ten_band_designer_owner == designer_id)
     {
-        config_changed |= DrawFilterDesigner(config.t60s, state.show_ten_band_designer, state.ten_band_designer);
+        bool keep_open = true;
+        config_changed |= DrawFilterDesigner(config.t60s, keep_open, state.ten_band_designer);
+        if (!keep_open)
+        {
+            state.ten_band_designer_owner = 0;
+        }
     }
 
     config.sample_rate = fdn_config.sample_rate;
