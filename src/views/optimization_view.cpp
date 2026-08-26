@@ -9,12 +9,14 @@
 #include <implot.h>
 #include <memory>
 #include <optional>
+#include <quill/LogMacros.h>
 #include <quill/Logger.h>
 
 #include "audio_loss.h"
 #include "audio_utils/audio_analysis.h"
 #include "audio_utils/fft_utils.h"
 #include "icons.h"
+#include "initialization.h"
 #include "optim_types.h"
 #include "optimizer.h"
 #include "plot_ui.h"
@@ -29,7 +31,9 @@
 #include <limits>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -44,162 +48,229 @@ bool IsOptimizationActive(fdn_optimization::OptimizationStatus status)
            status == fdn_optimization::OptimizationStatus::CancelRequested;
 }
 
-fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimization::OptimizationAlgoType algo_type)
+/// Restores the ImGui item-width stack on every exit path.
+class ItemWidthScope
 {
-    ImGui::PushItemWidth(200);
-    if (algo_type == fdn_optimization::OptimizationAlgoType::Adam)
+  public:
+    explicit ItemWidthScope(float width)
     {
-        static fdn_optimization::AdamParameters params;
-
-        ImGui::InputFloat("Step Size", &params.step_size, 0.01f, 2.0f, "%.3f");
-        ImGui::InputFloat("Beta 1", &params.beta1, 0.001f, 0.999f, "%.3f");
-        ImGui::InputFloat("Beta 2", &params.beta2, 0.001f, 0.999f, "%.3f");
-        ImGui::InputDouble("Gradient Delta", &params.gradient_delta, 1e-6f, 1e-1f, "%.1e",
-                           ImGuiSliderFlags_Logarithmic);
-        ImGui::InputFloat("Tolerance", &params.tolerance, 1e-6f, 1e-3f, "%.1e", ImGuiSliderFlags_Logarithmic);
-
-        params.decay_step_size = std::max(1, params.decay_step_size);
-        params.epoch_restarts = std::max(0, params.epoch_restarts);
-        params.max_restarts = std::max(0, params.max_restarts);
-
-        return params;
+        ImGui::PushItemWidth(width);
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::SPSA)
+    ~ItemWidthScope()
     {
-        static fdn_optimization::SPSAParameters spsa_params;
-
-        ImGui::InputDouble("Alpha", &spsa_params.alpha, 0.001f, 0.1f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputDouble("Gamma", &spsa_params.gamma, 0.05f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputDouble("Step Size", &spsa_params.step_size, 0.1f, 2.0f, "%.3f");
-        ImGui::InputDouble("Evaluation Step Size", &spsa_params.evaluationStepSize, 0.1f, 2.0f, "%.3f");
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &spsa_params.max_iterations);
-
-        return spsa_params;
+        ImGui::PopItemWidth();
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::SimulatedAnnealing)
+
+    ItemWidthScope(const ItemWidthScope&) = delete;
+    ItemWidthScope& operator=(const ItemWidthScope&) = delete;
+    ItemWidthScope(ItemWidthScope&&) = delete;
+    ItemWidthScope& operator=(ItemWidthScope&&) = delete;
+};
+
+/// Draws a combo bound to an enum, using `to_string` for the labels.
+template <typename Enum, std::size_t N>
+void DrawEnumCombo(const char* label, Enum& value, const std::array<Enum, N>& options, const char* (*to_string)(Enum))
+{
+    if (!ImGui::BeginCombo(label, to_string(value)))
     {
-        static fdn_optimization::SimulatedAnnealingParameters sa_params;
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &sa_params.max_iterations);
-
-        constexpr std::array kInitialTempMinMax = {100.0, 20000.0};
-        ImGui::InputScalar("Initial Temperature", ImGuiDataType_Double, &sa_params.initial_temperature,
-                           kInitialTempMinMax.data(), &kInitialTempMinMax[1], "%.1f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputScalar("Initial Moves", ImGuiDataType_U64, &sa_params.init_moves);
-        ImGui::InputScalar("Move Control Sweep", ImGuiDataType_U64, &sa_params.move_ctrl_sweep);
-        ImGui::InputScalar("Max Tolerance Sweep", ImGuiDataType_U64, &sa_params.max_tolerance_sweep);
-
-        constexpr std::array kMaxMoveCoefMinMax = {1.0, 50.0};
-        ImGui::InputScalar("Max Move Coefficient", ImGuiDataType_Double, &sa_params.max_move_coef,
-                           kMaxMoveCoefMinMax.data(), &kMaxMoveCoefMinMax[1], "%.2f");
-
-        constexpr std::array kInitMoveCoefMinMax = {0.1, 10.0};
-        ImGui::InputScalar("Initial Move Coefficient", ImGuiDataType_Double, &sa_params.init_move_coef,
-                           kInitMoveCoefMinMax.data(), &kInitMoveCoefMinMax[1], "%.2f");
-        constexpr std::array kGainMinMax = {0.1, 1.0};
-        ImGui::InputScalar("Gain", ImGuiDataType_Double, &sa_params.gain, kGainMinMax.data(), &kGainMinMax[1], "%.2f");
-
-        return sa_params;
+        return;
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::DifferentialEvolution)
+    for (const Enum option : options)
     {
-        static fdn_optimization::DifferentialEvolutionParameters de_params;
-        ImGui::InputScalar("Population Size", ImGuiDataType_U64, &de_params.population_size);
-        ImGui::InputScalar("Max Generations", ImGuiDataType_U64, &de_params.max_generation);
-        constexpr std::array kCrossoverRateMinMax = {0.0, 1.0};
-        ImGui::InputScalar("Crossover Rate", ImGuiDataType_Double, &de_params.crossover_rate,
-                           kCrossoverRateMinMax.data(), &kCrossoverRateMinMax[1], "%.2f");
-        constexpr std::array kDifferentialWeightMinMax = {0.0, 2.0};
-        ImGui::InputScalar("Differential Weight", ImGuiDataType_Double, &de_params.differential_weight,
-                           kDifferentialWeightMinMax.data(), &kDifferentialWeightMinMax[1], "%.2f");
-
-        return de_params;
+        const bool is_selected = value == option;
+        if (ImGui::Selectable(to_string(option), is_selected))
+        {
+            value = option;
+        }
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::PSO)
+    ImGui::EndCombo();
+}
+
+void DrawAdamParams(fdn_optimization::AdamParameters& params)
+{
+    ImGui::InputFloat("Step Size", &params.step_size, 0.01f, 2.0f, "%.4f");
+    ImGui::InputFloat("Beta 1", &params.beta1, 0.001f, 0.999f, "%.3f");
+    ImGui::InputFloat("Beta 2", &params.beta2, 0.001f, 0.999f, "%.3f");
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputDouble("Gradient Delta", &params.gradient_delta, 1e-6f, 1e-1f, "%.1e", ImGuiSliderFlags_Logarithmic);
+    ImGui::InputFloat("Tolerance", &params.tolerance, 1e-6f, 1e-3f, "%.1e", ImGuiSliderFlags_Logarithmic);
+
+    params.decay_step_size = std::max(1, params.decay_step_size);
+    params.epoch_restarts = std::max(0, params.epoch_restarts);
+    params.max_restarts = std::max(0, params.max_restarts);
+}
+
+void DrawSPSAParams(fdn_optimization::SPSAParameters& params)
+{
+    ImGui::InputDouble("Alpha", &params.alpha, 0.001f, 0.1f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::InputDouble("Gamma", &params.gamma, 0.05f, 0.5f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::InputDouble("Step Size", &params.step_size, 0.1f, 2.0f, "%.4f");
+    ImGui::InputDouble("Evaluation Step Size", &params.evaluationStepSize, 0.1f, 2.0f, "%.4f");
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+}
+
+void DrawBlockSPSAParams(fdn_optimization::BlockSPSAParameters& params)
+{
+    constexpr std::array kModes = {fdn_optimization::BlockSPSAMode::SnapshotSweepAll,
+                                   fdn_optimization::BlockSPSAMode::RandomOne};
+    DrawEnumCombo("Mode", params.mode, kModes, fdn_optimization::BlockSPSAModeToString);
+
+    constexpr std::array kStrategies = {fdn_optimization::ParameterBlockStrategy::Semantic,
+                                        fdn_optimization::ParameterBlockStrategy::FixedContiguous};
+    DrawEnumCombo("Block Strategy", params.block_strategy, kStrategies,
+                  fdn_optimization::ParameterBlockStrategyToString);
+
+    if (params.block_strategy == fdn_optimization::ParameterBlockStrategy::FixedContiguous)
     {
-        static fdn_optimization::PSOParameters pso_params;
-        ImGui::InputScalar("Number of Particles", ImGuiDataType_U64, &pso_params.num_particles);
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &pso_params.max_iterations);
-        ImGui::InputScalar("Horizon Size", ImGuiDataType_U64, &pso_params.horizon_size);
-
-        constexpr std::array kExploitationFactorMinMax = {0.1, 5.0};
-        ImGui::InputScalar("Exploitation Factor", ImGuiDataType_Double, &pso_params.exploitation_factor,
-                           kExploitationFactorMinMax.data(), &kExploitationFactorMinMax[1], "%.2f");
-        constexpr std::array kExplorationFactorMinMax = {0.1, 5.0};
-        ImGui::InputScalar("Exploration Factor", ImGuiDataType_Double, &pso_params.exploration_factor,
-                           kExplorationFactorMinMax.data(), &kExplorationFactorMinMax[1], "%.2f");
-
-        return pso_params;
+        ImGui::InputScalar("Fixed Block Size", ImGuiDataType_U64, &params.contiguous_block_size);
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::RandomSearch)
+
+    if (params.mode == fdn_optimization::BlockSPSAMode::RandomOne)
     {
-        static fdn_optimization::RandomSearchParameters rs_params;
-        // No parameters for random search currently
-
-        return rs_params;
+        constexpr std::array kSchedules = {fdn_optimization::RandomBlockSchedule::ShuffledSweep,
+                                           fdn_optimization::RandomBlockSchedule::IndependentUniform};
+        DrawEnumCombo("Random Schedule", params.random_schedule, kSchedules,
+                      fdn_optimization::RandomBlockScheduleToString);
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::L_BFGS)
+
+    constexpr std::array kNormalizations = {fdn_optimization::ProbeRadiusNormalization::None,
+                                            fdn_optimization::ProbeRadiusNormalization::SqrtDimension};
+    DrawEnumCombo("Probe Radius Normalization", params.probe_radius_normalization, kNormalizations,
+                  fdn_optimization::ProbeRadiusNormalizationToString);
+
+    ImGui::InputDouble("Step Size", &params.step_size, 0.1f, 2.0f, "%.4f");
+    ImGui::InputDouble("Evaluation Step Size", &params.evaluation_step_size, 0.01f, 0.5f, "%.4f");
+    ImGui::InputDouble("Alpha", &params.alpha, 0.01f, 0.1f, "%.4f");
+    ImGui::InputDouble("Gamma", &params.gamma, 0.01f, 0.1f, "%.4f");
+
+    // An unset stability constant lets the optimizer derive one; expose that as an explicit toggle
+    // rather than overloading a sentinel value.
+    bool has_stability_constant = params.stability_constant.has_value();
+    if (ImGui::Checkbox("Override Stability Constant", &has_stability_constant))
     {
-        static fdn_optimization::L_BFGSParameters lbfgs_params;
-        ImGui::InputScalar("Number of Basis", ImGuiDataType_U64, &lbfgs_params.num_basis);
-
-        constexpr std::array<size_t, 2> kMaxIterationsSteps = {100, 10000};
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &lbfgs_params.max_iterations,
-                           kMaxIterationsSteps.data(), &kMaxIterationsSteps[1]);
-
-        ImGui::InputScalar("Wolfe Parameter", ImGuiDataType_Double, &lbfgs_params.wolfe, nullptr, nullptr, "%.2f");
-        ImGui::InputScalar("Min Gradient Norm", ImGuiDataType_Double, &lbfgs_params.min_gradient_norm, nullptr, nullptr,
-                           "%.1e");
-        ImGui::InputScalar("Factor", ImGuiDataType_Double, &lbfgs_params.factor, nullptr, nullptr, "%.1e");
-        ImGui::InputScalar("Max Line Search Trials", ImGuiDataType_U64, &lbfgs_params.max_line_search_trials);
-        ImGui::InputScalar("Min Step", ImGuiDataType_Double, &lbfgs_params.min_step, nullptr, nullptr, "%.1e");
-        ImGui::InputScalar("Max Step", ImGuiDataType_Double, &lbfgs_params.max_step, nullptr, nullptr, "%.1e");
-        ImGui::InputDouble("Gradient Delta", &lbfgs_params.gradient_delta, 1e-6f, 1e-1f, "%.1e",
-                           ImGuiSliderFlags_Logarithmic);
-
-        return lbfgs_params;
+        params.stability_constant = has_stability_constant ? std::optional<double>(1.0) : std::nullopt;
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::GradientDescent)
+    if (params.stability_constant)
     {
-        static fdn_optimization::GradientDescentParameters gd_params;
-
-        ImGui::InputDouble("Step Size", &gd_params.step_size, 0.001f, 1.0f, "%.4f");
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &gd_params.max_iterations, nullptr, nullptr, "%llu");
-        ImGui::InputDouble("Tolerance", &gd_params.tolerance, 0.f, 0.f, "%.1ef");
-        ImGui::InputDouble("Kappa", &gd_params.kappa, 0.f, 0.f, "%.2f");
-        ImGui::InputDouble("Phi", &gd_params.phi, 0.f, 0.f, "%.2f");
-        ImGui::InputDouble("Momentum", &gd_params.momentum, 0.f, 0.f, "%.3f");
-        ImGui::InputDouble("Min Gain", &gd_params.min_gain, 1e-4f, 1.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-        ImGui::InputDouble("Gradient Delta", &gd_params.gradient_delta, 1e-6f, 1e-1f, "%.1e",
-                           ImGuiSliderFlags_Logarithmic);
-
-        return gd_params;
+        ImGui::InputDouble("Stability Constant", &*params.stability_constant, 1.0f, 10.0f, "%.4f");
     }
-    else if (algo_type == fdn_optimization::OptimizationAlgoType::CMAES)
+
+    ImGui::InputScalar("Directions Per Block", ImGuiDataType_U64, &params.directions_per_block);
+    params.directions_per_block = std::max<std::size_t>(1, params.directions_per_block);
+
+    ImGui::InputScalar("Accepted Eval Interval", ImGuiDataType_U64, &params.accepted_evaluation_interval);
+    params.accepted_evaluation_interval = std::max<std::size_t>(1, params.accepted_evaluation_interval);
+
+    ImGui::InputDouble("Max Step Norm", &params.max_step_norm, 0.1f, 1.0f, "%.4f");
+    params.max_step_norm = std::max(0.0, params.max_step_norm);
+
+    bool has_stall_window = params.stall_window.has_value();
+    if (ImGui::Checkbox("Enable Stall Window", &has_stall_window))
     {
-        static size_t population_size = 0;
-        static size_t max_iterations = 1000;
-        static double tolerance = 1e-5;
-        static double step_size = 0;
-
-        ImGui::InputScalar("Population Size", ImGuiDataType_U64, &population_size);
-        ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &max_iterations);
-        ImGui::InputScalar("Tolerance", ImGuiDataType_Double, &tolerance);
-        ImGui::InputScalar("Step Size", ImGuiDataType_Double, &step_size);
-
-        return fdn_optimization::CMAESParameters{
-            .population_size = population_size,
-            .max_iterations = max_iterations,
-            .tolerance = tolerance,
-            .step_size = step_size,
-        };
+        params.stall_window = has_stall_window ? std::optional<std::size_t>(320) : std::nullopt;
     }
-    else
+    if (params.stall_window)
     {
-        ImGui::Text("No parameters available for this optimizer.");
+        ImGui::InputScalar("Stall Window", ImGuiDataType_U64, &*params.stall_window);
     }
-    ImGui::PopItemWidth();
 
-    return {};
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+
+    // Block gain scales are carried through from the tuned defaults. They are a list of per-class
+    // (a, c) multipliers whose valid classes depend on the block strategy, so editing them here
+    // would need validation the optimizer already performs on the CLI side.
+    if (!params.block_scales.empty())
+    {
+        ImGui::TextDisabled("%zu tuned block gain scale(s) applied", params.block_scales.size());
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Per-class learning-rate and perturbation multipliers from the tuned configuration.");
+        }
+    }
+}
+
+void DrawSimulatedAnnealingParams(fdn_optimization::SimulatedAnnealingParameters& params)
+{
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputDouble("Initial Temperature", &params.initial_temperature, 0.01f, 1.0f, "%.4f");
+    ImGui::InputScalar("Initial Moves", ImGuiDataType_U64, &params.init_moves);
+    ImGui::InputScalar("Move Control Sweep", ImGuiDataType_U64, &params.move_ctrl_sweep);
+    ImGui::InputScalar("Max Tolerance Sweep", ImGuiDataType_U64, &params.max_tolerance_sweep);
+    ImGui::InputDouble("Max Move Coefficient", &params.max_move_coef, 1.0f, 10.0f, "%.4f");
+    ImGui::InputDouble("Initial Move Coefficient", &params.init_move_coef, 0.01f, 1.0f, "%.4f");
+    ImGui::InputDouble("Gain", &params.gain, 0.01f, 0.1f, "%.4f");
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+}
+
+void DrawCNEParams(fdn_optimization::CNEParameters& params)
+{
+    ImGui::InputScalar("Population Size", ImGuiDataType_U64, &params.population_size);
+    ImGui::InputScalar("Max Generations", ImGuiDataType_U64, &params.max_generations);
+    ImGui::InputDouble("Mutation Probability", &params.mutation_probability, 0.01f, 0.1f, "%.4f");
+    ImGui::InputDouble("Mutation Size", &params.mutation_size, 0.01f, 0.1f, "%.4f");
+    ImGui::InputDouble("Select Percent", &params.select_percent, 0.01f, 0.1f, "%.4f");
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+}
+
+void DrawDifferentialEvolutionParams(fdn_optimization::DifferentialEvolutionParameters& params)
+{
+    ImGui::InputScalar("Population Size", ImGuiDataType_U64, &params.population_size);
+    ImGui::InputScalar("Max Generations", ImGuiDataType_U64, &params.max_generation);
+    ImGui::InputDouble("Crossover Rate", &params.crossover_rate, 0.01f, 0.1f, "%.4f");
+    ImGui::InputDouble("Differential Weight", &params.differential_weight, 0.01f, 0.1f, "%.4f");
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+}
+
+void DrawPSOParams(fdn_optimization::PSOParameters& params)
+{
+    ImGui::InputScalar("Number of Particles", ImGuiDataType_U64, &params.num_particles);
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputScalar("Horizon Size", ImGuiDataType_U64, &params.horizon_size);
+    ImGui::InputDouble("Exploitation Factor", &params.exploitation_factor, 0.1f, 1.0f, "%.4f");
+    ImGui::InputDouble("Exploration Factor", &params.exploration_factor, 0.1f, 1.0f, "%.4f");
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+}
+
+void DrawLBFGSParams(fdn_optimization::L_BFGSParameters& params)
+{
+    ImGui::InputScalar("Number of Basis", ImGuiDataType_U64, &params.num_basis);
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputDouble("Wolfe Parameter", &params.wolfe, 0.0, 0.0, "%.4f");
+    ImGui::InputDouble("Min Gradient Norm", &params.min_gradient_norm, 0.0, 0.0, "%.1e");
+    ImGui::InputDouble("Factor", &params.factor, 0.0, 0.0, "%.1e");
+    ImGui::InputScalar("Max Line Search Trials", ImGuiDataType_U64, &params.max_line_search_trials);
+    ImGui::InputDouble("Min Step", &params.min_step, 0.0, 0.0, "%.1e");
+    ImGui::InputDouble("Max Step", &params.max_step, 0.0, 0.0, "%.1e");
+    ImGui::InputDouble("Gradient Delta", &params.gradient_delta, 1e-6f, 1e-1f, "%.1e", ImGuiSliderFlags_Logarithmic);
+}
+
+void DrawGradientDescentParams(fdn_optimization::GradientDescentParameters& params)
+{
+    ImGui::InputDouble("Step Size", &params.step_size, 0.001f, 1.0f, "%.4f");
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+    ImGui::InputDouble("Kappa", &params.kappa, 0.0, 0.0, "%.4f");
+    ImGui::InputDouble("Phi", &params.phi, 0.0, 0.0, "%.4f");
+    ImGui::InputDouble("Momentum", &params.momentum, 0.0, 0.0, "%.4f");
+    ImGui::InputDouble("Min Gain", &params.min_gain, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+    ImGui::InputDouble("Gradient Delta", &params.gradient_delta, 1e-6f, 1e-1f, "%.1e", ImGuiSliderFlags_Logarithmic);
+    ImGui::InputDouble("Max Step Norm", &params.max_step_norm, 0.1f, 1.0f, "%.4f");
+    params.max_step_norm = std::max(0.0, params.max_step_norm);
+}
+
+void DrawCMAESParams(fdn_optimization::CMAESParameters& params)
+{
+    ImGui::InputScalar("Population Size", ImGuiDataType_U64, &params.population_size);
+    ImGui::InputScalar("Max Iterations", ImGuiDataType_U64, &params.max_iterations);
+    ImGui::InputDouble("Tolerance", &params.tolerance, 0.0, 0.0, "%.1e", ImGuiSliderFlags_Logarithmic);
+    ImGui::InputDouble("Step Size", &params.step_size, 0.01f, 0.1f, "%.4f");
+}
+
+void DrawRandomSearchParams(fdn_optimization::RandomSearchParameters& params)
+{
+    ImGui::InputDouble("Time Limit (s)", &params.time_limit_seconds, 1.0f, 10.0f, "%.1f");
 }
 
 } // namespace
@@ -207,11 +278,67 @@ fdn_optimization::OptimizationAlgoParams DrawOptimizationParamGui(fdn_optimizati
 namespace fdn_sandbox::views
 {
 
+std::size_t OptimizationView::AlgorithmParameterStore::Index(fdn_optimization::OptimizationObjective objective)
+{
+    return objective == fdn_optimization::OptimizationObjective::RirMatching ? 1U : 0U;
+}
+
+fdn_optimization::OptimizationAlgoParams& OptimizationView::AlgorithmParameterStore::Entry(
+    fdn_optimization::OptimizationObjective objective, fdn_optimization::OptimizationAlgoType algorithm)
+{
+    const auto algorithm_index = static_cast<std::size_t>(algorithm);
+    assert(algorithm_index < kAlgorithmCount);
+    Slot& slot = slots_[Index(objective)][algorithm_index];
+    if (!slot.seeded)
+    {
+        slot.params = fdn_optimization::TunedDefaultsFor(algorithm, objective);
+        slot.seeded = true;
+    }
+    return slot.params;
+}
+
+void OptimizationView::AlgorithmParameterStore::Reset(fdn_optimization::OptimizationObjective objective,
+                                                      fdn_optimization::OptimizationAlgoType algorithm)
+{
+    const auto algorithm_index = static_cast<std::size_t>(algorithm);
+    assert(algorithm_index < kAlgorithmCount);
+    Slot& slot = slots_[Index(objective)][algorithm_index];
+    slot.params = fdn_optimization::TunedDefaultsFor(algorithm, objective);
+    slot.seeded = true;
+}
+
 OptimizationView::OptimizationView(quill::Logger* logger)
     : fdn_optimizer_(logger)
     , previous_loss_plot_statistics_{.min_loss = std::numeric_limits<double>::quiet_NaN(),
                                      .max_loss = std::numeric_limits<double>::quiet_NaN()}
 {
+    ApplyTunedLossDefaults(SelectedObjective());
+
+    // The tuned RIR-matching campaign is thesis-faithful 3-band matching, so the filter selector
+    // must start there rather than on the 10-band default it previously shipped with.
+    const auto matching = fdn_optimization::TunedMatchingDefaults();
+    filter_type_ =
+        matching.attenuation_filter_type == fdn_optimization::OptimizationParamType::AttenuationFilters_3Band ? 1 : 0;
+    tuned_matching_initialization_ = matching.initialization;
+    opt_info_.matching_parameters.initialization = matching.initialization;
+}
+
+fdn_optimization::OptimizationObjective OptimizationView::SelectedObjective() const noexcept
+{
+    return optimize_type_ == 1 ? fdn_optimization::OptimizationObjective::RirMatching
+                               : fdn_optimization::OptimizationObjective::Colorless;
+}
+
+void OptimizationView::ApplyTunedLossDefaults(fdn_optimization::OptimizationObjective objective)
+{
+    // Each objective edits a disjoint pair of weights (colorless: flatness and sparsity; matching:
+    // EDC and mel-EDR), so seeding all four once is safe and switching objectives never has to
+    // discard the other objective's edits.
+    const auto losses = fdn_optimization::TunedLossDefaultsFor(objective);
+    spectral_flatness_weight_ = losses.spectral_flatness_weight;
+    sparsity_weight_ = losses.sparsity_weight;
+    edc_weight_ = losses.edc_weight;
+    mel_edr_weight_ = losses.mel_edr_weight;
 }
 
 bool OptimizationView::IsActive() const noexcept
@@ -309,10 +436,84 @@ bool OptimizationView::DrawOptimizationPanel(sfFDN::FDNConfig& fdn_config, std::
     return updated_fdn;
 }
 
+void OptimizationView::DrawParameterEditor(fdn_optimization::OptimizationAlgoParams& params)
+{
+    const ItemWidthScope item_width(200);
+
+    // Dispatching on the stored alternative rather than on `selected_algorithm_` keeps the editor
+    // and the parameters that get submitted in agreement even if the two ever drift apart.
+    std::visit(
+        [](auto& value) {
+            using Params = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<Params, fdn_optimization::AdamParameters>)
+            {
+                DrawAdamParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::SPSAParameters>)
+            {
+                DrawSPSAParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::BlockSPSAParameters>)
+            {
+                DrawBlockSPSAParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::SimulatedAnnealingParameters>)
+            {
+                DrawSimulatedAnnealingParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::CNEParameters>)
+            {
+                DrawCNEParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::DifferentialEvolutionParameters>)
+            {
+                DrawDifferentialEvolutionParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::PSOParameters>)
+            {
+                DrawPSOParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::L_BFGSParameters>)
+            {
+                DrawLBFGSParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::GradientDescentParameters>)
+            {
+                DrawGradientDescentParams(value);
+            }
+            else if constexpr (std::is_same_v<Params, fdn_optimization::CMAESParameters>)
+            {
+                DrawCMAESParams(value);
+            }
+            else
+            {
+                DrawRandomSearchParams(value);
+            }
+        },
+        params);
+}
+
 void OptimizationView::DrawAlgorithmSettings()
 {
     DrawAlgorithmSelector();
-    opt_info_.optimizer_params = DrawOptimizationParamGui(selected_algorithm_);
+
+    const fdn_optimization::OptimizationObjective objective = SelectedObjective();
+    fdn_optimization::OptimizationAlgoParams& params = parameter_store_.Entry(objective, selected_algorithm_);
+    DrawParameterEditor(params);
+
+    if (ImGui::Button("Reset to tuned defaults"))
+    {
+        parameter_store_.Reset(objective, selected_algorithm_);
+        ApplyTunedLossDefaults(objective);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Restores the %s hyperparameters tuned for the %s objective.",
+                          fdn_optimization::OptimizationAlgoTypeToString(selected_algorithm_),
+                          fdn_optimization::OptimizationObjectiveToString(objective));
+    }
+
+    opt_info_.optimizer_params = params;
 
     if (selected_algorithm_ >= fdn_optimization::OptimizationAlgoType::Adam)
     {
@@ -371,6 +572,22 @@ void OptimizationView::StartOptimization(const sfFDN::FDNConfig& fdn_config, std
     if (!target_rir.empty())
     {
         opt_info_.target_rir.assign(target_rir.begin(), target_rir.end());
+    }
+
+    // Target-derived initialization is silently ignored unless the estimates are supplied, so they
+    // are measured here where both the target RIR and the selected band layout are known. Measuring
+    // per start rather than per frame keeps the analysis off the UI thread's hot path.
+    opt_info_.t60_estimates.clear();
+    if (opt_info_.matching_parameters.initialization == fdn_optimization::MatchingInitialization::TargetDerived &&
+        !target_rir.empty())
+    {
+        const auto attenuation_type = filter_type_ == 1
+                                          ? fdn_optimization::OptimizationParamType::AttenuationFilters_3Band
+                                          : fdn_optimization::OptimizationParamType::AttenuationFilters;
+        opt_info_.t60_estimates = fdn_optimization::EstimateMatchingT60s(target_rir, attenuation_type,
+                                                                         Settings::Instance().SampleRateAs<float>());
+        LOG_INFO(Settings::Instance().GetLogger(), "Estimated {} starting T60s from the target RIR",
+                 opt_info_.t60_estimates.size());
     }
 
     LossFunctions loss_functions = CreateLossFunctions(target_rir);
@@ -741,6 +958,17 @@ void OptimizationView::DrawRIRMatchSettings()
 
     opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::TonecorrectionFilters);
     opt_info_.parameters_to_optimize.push_back(fdn_optimization::OptimizationParamType::OverallGain);
+
+    // Choosing target-derived initialization only records the intent; the estimates themselves are
+    // measured from the target RIR in StartOptimization, since they depend on the band layout.
+    ImGui::Checkbox("Start from estimated T60s", &use_estimated_t60s_);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Measures per-band T60s from the target RIR and uses them as the optimizer's starting\n"
+                          "point instead of the tuned random initialization.");
+    }
+    opt_info_.matching_parameters.initialization =
+        use_estimated_t60s_ ? fdn_optimization::MatchingInitialization::TargetDerived : tuned_matching_initialization_;
 
     ImGui::SeparatorText("RIR Match Weights");
 

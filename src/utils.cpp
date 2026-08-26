@@ -605,6 +605,52 @@ bool NormalizeAttenuationFilterBank(sfFDN::FDNConfig& config)
     return changed;
 }
 
+bool IsAttenuationFilterBankHomogeneous(const sfFDN::AttenuationFilterBankOptions& filter_bank)
+{
+    const auto& filter_configs = filter_bank.filter_configs;
+    if (filter_configs.size() < 2)
+    {
+        return true;
+    }
+
+    // sfFDN's option structs have no equality operators, and a member-wise comparison would be
+    // wrong anyway: `delay` is assigned per channel from the delay bank, so comparing whole structs
+    // would report every bank as heterogeneous. Only the decay-shaping fields are compared here.
+    const auto same_response = [](const sfFDN::attenuation_filter_variant_t& lhs,
+                                  const sfFDN::attenuation_filter_variant_t& rhs) {
+        if (lhs.index() != rhs.index())
+        {
+            return false;
+        }
+        return std::visit(
+            [&rhs](const auto& left) {
+                using Filter = std::decay_t<decltype(left)>;
+                const auto& right = std::get<Filter>(rhs);
+                if constexpr (std::is_same_v<Filter, sfFDN::HomogenousFilterOptions>)
+                {
+                    return left.t60 == right.t60;
+                }
+                else if constexpr (std::is_same_v<Filter, sfFDN::TwoBandFilterOptions>)
+                {
+                    return left.t60s == right.t60s;
+                }
+                else if constexpr (std::is_same_v<Filter, sfFDN::ThreeBandFilterOptions>)
+                {
+                    return left.t60s == right.t60s && left.freqs == right.freqs && left.q == right.q;
+                }
+                else
+                {
+                    return left.t60s == right.t60s && left.shelf_cutoff == right.shelf_cutoff;
+                }
+            },
+            lhs);
+    };
+
+    return std::ranges::all_of(filter_configs, [&](const sfFDN::attenuation_filter_variant_t& filter) {
+        return same_response(filter_configs.front(), filter);
+    });
+}
+
 void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size)
 {
     config.fdn_size = new_size;

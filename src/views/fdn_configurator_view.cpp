@@ -13,6 +13,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <format>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -275,6 +276,15 @@ bool FdnConfiguratorView::DrawLoopFiltersSection(session::FdnSession& session)
     auto filter_bank = fdn_config.attenuation_filter_bank_config.value();
     auto shared_filter = filter_bank.filter_configs.front();
 
+    // Shared mode can only render the first channel, and any edit made in it overwrites every
+    // channel. Optimizing per-channel attenuation (3-band RIR matching in particular) produces a
+    // heterogeneous bank, so force independent mode to keep the view honest and stop the next
+    // interaction from silently flattening the result.
+    if (!utils::IsAttenuationFilterBankHomogeneous(filter_bank))
+    {
+        independent_t60s_ = true;
+    }
+
     const bool independence_changed = ImGui::Checkbox("Independent T60s", &independent_t60s_);
     const bool filter_type_changed = DrawAttenuationFilterType(shared_filter);
 
@@ -297,6 +307,7 @@ bool FdnConfiguratorView::DrawLoopFiltersSection(session::FdnSession& session)
         for (uint32_t i = 0; i < fdn_config.fdn_size; ++i)
         {
             ImGui::PushID(static_cast<int>(i));
+            ImGui::SeparatorText(std::format("Channel {}", i).c_str());
             filter_bank_changed |= DrawFDNOptions(filter_bank.filter_configs[i], fdn_config, widget_state_);
             ImGui::PopID();
         }
