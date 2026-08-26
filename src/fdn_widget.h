@@ -24,6 +24,16 @@ struct FDNDelayWidgetState
     bool make_prime = false;
 };
 
+/// Persistent plotting buffers for the graphic EQ editor.
+struct GraphicEqEditorState
+{
+    std::vector<float> plot_frequencies;
+    std::vector<float> response_db;
+    std::vector<double> frequency_ticks;
+    float plot_sample_rate = 0.0f;
+    bool show_response = true;
+};
+
 /// Per-configurator state used by FDN option widgets and embedded file pickers.
 struct FDNWidgetState
 {
@@ -42,6 +52,7 @@ struct FDNWidgetState
     ImGuiID ten_band_designer_owner = 0;
     ThreeBandDesignerState three_band_designer;
     FilterDesignerState ten_band_designer;
+    GraphicEqEditorState graphic_eq_editor;
     std::map<std::ptrdiff_t, int> fir_filter_types;
     ImGui::FileBrowser fir_file_dialog;
     std::size_t multichannel_fir_file = 0;
@@ -93,7 +104,8 @@ bool DrawFDNOptions(sfFDN::feedback_matrix_variant_t& config_variant, const sfFD
 
 bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_variant_t>& processors,
                                     sfFDN::FDNConfig& fdn_config, FDNWidgetState& state);
-std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelProcessorPopup();
+std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelProcessorPopup(
+    const sfFDN::FDNConfig& fdn_config);
 
 bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_variant_t>& processors,
                                    sfFDN::FDNConfig& fdn_config, FDNWidgetState& state);

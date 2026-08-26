@@ -522,6 +522,52 @@ sfFDN::DelayBankTimeVaryingOptions MakeTimeVaryingDelayBank(uint32_t channel_cou
     return config;
 }
 
+bool NormalizeGraphicEq(sfFDN::GraphicEQOptions& config, float sample_rate)
+{
+    static constexpr std::array<float, 10> kDefaultFrequencies = {31.25f,  62.5f,   125.0f,  250.0f,  500.0f,
+                                                                  1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f};
+
+    bool changed = false;
+    const float nyquist_frequency = sample_rate * 0.5f;
+
+    for (size_t index = 0; index < config.freqs.size(); ++index)
+    {
+        const float default_frequency = std::min(kDefaultFrequencies.at(index), nyquist_frequency * 0.99f);
+        float frequency = config.freqs.at(index);
+        if (!std::isfinite(frequency) || frequency <= 0.0f || frequency >= nyquist_frequency)
+        {
+            frequency = default_frequency;
+        }
+        changed |= frequency != config.freqs.at(index);
+        config.freqs.at(index) = frequency;
+    }
+
+    for (float& gain_db : config.gains_db)
+    {
+        const float normalized =
+            std::isfinite(gain_db) ? std::clamp(gain_db, kGraphicEqMinimumGainDb, kGraphicEqMaximumGainDb) : 0.0f;
+        changed |= normalized != gain_db;
+        gain_db = normalized;
+    }
+
+    if (config.sample_rate != sample_rate)
+    {
+        config.sample_rate = sample_rate;
+        changed = true;
+    }
+
+    return changed;
+}
+
+sfFDN::GraphicEQOptions MakeGraphicEq(float sample_rate)
+{
+    // Value-initialization zeroes the band arrays; normalization then fills in the default octave
+    // band frequencies and a flat response.
+    sfFDN::GraphicEQOptions config{};
+    NormalizeGraphicEq(config, sample_rate);
+    return config;
+}
+
 namespace
 {
 void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size,

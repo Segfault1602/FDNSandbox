@@ -15,14 +15,19 @@
 
 #include "sffdn/delay_utils.h"
 #include "sffdn/fdn_config.h"
+#include "sffdn/filter_design.h"
 #include "sffdn/matrix_gallery.h"
 #include "sffdn/types.h"
 #include "theme.h"
 #include "utils.h"
 #include "widget.h"
 
+#include <audio_utils/array_math.h>
+
 #include <algorithm>
 #include <array>
+#include <cfloat>
+#include <cmath>
 #include <map>
 #include <optional>
 #include <random>
@@ -325,6 +330,80 @@ TimeVaryingDelayTableResult DrawTimeVaryingDelayTable(sfFDN::DelayBankTimeVaryin
 
     ImGui::EndTable();
     return result;
+}
+
+std::string FormatBandFrequency(float frequency)
+{
+    if (frequency >= 1000.0f)
+    {
+        return std::format("{:.1f} kHz", frequency / 1000.0f);
+    }
+    return std::format("{:.0f} Hz", frequency);
+}
+
+bool DrawGraphicEqBands(sfFDN::GraphicEQOptions& config)
+{
+    bool config_changed = false;
+    if (!ImGui::BeginTable("##GraphicEqBands", 5, ImGuiTableFlags_SizingStretchSame))
+    {
+        return config_changed;
+    }
+
+    for (size_t index = 0; index < config.gains_db.size(); ++index)
+    {
+        ImGui::TableNextColumn();
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::TextDisabled("%s", FormatBandFrequency(config.freqs.at(index)).c_str());
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        config_changed |= ImGui::DragFloat("##Gain", &config.gains_db.at(index), 0.1f, utils::kGraphicEqMinimumGainDb,
+                                           utils::kGraphicEqMaximumGainDb, "%.2f dB", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::PopID();
+    }
+
+    ImGui::EndTable();
+    return config_changed;
+}
+
+void DrawGraphicEqResponse(const sfFDN::GraphicEQOptions& config, GraphicEqEditorState& state)
+{
+    const float nyquist_frequency = config.sample_rate * 0.5f;
+    if (state.plot_frequencies.empty() || state.plot_sample_rate != config.sample_rate)
+    {
+        state.plot_frequencies = utils::LogSpace(std::log10(20.0f), std::log10(nyquist_frequency), 512);
+        state.frequency_ticks.assign(config.freqs.begin(), config.freqs.end());
+        state.plot_sample_rate = config.sample_rate;
+    }
+
+    // The response is recomputed every frame because a single shared buffer would otherwise show
+    // whichever graphic EQ was edited last.
+    const auto sos = sfFDN::DesignGraphicEQ(config);
+    state.response_db = utils::AbsFreqz(sos, state.plot_frequencies, static_cast<size_t>(config.sample_rate));
+    audio_utils::array_math::ToDb(state.response_db, 20.0f);
+
+    if (!ImPlot::BeginPlot("Filter Response", ImVec2(-1, 260), ImPlotFlags_NoLegend))
+    {
+        return;
+    }
+
+    ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)");
+    ImPlot::SetupAxisLimits(ImAxis_X1, 20.0, static_cast<double>(nyquist_frequency), ImPlotCond_Always);
+    ImPlot::SetupAxisLimits(ImAxis_Y1, utils::kGraphicEqMinimumGainDb, utils::kGraphicEqMaximumGainDb, ImPlotCond_Once);
+    ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+    ImPlot::SetupAxisTicks(ImAxis_X1, state.frequency_ticks.data(), static_cast<int>(state.frequency_ticks.size()),
+                           nullptr, false);
+
+    ImPlotSpec target_spec{};
+    target_spec.Marker = ImPlotMarker_Circle;
+    target_spec.MarkerSize = 6.0f;
+    ImPlot::PlotScatter("Target", config.freqs.data(), config.gains_db.data(), static_cast<int>(config.gains_db.size()),
+                        target_spec);
+
+    ImPlotSpec response_spec{};
+    response_spec.LineWeight = 2.0f;
+    ImPlot::PlotLine("Response", state.plot_frequencies.data(), state.response_db.data(),
+                     static_cast<int>(state.response_db.size()), response_spec);
+
+    ImPlot::EndPlot();
 }
 
 bool DrawTimeVaryingGains(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig& fdn_config)
@@ -936,10 +1015,27 @@ bool FDNWidgetVisitor::operator()(sfFDN::TenBandFilterOptions& config) const
     return config_changed;
 }
 
-bool FDNWidgetVisitor::operator()([[maybe_unused]] sfFDN::GraphicEQOptions& config) const
+bool FDNWidgetVisitor::operator()(sfFDN::GraphicEQOptions& config) const
 {
-    (void)config;
-    return false;
+    bool config_changed = utils::NormalizeGraphicEq(config, fdn_config.sample_rate);
+
+    ImGui::TextDisabled("Band Gains");
+    config_changed |= DrawGraphicEqBands(config);
+
+    if (ImGui::Button("Flatten"))
+    {
+        config.gains_db.fill(0.0f);
+        config_changed = true;
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Show Response", &state.graphic_eq_editor.show_response);
+
+    if (state.graphic_eq_editor.show_response)
+    {
+        DrawGraphicEqResponse(config, state.graphic_eq_editor);
+    }
+
+    return config_changed;
 }
 
 bool FDNWidgetVisitor::operator()([[maybe_unused]] sfFDN::AllpassFilterOptions& config) const
@@ -1158,7 +1254,7 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
         ImGui::OpenPopup("single_channel_processor_popup");
     }
 
-    auto new_processor = DrawAddSingleChannelProcessorPopup();
+    auto new_processor = DrawAddSingleChannelProcessorPopup(fdn_config);
     if (new_processor.has_value())
     {
         processors.push_back(std::move(*new_processor));
@@ -1168,9 +1264,11 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
     return config_changed;
 }
 
-std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelProcessorPopup()
+std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelProcessorPopup(
+    const sfFDN::FDNConfig& fdn_config)
 {
-    const std::array single_channel_processor_names = {"Delay", "Schroeder Allpass", "Velvet Noise Decorrelator"};
+    const std::array single_channel_processor_names = {"Delay", "Schroeder Allpass", "Velvet Noise Decorrelator",
+                                                       "Graphic EQ"};
     std::optional<sfFDN::single_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("single_channel_processor_popup"))
     {
@@ -1189,6 +1287,9 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
                     break;
                 case 2:
                     new_processor = sfFDN::FirOptions{};
+                    break;
+                case 3:
+                    new_processor = utils::MakeGraphicEq(fdn_config.sample_rate);
                     break;
                 default:
                     break;

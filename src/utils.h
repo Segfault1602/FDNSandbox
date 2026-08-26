@@ -111,6 +111,12 @@ bool NormalizeTimeVaryingDelayBank(sfFDN::DelayBankTimeVaryingOptions& config,
 sfFDN::DelayBankTimeVaryingOptions MakeTimeVaryingDelayBank(uint32_t channel_count, float sample_rate,
                                                             float base_delay = 512.0f);
 
+inline constexpr float kGraphicEqMinimumGainDb = -30.0f;
+inline constexpr float kGraphicEqMaximumGainDb = 30.0f;
+
+bool NormalizeGraphicEq(sfFDN::GraphicEQOptions& config, float sample_rate);
+sfFDN::GraphicEQOptions MakeGraphicEq(float sample_rate);
+
 struct Span2D
 {
     std::span<float> data;
