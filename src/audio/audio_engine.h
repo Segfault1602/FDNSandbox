@@ -68,6 +68,8 @@ class AudioEngine final
     void SetOutputDevice(std::string_view device);
     audio_stream_info GetStreamInfo() const;
     void PlayTestTone(bool play);
+    // Block size most recently delivered by the audio device. Zero until the first callback.
+    [[nodiscard]] std::size_t GetDeviceBlockSize() const noexcept;
 
   private:
     void AudioCallback(std::span<float> output_buffer, std::size_t frame_size, std::size_t num_channels) noexcept;

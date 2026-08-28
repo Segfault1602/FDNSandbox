@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace fdn_sandbox::audio
 {
@@ -57,6 +58,8 @@ class AudioRuntime final
     AudioTelemetry ReadTelemetry() const noexcept;
     float ConsumePeak() noexcept;
     bool ConsumeClipped() noexcept;
+    // Block size most recently delivered by the audio device. Zero until the first callback.
+    std::size_t GetDeviceBlockSize() const noexcept;
 
   private:
     struct ProcessingTimes
@@ -75,6 +78,8 @@ class AudioRuntime final
                           float dry) noexcept;
     void UpdateCpuUsage(std::int64_t duration_ns) noexcept;
     void PublishEvent(AudioEvent event) noexcept;
+    [[nodiscard]] std::span<float> InputBlock() noexcept;
+    void ProcessConvolution(const sfFDN::AudioBuffer& input, sfFDN::AudioBuffer& output) noexcept;
 
     std::uint32_t sample_rate_;
     std::size_t max_commands_per_block_;
@@ -90,13 +95,18 @@ class AudioRuntime final
     bool impulse_requested_ = false;
     bool impulse_active_ = false;
     std::size_t last_invalid_frame_size_ = 0;
+    // Frames delivered by the current callback. Only touched on the audio thread.
+    std::size_t frame_size_ = 0;
+    std::size_t last_reported_convolver_block_size_ = 0;
     ReverbEngine last_reverb_engine_ = ReverbEngine::Fdn;
     std::size_t cpu_highwater_mark_ns_ = 0;
 
-    std::array<float, kSystemBlockSize> input_{};
-    std::array<float, kSystemBlockSize> fdn_output_{};
-    std::array<float, kSystemBlockSize> convolution_output_{};
+    std::array<float, kMaxBlockSize> input_{};
+    std::array<float, kMaxBlockSize> fdn_output_{};
+    std::array<float, kMaxBlockSize> convolution_output_{};
     sfFDN::Delay direct_delay_;
+    FixedBlockAdapter convolution_adapter_{kConvolutionBlockSize};
+    std::vector<float> convolution_scratch_ = std::vector<float>(kConvolutionBlockSize, 0.0f);
     OutputLevelMeter output_meter_;
     CpuAverage cpu_average_;
 
@@ -111,6 +121,7 @@ class AudioRuntime final
     std::atomic<float> meter_peak_ = 0.0f;
     std::atomic<bool> meter_clipped_ = false;
     std::atomic<float> cpu_usage_ = 0.0f;
+    std::atomic<std::size_t> device_block_size_ = 0;
     std::atomic<PlaybackState> playback_state_ = PlaybackState::Stopped;
     std::atomic<std::uint64_t> telemetry_generation_ = 0;
     std::atomic<std::uint64_t> event_overflow_count_ = 0;

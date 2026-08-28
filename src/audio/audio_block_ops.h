@@ -49,6 +49,47 @@ struct CpuUsageReading
     float average;
 };
 
+/**
+ * @brief Bridges an arbitrary device block size to a processor that requires a fixed block size.
+ *
+ * Partitioned convolution only works at a fixed, power-of-two block size, but audio devices are
+ * free to deliver any block size. Samples are accumulated until a full block is available, the
+ * block is handed to the callback, and results are drained back out. This costs one block of
+ * latency and is only used when the device block size differs from the processing block size.
+ */
+class FixedBlockAdapter final
+{
+  public:
+    explicit FixedBlockAdapter(std::size_t block_size);
+
+    void Reset() noexcept;
+    [[nodiscard]] std::size_t BlockSize() const noexcept;
+
+    /// Processes `input` into `output`, invoking `process(block_in, block_out)` once per full block.
+    template <typename ProcessBlock>
+    void Process(std::span<const float> input, std::span<float> output, ProcessBlock&& process) noexcept
+    {
+        assert(input.size() == output.size());
+        for (std::size_t index = 0; index < input.size(); ++index)
+        {
+            pending_input_[fill_] = input[index];
+            output[index] = ready_output_[fill_];
+            ++fill_;
+            if (fill_ == block_size_)
+            {
+                fill_ = 0;
+                process(std::span<const float>(pending_input_), std::span<float>(ready_output_));
+            }
+        }
+    }
+
+  private:
+    std::size_t block_size_;
+    std::size_t fill_ = 0;
+    std::vector<float> pending_input_;
+    std::vector<float> ready_output_;
+};
+
 class CpuAverage final
 {
   public:

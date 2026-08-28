@@ -140,6 +140,25 @@ MeterReading OutputLevelMeter::Measure(std::span<const float> samples) noexcept
     };
 }
 
+FixedBlockAdapter::FixedBlockAdapter(std::size_t block_size)
+    : block_size_(block_size)
+    , pending_input_(block_size, 0.0f)
+    , ready_output_(block_size, 0.0f)
+{
+}
+
+void FixedBlockAdapter::Reset() noexcept
+{
+    fill_ = 0;
+    std::ranges::fill(pending_input_, 0.0f);
+    std::ranges::fill(ready_output_, 0.0f);
+}
+
+std::size_t FixedBlockAdapter::BlockSize() const noexcept
+{
+    return block_size_;
+}
+
 CpuUsageReading CpuAverage::Push(std::int64_t duration_ns, std::size_t frame_size, float sample_rate) noexcept
 {
     const float allowed_time = (1e9f / sample_rate) * static_cast<float>(frame_size);

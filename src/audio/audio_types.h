@@ -6,7 +6,15 @@
 namespace fdn_sandbox::audio
 {
 
+// Block size requested from the audio device. Devices are free to ignore this hint, so the runtime
+// must accept whatever the callback actually delivers.
 inline constexpr std::size_t kSystemBlockSize = 1024;
+// Largest device block the runtime can process in a single pass. Larger callbacks are split into
+// several passes, so this only bounds the internal scratch buffers.
+inline constexpr std::size_t kMaxBlockSize = 8192;
+// Block size used by the partitioned convolution engine. It must be a power of two, so it cannot
+// simply follow the device block size; mismatched device blocks are bridged by a fixed-block adapter.
+inline constexpr std::size_t kConvolutionBlockSize = 1024;
 inline constexpr float kMeterIntegrationSeconds = 0.3f;
 
 enum class ReverbEngine : std::uint8_t

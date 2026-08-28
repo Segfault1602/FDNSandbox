@@ -49,8 +49,8 @@ void FDNToolboxApp::ProcessNotifications()
             break;
         case fdn_sandbox::audio::AudioEventKind::ConvolverBlockSizeMismatch:
             LOG_ERROR(Settings::Instance().GetLogger(),
-                      "RIR PartitionedConvolver block size {} does not match system block size {}", audio_event.actual,
-                      audio_event.expected);
+                      "RIR PartitionedConvolver block size {} does not match convolution block size {}",
+                      audio_event.actual, audio_event.expected);
             break;
         case fdn_sandbox::audio::AudioEventKind::DirectDelayOutOfRange:
             LOG_ERROR(Settings::Instance().GetLogger(), "Pre-delay samples {} exceed maximum delay {}",

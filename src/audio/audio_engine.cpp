@@ -1,5 +1,7 @@
 #include "audio/audio_engine.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <stdexcept>
 #include <utility>
 
@@ -203,11 +205,31 @@ void AudioEngine::PlayTestTone(bool play)
 void AudioEngine::AudioCallback(std::span<float> output_buffer, std::size_t frame_size,
                                 std::size_t num_channels) noexcept
 {
-    if (runtime_.PrepareInput(frame_size).empty())
+    if (num_channels == 0 || output_buffer.size() < frame_size * num_channels)
     {
         return;
     }
-    runtime_.Process(output_buffer, frame_size, num_channels);
+
+    // Devices are free to ignore the requested block size, and some deliver more frames than the
+    // runtime can process at once, so the callback is split into runtime-sized passes.
+    std::size_t frame_offset = 0;
+    while (frame_offset < frame_size)
+    {
+        const std::size_t chunk_frames = std::min(frame_size - frame_offset, kMaxBlockSize);
+        const std::span<float> chunk_output =
+            output_buffer.subspan(frame_offset * num_channels, chunk_frames * num_channels);
+        if (runtime_.PrepareInput(chunk_frames).empty())
+        {
+            return;
+        }
+        runtime_.Process(chunk_output, chunk_frames, num_channels);
+        frame_offset += chunk_frames;
+    }
+}
+
+std::size_t AudioEngine::GetDeviceBlockSize() const noexcept
+{
+    return runtime_.GetDeviceBlockSize();
 }
 
 } // namespace fdn_sandbox::audio

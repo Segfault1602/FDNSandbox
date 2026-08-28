@@ -57,7 +57,7 @@ void FDNToolboxApp::HandleFileDialogSelection(const fdn_sandbox::files::SaveConf
 
 void FDNToolboxApp::HandleFileDialogSelection(const fdn_sandbox::files::LoadRirSelection& selection)
 {
-    auto loaded = file_workflows_.LoadRir(selection.path, fdn_sandbox::audio::kSystemBlockSize);
+    auto loaded = file_workflows_.LoadRir(selection.path, fdn_sandbox::audio::kConvolutionBlockSize);
     if (!loaded)
     {
         const auto& error = loaded.error();

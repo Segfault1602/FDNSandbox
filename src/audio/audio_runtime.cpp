@@ -25,43 +25,56 @@ AudioRuntime::~AudioRuntime()
     DrainOffRealtime();
 }
 
+std::span<float> AudioRuntime::InputBlock() noexcept
+{
+    return std::span<float>(input_).first(frame_size_);
+}
+
 std::span<float> AudioRuntime::PrepareInput(std::size_t frame_size) noexcept
 {
     ProcessCommands();
-    if (frame_size != kSystemBlockSize)
+    if (frame_size == 0 || frame_size > kMaxBlockSize)
     {
         if (frame_size != last_invalid_frame_size_)
         {
             PublishEvent({
                 .kind = AudioEventKind::FrameSizeMismatch,
                 .actual = frame_size,
-                .expected = kSystemBlockSize,
+                .expected = kMaxBlockSize,
             });
             last_invalid_frame_size_ = frame_size;
         }
         return {};
     }
     last_invalid_frame_size_ = 0;
+    if (frame_size != frame_size_)
+    {
+        // The buffering adapter is only valid for a single device block size.
+        convolution_adapter_.Reset();
+    }
+    frame_size_ = frame_size;
+    device_block_size_.store(frame_size, std::memory_order_relaxed);
 
-    input_.fill(0.0f);
-    fdn_output_.fill(0.0f);
-    convolution_output_.fill(0.0f);
+    const std::span<float> input = InputBlock();
+    std::ranges::fill(input, 0.0f);
+    std::ranges::fill(std::span<float>(fdn_output_).first(frame_size), 0.0f);
+    std::ranges::fill(std::span<float>(convolution_output_).first(frame_size), 0.0f);
 
     impulse_active_ = active_fdn_ != nullptr && impulse_requested_;
     if (impulse_active_)
     {
-        input_.front() = 1.0f;
+        input.front() = 1.0f;
     }
     if (active_fdn_ != nullptr)
     {
         RenderClip();
     }
-    return input_;
+    return input;
 }
 
 void AudioRuntime::Process(std::span<float> output_buffer, std::size_t frame_size, std::size_t num_channels) noexcept
 {
-    if (frame_size != kSystemBlockSize || output_buffer.size() < frame_size * num_channels)
+    if (frame_size != frame_size_ || output_buffer.size() < frame_size * num_channels)
     {
         return;
     }
@@ -75,14 +88,17 @@ void AudioRuntime::Process(std::span<float> output_buffer, std::size_t frame_siz
     const ProcessingTimes processing_times = ProcessEngines();
     DetectInstability();
 
+    const std::span<float> fdn_output = std::span<float>(fdn_output_).first(frame_size);
+    const std::span<float> convolution_output = std::span<float>(convolution_output_).first(frame_size);
+
     const ReverbEngine reverb_engine = reverb_engine_.load(std::memory_order_relaxed);
     if (last_reverb_engine_ == ReverbEngine::Fdn && reverb_engine == ReverbEngine::Convolution)
     {
-        Crossfade(convolution_output_, fdn_output_, convolution_output_);
+        Crossfade(convolution_output, fdn_output, convolution_output);
     }
     else if (last_reverb_engine_ == ReverbEngine::Convolution && reverb_engine == ReverbEngine::Fdn)
     {
-        Crossfade(fdn_output_, convolution_output_, fdn_output_);
+        Crossfade(fdn_output, convolution_output, fdn_output);
     }
     last_reverb_engine_ = reverb_engine;
 
@@ -94,8 +110,7 @@ void AudioRuntime::Process(std::span<float> output_buffer, std::size_t frame_siz
     }
 
     PrepareMix(reverb_engine);
-    std::span<float> output =
-        reverb_engine == ReverbEngine::Fdn ? std::span<float>(fdn_output_) : std::span<float>(convolution_output_);
+    std::span<float> output = reverb_engine == ReverbEngine::Fdn ? fdn_output : convolution_output;
     const float wet = reverb_engine == ReverbEngine::Fdn ? fdn_wet_.load(std::memory_order_relaxed)
                                                          : convolution_wet_.load(std::memory_order_relaxed);
     const float dry = reverb_engine == ReverbEngine::Fdn ? fdn_dry_.load(std::memory_order_relaxed) : 0.0f;
@@ -224,6 +239,11 @@ bool AudioRuntime::ConsumeClipped() noexcept
     return meter_clipped_.exchange(false, std::memory_order_relaxed);
 }
 
+std::size_t AudioRuntime::GetDeviceBlockSize() const noexcept
+{
+    return device_block_size_.load(std::memory_order_relaxed);
+}
+
 bool AudioRuntime::ApplyCommand(AudioCommand& command) noexcept
 {
     return std::visit(
@@ -250,29 +270,13 @@ bool AudioRuntime::ApplyCommand(AudioCommand& command) noexcept
                 {
                     return true;
                 }
-                if (value.value->GetBlockSize() != kSystemBlockSize)
-                {
-                    if (!handoff_.TryRetire(active_convolver_))
-                    {
-                        return false;
-                    }
-                    const std::size_t actual_block_size = value.value->GetBlockSize();
-                    if (!handoff_.TryRetire(value.value))
-                    {
-                        return false;
-                    }
-                    PublishEvent({
-                        .kind = AudioEventKind::ConvolverBlockSizeMismatch,
-                        .actual = actual_block_size,
-                        .expected = kSystemBlockSize,
-                    });
-                    return true;
-                }
                 if (!handoff_.TryRetire(active_convolver_))
                 {
                     return false;
                 }
                 active_convolver_ = std::move(value.value);
+                last_reported_convolver_block_size_ = 0;
+                convolution_adapter_.Reset();
                 return true;
             }
             else if constexpr (std::is_same_v<Command, InstallClip>)
@@ -348,13 +352,14 @@ void AudioRuntime::RenderClip() noexcept
     }
 
     std::size_t output_offset = 0;
-    while (output_offset < input_.size())
+    const std::span<float> input = InputBlock();
+    while (output_offset < input.size())
     {
         const std::size_t available = active_clip_->samples.size() - clip_cursor_;
-        const std::size_t count = std::min(input_.size() - output_offset, available);
+        const std::size_t count = std::min(input.size() - output_offset, available);
         for (std::size_t sample = 0; sample < count; ++sample)
         {
-            input_[output_offset + sample] += active_clip_->samples[clip_cursor_ + sample];
+            input[output_offset + sample] += active_clip_->samples[clip_cursor_ + sample];
         }
         output_offset += count;
         clip_cursor_ += count;
@@ -378,14 +383,16 @@ void AudioRuntime::RenderClip() noexcept
 
 AudioRuntime::ProcessingTimes AudioRuntime::ProcessEngines() noexcept
 {
-    const sfFDN::AudioBuffer input_buffer(kSystemBlockSize, 1, input_);
-    sfFDN::AudioBuffer fdn_output_buffer(kSystemBlockSize, 1, fdn_output_);
-    sfFDN::AudioBuffer convolution_output_buffer(kSystemBlockSize, 1, convolution_output_);
+    const auto block_size = static_cast<std::uint32_t>(frame_size_);
+    const sfFDN::AudioBuffer input_buffer(block_size, 1, InputBlock());
+    sfFDN::AudioBuffer fdn_output_buffer(block_size, 1, std::span<float>(fdn_output_).first(frame_size_));
+    sfFDN::AudioBuffer convolution_output_buffer(block_size, 1,
+                                                 std::span<float>(convolution_output_).first(frame_size_));
 
     const auto convolution_start = std::chrono::steady_clock::now();
     if (active_convolver_ != nullptr)
     {
-        active_convolver_->Process(input_buffer, convolution_output_buffer);
+        ProcessConvolution(input_buffer, convolution_output_buffer);
     }
     const auto convolution_end = std::chrono::steady_clock::now();
 
@@ -400,9 +407,49 @@ AudioRuntime::ProcessingTimes AudioRuntime::ProcessEngines() noexcept
     };
 }
 
+void AudioRuntime::ProcessConvolution(const sfFDN::AudioBuffer& input, sfFDN::AudioBuffer& output) noexcept
+{
+    const std::size_t convolver_block_size = active_convolver_->GetBlockSize();
+    if (convolver_block_size != convolution_adapter_.BlockSize())
+    {
+        // The convolver is always built at kConvolutionBlockSize, so this only happens if that
+        // invariant is broken. Report once and leave the convolution path silent.
+        if (convolver_block_size != last_reported_convolver_block_size_)
+        {
+            last_reported_convolver_block_size_ = convolver_block_size;
+            PublishEvent({
+                .kind = AudioEventKind::ConvolverBlockSizeMismatch,
+                .actual = convolver_block_size,
+                .expected = convolution_adapter_.BlockSize(),
+            });
+        }
+        return;
+    }
+    last_reported_convolver_block_size_ = 0;
+
+    // Fast path: the device already hands us exactly one convolution block, so no buffering and no
+    // extra latency are needed.
+    if (frame_size_ == convolver_block_size)
+    {
+        active_convolver_->Process(input, output);
+        return;
+    }
+
+    const auto block_size = static_cast<std::uint32_t>(convolver_block_size);
+    convolution_adapter_.Process(
+        input.GetChannelSpan(0), output.GetChannelSpan(0),
+        [this, block_size](std::span<const float> block_in, std::span<float> block_out) noexcept {
+            std::ranges::copy(block_in, convolution_scratch_.begin());
+            const sfFDN::AudioBuffer block_input(block_size, 1, convolution_scratch_);
+            sfFDN::AudioBuffer block_output(block_size, 1, block_out);
+            active_convolver_->Process(block_input, block_output);
+        });
+}
+
 void AudioRuntime::DetectInstability() noexcept
 {
-    if (!std::ranges::any_of(fdn_output_, [](float sample) { return std::abs(sample) > 5.0f; }))
+    const std::span<const float> fdn_output = std::span<const float>(fdn_output_).first(frame_size_);
+    if (!std::ranges::any_of(fdn_output, [](float sample) { return std::abs(sample) > 5.0f; }))
     {
         return;
     }
@@ -432,14 +479,14 @@ void AudioRuntime::PrepareMix(ReverbEngine engine) noexcept
     }
     direct_delay_.SetDelay(delay_samples);
 
-    sfFDN::AudioBuffer input_buffer(kSystemBlockSize, 1, input_);
+    sfFDN::AudioBuffer input_buffer(static_cast<std::uint32_t>(frame_size_), 1, InputBlock());
     direct_delay_.Process(input_buffer, input_buffer);
 }
 
 void AudioRuntime::MixMeterAndWrite(std::span<float> output_buffer, std::span<float> output, std::size_t num_channels,
                                     float wet, float dry) noexcept
 {
-    Mix(output, input_, {.output_gain = output_gain_.load(std::memory_order_relaxed), .wet = wet, .dry = dry});
+    Mix(output, InputBlock(), {.output_gain = output_gain_.load(std::memory_order_relaxed), .wet = wet, .dry = dry});
     const MeterReading reading = output_meter_.Measure(output);
     AddMonoToInterleaved(output_buffer, output, num_channels);
     meter_rms_.store(reading.rms, std::memory_order_relaxed);
@@ -457,8 +504,7 @@ void AudioRuntime::MixMeterAndWrite(std::span<float> output_buffer, std::span<fl
 
 void AudioRuntime::UpdateCpuUsage(std::int64_t duration_ns) noexcept
 {
-    const CpuUsageReading cpu_usage =
-        cpu_average_.Push(duration_ns, kSystemBlockSize, static_cast<float>(sample_rate_));
+    const CpuUsageReading cpu_usage = cpu_average_.Push(duration_ns, frame_size_, static_cast<float>(sample_rate_));
     cpu_usage_.store(cpu_usage.average, std::memory_order_relaxed);
 
     if (duration_ns <= 0 || static_cast<std::uint64_t>(duration_ns) <= cpu_highwater_mark_ns_)

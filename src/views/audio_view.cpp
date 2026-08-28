@@ -319,7 +319,17 @@ void AudioView::DrawAudioStreamStatus(audio::AudioEngine& engine)
 
     const auto audio_stream_info = engine.GetStreamInfo();
     ImGui::Text("Sample Rate: %d", audio_stream_info.sample_rate);
-    ImGui::Text("Buffer Size: %d", audio_stream_info.buffer_size);
+    // Devices may deliver a different block size than the one negotiated, so prefer the size the
+    // audio callback actually reports once it has run.
+    const std::size_t device_block_size = engine.GetDeviceBlockSize();
+    if (device_block_size != 0)
+    {
+        ImGui::Text("Buffer Size: %zu", device_block_size);
+    }
+    else
+    {
+        ImGui::Text("Buffer Size: %d", audio_stream_info.buffer_size);
+    }
     ImGui::Text("Num Output Channels: %d", audio_stream_info.num_output_channels);
 
     if (ImGui::Checkbox("Play Test Tone", &device_ui_.play_test_tone))
