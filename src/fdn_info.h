@@ -10,6 +10,7 @@ bool GetInputAndOutputGains(const sfFDN::FDN* fdn, std::vector<float>& input_gai
 
 bool GetDelays(const sfFDN::FDN* fdn, std::vector<uint32_t>& delays);
 
-bool GetFeedbackMatrix(const sfFDN::FDN* fdn, std::vector<float>& feedback_matrix, uint32_t& N);
+bool GetFeedbackMatrix(const sfFDN::FDN* fdn, std::vector<float>& feedback_matrix, uint32_t& N,
+                       uint64_t sample_index = 0);
 
 } // namespace fdn_info

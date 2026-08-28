@@ -27,9 +27,7 @@ void FdnInfoView::Draw(const session::FdnSession& session, analysis::AnalysisWor
         return;
     }
 
-    const std::string matrix_name =
-        std::visit([](const auto& matrix_options) { return utils::GetMatrixName(matrix_options.type); },
-                   session.Draft().feedback_matrix_config);
+    const std::string matrix_name = utils::GetFeedbackMatrixName(session.Draft().feedback_matrix_config);
     const auto& delays = session.Draft().delay_bank_config.delays;
     float min_delay = 0.0f;
     float max_delay = 0.0f;

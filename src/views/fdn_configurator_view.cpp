@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <type_traits>
@@ -89,23 +90,67 @@ bool DrawAttenuationFilterType(sfFDN::attenuation_filter_variant_t& filter)
     return true;
 }
 
-sfFDN::feedback_matrix_variant_t ConvertFeedbackMatrix(const sfFDN::feedback_matrix_variant_t& matrix, bool cascaded)
+enum class FeedbackMatrixKind : int
 {
-    return std::visit(
-        [cascaded](const auto& options) -> sfFDN::feedback_matrix_variant_t {
-            if (cascaded)
+    Scalar = 0,
+    Cascaded = 1,
+    TimeVarying = 2,
+};
+
+FeedbackMatrixKind GetFeedbackMatrixKind(const sfFDN::feedback_matrix_variant_t& matrix)
+{
+    if (std::holds_alternative<sfFDN::CascadedFeedbackMatrixOptions>(matrix))
+    {
+        return FeedbackMatrixKind::Cascaded;
+    }
+    if (std::holds_alternative<sfFDN::TimeVaryingFeedbackMatrixOptions>(matrix))
+    {
+        return FeedbackMatrixKind::TimeVarying;
+    }
+    return FeedbackMatrixKind::Scalar;
+}
+
+sfFDN::feedback_matrix_variant_t ConvertFeedbackMatrix(const sfFDN::feedback_matrix_variant_t& matrix,
+                                                       FeedbackMatrixKind kind, float sample_rate)
+{
+    // The scalar-family types share matrix_size and type; the time-varying options share neither a scalar type nor
+    // any modulation state with them, so conversion in either direction rebuilds from defaults.
+    const auto matrix_size = std::visit([](const auto& options) { return options.matrix_size; }, matrix);
+    const auto scalar_type = std::visit(
+        [matrix_size](const auto& options) {
+            using T = std::decay_t<decltype(options)>;
+            if constexpr (std::is_same_v<T, sfFDN::TimeVaryingFeedbackMatrixOptions>)
             {
-                sfFDN::CascadedFeedbackMatrixOptions converted;
-                converted.matrix_size = options.matrix_size;
-                converted.type = options.type;
-                return converted;
+                return utils::IsPowerOfTwo(matrix_size) ? sfFDN::ScalarMatrixType::Hadamard
+                                                        : sfFDN::ScalarMatrixType::Random;
             }
-            sfFDN::ScalarFeedbackMatrixOptions converted;
-            converted.matrix_size = options.matrix_size;
-            converted.type = options.type;
-            return converted;
+            else
+            {
+                return options.type;
+            }
         },
         matrix);
+
+    switch (kind)
+    {
+    case FeedbackMatrixKind::Cascaded:
+    {
+        sfFDN::CascadedFeedbackMatrixOptions converted;
+        converted.matrix_size = matrix_size;
+        converted.type = scalar_type;
+        return converted;
+    }
+    case FeedbackMatrixKind::TimeVarying:
+        return utils::MakeTimeVaryingFeedbackMatrix(matrix_size, sample_rate);
+    case FeedbackMatrixKind::Scalar:
+    default:
+    {
+        sfFDN::ScalarFeedbackMatrixOptions converted;
+        converted.matrix_size = matrix_size;
+        converted.type = scalar_type;
+        return converted;
+    }
+    }
 }
 } // namespace
 
@@ -198,7 +243,19 @@ void FdnConfiguratorView::DrawVisualOverviewSection(session::FdnSession& session
         constexpr int kMaxDelay = 6000;
         DrawInputOutputGainsPlot(session.Draft(), session.Preview());
         DrawDelaysPlot(session.Draft(), kMaxDelay);
-        DrawFeedbackMatrixPlot(session.Draft(), session.Preview(), widget_state_.feedback_matrix);
+
+        // Drive the time-varying matrix animation from wall-clock time so the heatmap modulates at the rate the user
+        // configured. The preview FDN is UI-owned and never processed, so nothing else advances its notion of time.
+        const float sample_rate = session.Draft().sample_rate;
+        const float frame_delta = ImGui::GetIO().DeltaTime;
+        if (sample_rate > 0.0f && std::isfinite(frame_delta) && frame_delta > 0.0f)
+        {
+            widget_state_.feedback_matrix_animation_samples +=
+                static_cast<double>(sample_rate) * static_cast<double>(frame_delta);
+        }
+
+        DrawFeedbackMatrixPlot(session.Draft(), session.Preview(), widget_state_.feedback_matrix,
+                               static_cast<uint64_t>(widget_state_.feedback_matrix_animation_samples));
     }
     fdn_sandbox::theme::EndSection();
 }
@@ -249,12 +306,36 @@ bool FdnConfiguratorView::DrawFeedbackMatrixSection(session::FdnSession& session
 
     bool changed = false;
     auto& fdn_config = session.Draft();
-    bool is_cascaded = std::holds_alternative<sfFDN::CascadedFeedbackMatrixOptions>(fdn_config.feedback_matrix_config);
-    if (ImGui::Checkbox("Cascaded", &is_cascaded))
+    constexpr std::array<const char*, 3> kMatrixKindNames = {"Scalar", "Cascaded", "Time-Varying"};
+    const auto current_kind = GetFeedbackMatrixKind(fdn_config.feedback_matrix_config);
+    // A time-varying matrix is orthogonal by construction from 2x2 rotations, which an odd order cannot supply.
+    const bool time_varying_supported = fdn_config.fdn_size >= 2 && (fdn_config.fdn_size % 2) == 0;
+
+    // Labelled "Implementation" rather than "Matrix Type": the scalar and cascaded editors below already draw a
+    // "Matrix Type" combo for the ScalarMatrixType, and ImGui derives widget IDs from labels, so reusing the label
+    // makes the two collide. "Structure" is taken as well, by the section tree node above.
+    if (ImGui::BeginCombo("Implementation", kMatrixKindNames.at(static_cast<size_t>(current_kind))))
     {
-        changed = true;
-        fdn_config.feedback_matrix_config = ConvertFeedbackMatrix(fdn_config.feedback_matrix_config, is_cascaded);
+        for (size_t index = 0; index < kMatrixKindNames.size(); ++index)
+        {
+            const auto kind = static_cast<FeedbackMatrixKind>(index);
+            const bool selectable = kind != FeedbackMatrixKind::TimeVarying || time_varying_supported;
+            if (ImGui::Selectable(kMatrixKindNames.at(index), kind == current_kind,
+                                  selectable ? ImGuiSelectableFlags_None : ImGuiSelectableFlags_Disabled) &&
+                kind != current_kind)
+            {
+                fdn_config.feedback_matrix_config =
+                    ConvertFeedbackMatrix(fdn_config.feedback_matrix_config, kind, fdn_config.sample_rate);
+                changed = true;
+            }
+            if (!selectable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("A time-varying matrix requires an even FDN size.");
+            }
+        }
+        ImGui::EndCombo();
     }
+
     changed |= DrawFDNOptions(fdn_config.feedback_matrix_config, fdn_config, widget_state_);
     fdn_sandbox::theme::EndSection();
     return changed;

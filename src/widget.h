@@ -10,7 +10,8 @@
 
 void DrawInputOutputGainsPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn);
 void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay);
-void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn, std::vector<float>& feedback_matrix);
+void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn, std::vector<float>& feedback_matrix,
+                            uint64_t sample_index = 0);
 bool DrawGainsWidget(std::span<float> gains, float& min_gain, float& max_gain, float& set_all_value);
 
 struct ThreeBandDesignerData

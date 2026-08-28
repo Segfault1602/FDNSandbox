@@ -600,7 +600,8 @@ void DrawDelaysPlot(const sfFDN::FDNConfig& config, uint32_t max_delay)
     }
 }
 
-void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn, std::vector<float>& feedback_matrix)
+void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn, std::vector<float>& feedback_matrix,
+                            uint64_t sample_index)
 {
     constexpr ImPlotColormap feedback_matrix_colormap = ImPlotColormap_RdBu;
 
@@ -611,7 +612,7 @@ void DrawFeedbackMatrixPlot(const sfFDN::FDNConfig& config, sfFDN::FDN* fdn, std
     {
         uint32_t matrix_size{0};
         feedback_matrix.resize(matrix_count);
-        if (!fdn_info::GetFeedbackMatrix(fdn, feedback_matrix, matrix_size))
+        if (!fdn_info::GetFeedbackMatrix(fdn, feedback_matrix, matrix_size, sample_index))
         {
             feedback_matrix.clear();
         }

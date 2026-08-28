@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <random>
 #include <ranges>
 #include <span>
 #include <string>
@@ -379,6 +380,59 @@ sfFDN::ModulationOptions MakeDefaultDelayModulation(uint32_t channel_index, uint
     };
 }
 
+// Schlecht and Habets (2015) recommend roughly 1 Hz per rotation block, an amplitude near 0.7, random initial
+// phases, and per-block frequencies spread by about +/-50%. Modulating every block synchronously produces easily
+// perceivable beating, so the spread and the phase scatter are load-bearing rather than cosmetic.
+constexpr float kMatrixModulationBaseFrequencyHz = 1.0f;
+constexpr float kMatrixModulationFrequencySpread = 0.5f;
+constexpr float kMatrixModulationAmplitude = 0.7f;
+// Above roughly 4 Hz the modulation stops sounding smooth and turns into audible detuning.
+constexpr float kMatrixModulationMaximumFrequencyHz = 4.0f;
+
+sfFDN::ModulationOptions ClampMatrixModulation(const sfFDN::ModulationOptions& modulation, float sample_rate)
+{
+    const float maximum_frequency = sample_rate > 0.0f ? kMatrixModulationMaximumFrequencyHz / sample_rate : 0.0f;
+
+    sfFDN::ModulationOptions normalized{};
+    normalized.frequency =
+        std::isfinite(modulation.frequency) ? std::clamp(modulation.frequency, 0.0f, maximum_frequency) : 0.0f;
+    // sfFDN multiplies the amplitude by pi exactly once, and rejects anything outside [-1, 1].
+    normalized.amplitude = std::isfinite(modulation.amplitude) ? std::clamp(modulation.amplitude, -1.0f, 1.0f) : 0.0f;
+    normalized.initial_phase =
+        std::isfinite(modulation.initial_phase) ? std::clamp(modulation.initial_phase, 0.0f, 1.0f) : 0.0f;
+    return normalized;
+}
+
+std::vector<sfFDN::ModulationOptions> MakeDefaultMatrixModulation(uint32_t block_count, float sample_rate)
+{
+    std::vector<sfFDN::ModulationOptions> config(block_count);
+    if (block_count == 0)
+    {
+        return config;
+    }
+
+    // A fixed seed keeps a given FDN size reproducible across sessions and saved configurations.
+    std::mt19937 generator(0x7A11CE5Du);
+    std::uniform_real_distribution<float> phase_distribution(0.0f, 1.0f);
+
+    for (uint32_t block = 0; block < block_count; ++block)
+    {
+        const float position = block_count > 1 ? static_cast<float>(block) / static_cast<float>(block_count - 1) : 0.5f;
+        const float spread = ((2.0f * position) - 1.0f) * kMatrixModulationFrequencySpread;
+        const float frequency_hz = kMatrixModulationBaseFrequencyHz * (1.0f + spread);
+
+        config[block] = ClampMatrixModulation(
+            sfFDN::ModulationOptions{
+                .frequency = sample_rate > 0.0f ? frequency_hz / sample_rate : 0.0f,
+                .amplitude = kMatrixModulationAmplitude,
+                .initial_phase = phase_distribution(generator),
+            },
+            sample_rate);
+    }
+
+    return config;
+}
+
 uint32_t RequiredMaximumDelay(const sfFDN::DelayBankTimeVaryingOptions& config)
 {
     constexpr uint32_t kAlignment = 64;
@@ -520,6 +574,127 @@ sfFDN::DelayBankTimeVaryingOptions MakeTimeVaryingDelayBank(uint32_t channel_cou
     NormalizeTimeVaryingDelayBank(
         config, {.channel_count = channel_count, .sample_rate = sample_rate, .new_delay = base_delay});
     return config;
+}
+
+uint32_t GetTimeVaryingRotationBlockCount(const sfFDN::TimeVaryingFeedbackMatrixOptions& config)
+{
+    if (config.mode == sfFDN::TimeVaryingMatrixMode::Hadamard)
+    {
+        return IsPowerOfTwo(config.matrix_size) ? config.matrix_size / 2 : 0;
+    }
+
+    if (config.matrix_size < 2 || (config.matrix_size % 2) != 0)
+    {
+        return 0;
+    }
+
+    // RealSchur derives its rotation blocks from a basis built at construction time, so the count cannot be computed
+    // from the options alone. Probe with modulation disabled to avoid the per-block validation.
+    try
+    {
+        const sfFDN::TimeVaryingFeedbackMatrix probe(
+            sfFDN::TimeVaryingFeedbackMatrixOptions{.matrix_size = config.matrix_size,
+                                                    .mode = config.mode,
+                                                    .time_varying_config = {},
+                                                    .rng_seed = config.rng_seed});
+        return probe.RotationBlockCount();
+    }
+    catch (const std::exception& error)
+    {
+        LOG_WARNING(Settings::Instance().GetLogger(), "Failed to probe time-varying matrix rotation blocks: {}",
+                    error.what());
+        return 0;
+    }
+}
+
+bool NormalizeTimeVaryingMatrixOptions(sfFDN::TimeVaryingFeedbackMatrixOptions& config, uint32_t fdn_size,
+                                       float sample_rate, std::optional<uint32_t> known_block_count)
+{
+    bool changed = false;
+
+    if (config.matrix_size != fdn_size)
+    {
+        config.matrix_size = fdn_size;
+        changed = true;
+        known_block_count.reset();
+    }
+
+    // Hadamard construction is only defined for power-of-two orders; RealSchur accepts any even order.
+    if (config.mode == sfFDN::TimeVaryingMatrixMode::Hadamard && !IsPowerOfTwo(config.matrix_size))
+    {
+        config.mode = sfFDN::TimeVaryingMatrixMode::RealSchur;
+        changed = true;
+        known_block_count.reset();
+    }
+
+    const uint32_t block_count =
+        known_block_count.has_value() ? *known_block_count : GetTimeVaryingRotationBlockCount(config);
+    if (block_count == 0)
+    {
+        changed |= !config.time_varying_config.empty();
+        config.time_varying_config.clear();
+        return changed;
+    }
+
+    // An empty config is the library's "modulation off" state, so leave it alone rather than switching it on.
+    if (config.time_varying_config.empty())
+    {
+        return changed;
+    }
+
+    const size_t previous_count = config.time_varying_config.size();
+    if (previous_count != block_count)
+    {
+        config.time_varying_config.resize(block_count);
+        changed = true;
+    }
+
+    const auto defaults = MakeDefaultMatrixModulation(block_count, sample_rate);
+    for (size_t index = 0; index < config.time_varying_config.size(); ++index)
+    {
+        auto& modulation = config.time_varying_config[index];
+        if (index >= previous_count)
+        {
+            modulation = defaults[index];
+            continue;
+        }
+
+        const sfFDN::ModulationOptions normalized = ClampMatrixModulation(modulation, sample_rate);
+        changed |= normalized.frequency != modulation.frequency || normalized.amplitude != modulation.amplitude ||
+                   normalized.initial_phase != modulation.initial_phase;
+        modulation = normalized;
+    }
+
+    return changed;
+}
+
+sfFDN::TimeVaryingFeedbackMatrixOptions MakeTimeVaryingFeedbackMatrix(uint32_t fdn_size, float sample_rate)
+{
+    sfFDN::TimeVaryingFeedbackMatrixOptions config{
+        .matrix_size = fdn_size,
+        .mode =
+            IsPowerOfTwo(fdn_size) ? sfFDN::TimeVaryingMatrixMode::Hadamard : sfFDN::TimeVaryingMatrixMode::RealSchur,
+        .time_varying_config = {},
+        .rng_seed = 0,
+    };
+
+    const uint32_t block_count = GetTimeVaryingRotationBlockCount(config);
+    config.time_varying_config = MakeDefaultMatrixModulation(block_count, sample_rate);
+    return config;
+}
+
+std::string GetFeedbackMatrixName(const sfFDN::feedback_matrix_variant_t& matrix_variant)
+{
+    return std::visit(
+        overloaded{
+            [](const sfFDN::CascadedFeedbackMatrixOptions& config) { return "Cascaded " + GetMatrixName(config.type); },
+            [](const sfFDN::ScalarFeedbackMatrixOptions& config) { return GetMatrixName(config.type); },
+            [](const sfFDN::TimeVaryingFeedbackMatrixOptions& config) {
+                return std::string("Time-Varying (") +
+                       (config.mode == sfFDN::TimeVaryingMatrixMode::Hadamard ? "Hadamard" : "RealSchur") + ")";
+            },
+        },
+        matrix_variant);
 }
 
 bool NormalizeGraphicEq(sfFDN::GraphicEQOptions& config, float sample_rate)
@@ -723,24 +898,41 @@ void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size)
         ResizeMultichannelProcessorConfigs(processor_variant, new_size, config.sample_rate);
     }
 
-    std::visit(
-        [new_size](auto&& feedback_matrix_config) {
-            feedback_matrix_config.matrix_size = new_size;
-            if (feedback_matrix_config.type == sfFDN::ScalarMatrixType::Hadamard && !IsPowerOfTwo(new_size))
-            {
-                feedback_matrix_config.type = sfFDN::ScalarMatrixType::Random;
-            }
+    const auto demote_hadamard = [new_size](sfFDN::ScalarMatrixType& type) {
+        if (type == sfFDN::ScalarMatrixType::Hadamard && !IsPowerOfTwo(new_size))
+        {
+            type = sfFDN::ScalarMatrixType::Random;
+        }
+    };
 
-            using T = std::decay_t<decltype(feedback_matrix_config)>;
-            if constexpr (std::is_same_v<T, sfFDN::ScalarFeedbackMatrixOptions>)
-            {
-                if (feedback_matrix_config.custom_matrix.has_value())
-                {
-                    feedback_matrix_config.custom_matrix = sfFDN::GenerateMatrix(new_size, feedback_matrix_config.type);
-                }
-            }
-        },
-        config.feedback_matrix_config);
+    std::visit(overloaded{
+                   [&](sfFDN::CascadedFeedbackMatrixOptions& matrix_config) {
+                       matrix_config.matrix_size = new_size;
+                       demote_hadamard(matrix_config.type);
+                   },
+                   [&](sfFDN::ScalarFeedbackMatrixOptions& matrix_config) {
+                       matrix_config.matrix_size = new_size;
+                       demote_hadamard(matrix_config.type);
+                       if (matrix_config.custom_matrix.has_value())
+                       {
+                           matrix_config.custom_matrix = sfFDN::GenerateMatrix(new_size, matrix_config.type);
+                       }
+                   },
+                   [&](sfFDN::TimeVaryingFeedbackMatrixOptions& matrix_config) {
+                       // A time-varying matrix cannot be built at an odd order at all: an odd-dimensional orthogonal
+                       // matrix always has a static real eigenvalue, so sfFDN rejects it. Fall back to a scalar
+                       // matrix rather than leaving behind a configuration that throws at build time.
+                       if (new_size < 2 || (new_size % 2) != 0)
+                       {
+                           sfFDN::ScalarFeedbackMatrixOptions replacement{.matrix_size = new_size};
+                           demote_hadamard(replacement.type);
+                           config.feedback_matrix_config = replacement;
+                           return;
+                       }
+                       NormalizeTimeVaryingMatrixOptions(matrix_config, new_size, config.sample_rate);
+                   },
+               },
+               config.feedback_matrix_config);
 }
 
 std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& processor_variant)

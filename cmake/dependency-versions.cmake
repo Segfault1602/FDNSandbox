@@ -6,5 +6,8 @@ set(FDN_SANDBOX_IMPLOT_REVISION 524f9fcd48d76c13fdf94c5ffbba8787a1ff7e39)
 set(FDN_SANDBOX_IMPLOT3D_REVISION 41ae3e447c0de20ecab95d38a4b4dc0835a3efc2)
 set(FDN_SANDBOX_IMGUI_FILEBROWSER_REVISION 47a1884524d6a3df5d99f70ecc82e1ed0ccd26cf)
 set(FDN_SANDBOX_AUDIO_UTILS_REVISION d29158ffd84824f8e6b2e140e3200110670f71df)
+# TODO: Time-varying feedback matrix support requires the sfFDN `time-varying-matrix` branch, which is not yet
+# pushed. Until it is, build with `CPM_sfFDN_SOURCE` pointing at a local checkout (see CMakeUserPresets.json), then
+# bump this revision to the pushed commit.
 set(FDN_SANDBOX_SFFDN_REVISION 44ca6b55f444e04a42c2133348f29fc71c532f5d)
 set(FDN_SANDBOX_FDN_OPT_REVISION 03085af60c65f6fa6b22b58ac4402e27c47c61cd)

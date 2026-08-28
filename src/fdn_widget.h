@@ -1,5 +1,6 @@
 #pragma once
 
+#include "utils.h"
 #include "widget.h"
 
 #include <imgui.h>
@@ -34,6 +35,32 @@ struct GraphicEqEditorState
     bool show_response = true;
 };
 
+/// Caches the rotation block count of a time-varying feedback matrix.
+///
+/// RealSchur mode derives its blocks from a basis built at construction, so learning the count costs a Schur
+/// decomposition plus a Householder QR. That is far too expensive to repeat every frame, hence the cache.
+struct TimeVaryingMatrixBlockCache
+{
+    uint32_t matrix_size = 0;
+    sfFDN::TimeVaryingMatrixMode mode = sfFDN::TimeVaryingMatrixMode::Hadamard;
+    uint32_t rng_seed = 0;
+    uint32_t block_count = 0;
+    bool valid = false;
+
+    uint32_t Get(const sfFDN::TimeVaryingFeedbackMatrixOptions& config)
+    {
+        if (!valid || matrix_size != config.matrix_size || mode != config.mode || rng_seed != config.rng_seed)
+        {
+            matrix_size = config.matrix_size;
+            mode = config.mode;
+            rng_seed = config.rng_seed;
+            block_count = utils::GetTimeVaryingRotationBlockCount(config);
+            valid = true;
+        }
+        return block_count;
+    }
+};
+
 /// Per-configurator state used by FDN option widgets and embedded file pickers.
 struct FDNWidgetState
 {
@@ -60,6 +87,12 @@ struct FDNWidgetState
     std::size_t velvet_file = 0;
     std::uint32_t velvet_channel = 0;
     std::vector<float> feedback_matrix;
+    TimeVaryingMatrixBlockCache time_varying_matrix_blocks;
+    /// Wall-clock-driven sample counter used to animate the time-varying feedback matrix heatmap.
+    ///
+    /// Advanced by `sample_rate * frame_delta` rather than one sample per frame, so a 1 Hz LFO visibly completes one
+    /// cycle per second. A double holds sample counts exactly past any plausible session length.
+    double feedback_matrix_animation_samples = 0.0;
 };
 
 /// Dispatches an FDN option variant to its matching ImGui editor.
@@ -70,6 +103,7 @@ struct FDNWidgetVisitor
 
     bool operator()(sfFDN::ScalarFeedbackMatrixOptions& config) const;
     bool operator()(sfFDN::CascadedFeedbackMatrixOptions& config) const;
+    bool operator()(sfFDN::TimeVaryingFeedbackMatrixOptions& config) const;
     bool operator()(sfFDN::ModulationOptions& config) const;
     bool operator()(sfFDN::ParallelGainsOptions& config) const;
     bool operator()(sfFDN::DelayOptions& config) const;

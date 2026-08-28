@@ -406,6 +406,77 @@ void DrawGraphicEqResponse(const sfFDN::GraphicEQOptions& config, GraphicEqEdito
     ImPlot::EndPlot();
 }
 
+struct ModulationTableSpec
+{
+    const char* table_id;
+    const char* index_column_label;
+    float sample_rate;
+    float maximum_frequency_hz;
+    float minimum_amplitude;
+    // Equal to minimum_amplitude means "unbounded above", matching ImGui's DragFloat convention.
+    float maximum_amplitude;
+};
+
+bool DrawModulationTable(std::span<sfFDN::ModulationOptions> modulations, const ModulationTableSpec& spec)
+{
+    if (!ImGui::BeginTable(spec.table_id, 4,
+                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+    {
+        return false;
+    }
+
+    ImGui::TableSetupColumn(spec.index_column_label, ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("Frequency");
+    ImGui::TableSetupColumn("Amplitude");
+    ImGui::TableSetupColumn("Phase");
+    ImGui::TableHeadersRow();
+
+    bool config_changed = false;
+    for (size_t index = 0; index < modulations.size(); ++index)
+    {
+        auto& modulation = modulations[index];
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%zu", index + 1);
+
+        ImGui::TableSetColumnIndex(1);
+        const float stored_frequency_hz = modulation.frequency * spec.sample_rate;
+        float frequency_hz = std::clamp(stored_frequency_hz, 0.0f, spec.maximum_frequency_hz);
+        const bool frequency_changed =
+            ImGui::DragFloat("##Frequency", &frequency_hz, 0.01f, 0.0f, spec.maximum_frequency_hz, "%.2f Hz",
+                             ImGuiSliderFlags_AlwaysClamp);
+        modulation.frequency = spec.sample_rate > 0.0f ? frequency_hz / spec.sample_rate : 0.0f;
+        config_changed |= frequency_changed || frequency_hz != stored_frequency_hz;
+
+        ImGui::TableSetColumnIndex(2);
+        const auto clamp_amplitude = [&spec](float amplitude) {
+            return spec.maximum_amplitude > spec.minimum_amplitude
+                       ? std::clamp(amplitude, spec.minimum_amplitude, spec.maximum_amplitude)
+                       : std::max(spec.minimum_amplitude, amplitude);
+        };
+        const float stored_amplitude = modulation.amplitude;
+        modulation.amplitude = clamp_amplitude(modulation.amplitude);
+        const bool amplitude_changed = ImGui::DragFloat("##Amplitude", &modulation.amplitude, 0.01f,
+                                                        spec.minimum_amplitude, spec.maximum_amplitude, "%.3f");
+        modulation.amplitude = clamp_amplitude(modulation.amplitude);
+        config_changed |= amplitude_changed || modulation.amplitude != stored_amplitude;
+
+        ImGui::TableSetColumnIndex(3);
+        const float stored_phase = modulation.initial_phase;
+        modulation.initial_phase = std::clamp(modulation.initial_phase, 0.0f, 1.0f);
+        const bool phase_changed = ImGui::DragFloat("##Phase", &modulation.initial_phase, 0.01f, 0.0f, 1.0f, "%.3f",
+                                                    ImGuiSliderFlags_AlwaysClamp);
+        config_changed |= phase_changed || modulation.initial_phase != stored_phase;
+
+        ImGui::PopID();
+    }
+
+    ImGui::EndTable();
+    return config_changed;
+}
+
 bool DrawTimeVaryingGains(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNConfig& fdn_config)
 {
     bool config_changed = false;
@@ -421,55 +492,14 @@ bool DrawTimeVaryingGains(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNC
         return config_changed;
     }
 
-    if (!ImGui::BeginTable("##TimeVaryingGains", 4,
-                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
-    {
-        return config_changed;
-    }
-
-    ImGui::TableSetupColumn("Channel", ImGuiTableColumnFlags_WidthFixed);
-    ImGui::TableSetupColumn("Frequency");
-    ImGui::TableSetupColumn("Amplitude");
-    ImGui::TableSetupColumn("Phase");
-    ImGui::TableHeadersRow();
-
-    constexpr float kMaximumFrequencyHz = 20.0f;
-    for (size_t index = 0; index < config.time_varying_config.size(); ++index)
-    {
-        auto& modulation = config.time_varying_config[index];
-        ImGui::PushID(static_cast<int>(index));
-        ImGui::TableNextRow();
-
-        ImGui::TableSetColumnIndex(0);
-        ImGui::Text("%zu", index + 1);
-
-        ImGui::TableSetColumnIndex(1);
-        const float stored_frequency_hz = modulation.frequency * fdn_config.sample_rate;
-        float frequency_hz = std::clamp(stored_frequency_hz, 0.0f, kMaximumFrequencyHz);
-        const bool frequency_changed = ImGui::DragFloat("##Frequency", &frequency_hz, 0.01f, 0.0f, kMaximumFrequencyHz,
-                                                        "%.2f Hz", ImGuiSliderFlags_AlwaysClamp);
-        modulation.frequency = fdn_config.sample_rate > 0.0f ? frequency_hz / fdn_config.sample_rate : 0.0f;
-        config_changed |= frequency_changed || frequency_hz != stored_frequency_hz;
-
-        ImGui::TableSetColumnIndex(2);
-        const float stored_amplitude = modulation.amplitude;
-        modulation.amplitude = std::max(0.0f, modulation.amplitude);
-        const bool amplitude_changed =
-            ImGui::DragFloat("##Amplitude", &modulation.amplitude, 0.01f, 0.0f, 0.0f, "%.3f");
-        modulation.amplitude = std::max(0.0f, modulation.amplitude);
-        config_changed |= amplitude_changed || modulation.amplitude != stored_amplitude;
-
-        ImGui::TableSetColumnIndex(3);
-        const float stored_phase = modulation.initial_phase;
-        modulation.initial_phase = std::clamp(modulation.initial_phase, 0.0f, 1.0f);
-        const bool phase_changed = ImGui::DragFloat("##Phase", &modulation.initial_phase, 0.01f, 0.0f, 1.0f, "%.3f",
-                                                    ImGuiSliderFlags_AlwaysClamp);
-        config_changed |= phase_changed || modulation.initial_phase != stored_phase;
-
-        ImGui::PopID();
-    }
-
-    ImGui::EndTable();
+    config_changed |= DrawModulationTable(config.time_varying_config, ModulationTableSpec{
+                                                                          .table_id = "##TimeVaryingGains",
+                                                                          .index_column_label = "Channel",
+                                                                          .sample_rate = fdn_config.sample_rate,
+                                                                          .maximum_frequency_hz = 20.0f,
+                                                                          .minimum_amplitude = 0.0f,
+                                                                          .maximum_amplitude = 0.0f,
+                                                                      });
     return config_changed;
 }
 } // namespace
@@ -533,6 +563,107 @@ bool FDNWidgetVisitor::operator()(sfFDN::CascadedFeedbackMatrixOptions& config) 
     {
         config.type = static_cast<sfFDN::ScalarMatrixType>(selected_matrix_type);
     }
+
+    return config_changed;
+}
+
+bool FDNWidgetVisitor::operator()(sfFDN::TimeVaryingFeedbackMatrixOptions& config) const
+{
+    bool config_changed = false;
+    if (config.matrix_size != fdn_config.fdn_size)
+    {
+        config.matrix_size = fdn_config.fdn_size;
+        config_changed = true;
+    }
+
+    const bool power_of_two_size = (config.matrix_size & (config.matrix_size - 1)) == 0 && config.matrix_size != 0;
+
+    constexpr std::array<const char*, 2> kModeNames = {"Hadamard", "RealSchur"};
+    const auto selected_mode_index = static_cast<size_t>(config.mode);
+    if (ImGui::BeginCombo("Mode", kModeNames.at(std::min(selected_mode_index, kModeNames.size() - 1))))
+    {
+        for (size_t index = 0; index < kModeNames.size(); ++index)
+        {
+            const auto mode = static_cast<sfFDN::TimeVaryingMatrixMode>(index);
+            // Hadamard construction only exists for power-of-two orders.
+            const bool selectable = mode != sfFDN::TimeVaryingMatrixMode::Hadamard || power_of_two_size;
+            if (ImGui::Selectable(kModeNames.at(index), index == selected_mode_index,
+                                  selectable ? ImGuiSelectableFlags_None : ImGuiSelectableFlags_Disabled) &&
+                mode != config.mode)
+            {
+                config.mode = mode;
+                config_changed = true;
+            }
+            if (!selectable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("Hadamard mode requires a power-of-two FDN size.");
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if (config.mode == sfFDN::TimeVaryingMatrixMode::RealSchur)
+    {
+        constexpr uint32_t kSeedStep = 1;
+        if (ImGui::InputScalar("RNG Seed", ImGuiDataType_U32, &config.rng_seed, &kSeedStep, nullptr, "%u"))
+        {
+            config_changed = true;
+        }
+        ImGui::SetItemTooltip("Seeds the random orthogonal basis. Zero selects sfFDN's fixed default seed.");
+    }
+
+    const uint32_t block_count = state.time_varying_matrix_blocks.Get(config);
+    if (block_count == 0)
+    {
+        ImGui::TextUnformatted("This FDN size cannot be modulated in the selected mode.");
+        config.time_varying_config.clear();
+        return config_changed;
+    }
+
+    bool modulation_enabled = !config.time_varying_config.empty();
+    if (ImGui::Checkbox("Modulate", &modulation_enabled))
+    {
+        config.time_varying_config =
+            modulation_enabled
+                ? utils::MakeTimeVaryingFeedbackMatrix(config.matrix_size, fdn_config.sample_rate).time_varying_config
+                : std::vector<sfFDN::ModulationOptions>{};
+        config_changed = true;
+    }
+
+    if (!modulation_enabled)
+    {
+        return config_changed;
+    }
+
+    // sfFDN throws unless there is exactly one modulation option per rotation block. Feed the cached count through so
+    // this per-frame path never re-probes the basis.
+    config_changed |=
+        utils::NormalizeTimeVaryingMatrixOptions(config, fdn_config.fdn_size, fdn_config.sample_rate, block_count);
+
+    if (ImGui::Button("Recommended modulation"))
+    {
+        config.time_varying_config =
+            utils::MakeTimeVaryingFeedbackMatrix(config.matrix_size, fdn_config.sample_rate).time_varying_config;
+        config_changed = true;
+    }
+    ImGui::SetItemTooltip("Applies the settings recommended by Schlecht and Habets (2015): roughly 1 Hz per block\n"
+                          "spread by +/-50%%, amplitude 0.7, and scattered initial phases.");
+
+    ImGui::TextUnformatted("Amplitude is a fraction of pi: 0.7 is a peak deviation of ~2.2 rad.");
+
+    if (block_count < config.matrix_size / 2)
+    {
+        ImGui::Text("This basis yields %u rotation blocks; the remaining channels are static.", block_count);
+    }
+
+    config_changed |= DrawModulationTable(config.time_varying_config, ModulationTableSpec{
+                                                                          .table_id = "##TimeVaryingMatrix",
+                                                                          .index_column_label = "Block",
+                                                                          .sample_rate = fdn_config.sample_rate,
+                                                                          .maximum_frequency_hz = 4.0f,
+                                                                          .minimum_amplitude = -1.0f,
+                                                                          .maximum_amplitude = 1.0f,
+                                                                      });
 
     return config_changed;
 }

@@ -223,7 +223,7 @@ bool GetDelays(const sfFDN::FDN* fdn, std::vector<uint32_t>& delays)
     return true;
 }
 
-bool GetFeedbackMatrix(const sfFDN::FDN* fdn, std::vector<float>& feedback_matrix, uint32_t& N)
+bool GetFeedbackMatrix(const sfFDN::FDN* fdn, std::vector<float>& feedback_matrix, uint32_t& N, uint64_t sample_index)
 {
     sfFDN::AudioProcessor* feedback_matrix_processor = fdn->GetFeedbackMatrix();
     if (feedback_matrix_processor == nullptr)
@@ -249,6 +249,14 @@ bool GetFeedbackMatrix(const sfFDN::FDN* fdn, std::vector<float>& feedback_matri
     {
         resize_matrix(filter_matrix->InputChannelCount());
         return filter_matrix->GetFirstMatrix(feedback_matrix);
+    }
+
+    if (auto* time_varying_matrix = dynamic_cast<sfFDN::TimeVaryingFeedbackMatrix*>(feedback_matrix_processor))
+    {
+        resize_matrix(time_varying_matrix->InputChannelCount());
+        // GetMatrix ignores the running LFO phases and derives everything from sample_index, so the caller drives the
+        // animation from its own clock and this stays safe to call while the audio thread is processing.
+        return time_varying_matrix->GetMatrix(feedback_matrix, sample_index);
     }
 
     std::cerr << "[fdn_info::GetFeedbackMatrix]: Feedback matrix processor is not a ScalarFeedbackMatrix or "
