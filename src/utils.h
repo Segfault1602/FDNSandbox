@@ -146,6 +146,25 @@ inline constexpr float kGraphicEqMaximumGainDb = 30.0f;
 bool NormalizeGraphicEq(sfFDN::GraphicEQOptions& config, float sample_rate);
 sfFDN::GraphicEQOptions MakeGraphicEq(float sample_rate);
 
+/// Returns a display name for one of Dattorro's classic delay-line effects.
+std::string GetDattorroEffectName(sfFDN::DattorroEffectType type);
+
+/// Repairs a Dattorro delay configuration so that `sfFDN` will accept it.
+///
+/// `DattorroDelay` throws when the nominal delay is below `kMinimumDelay`, or when the modulation would take the
+/// instantaneous delay below it, and clamps the feedback to keep the recirculating loop stable. Clamping here keeps
+/// the draft config buildable while the user drags the sliders.
+bool NormalizeDattorroDelay(sfFDN::DattorroDelayOptions& config);
+sfFDN::DattorroDelayOptions MakeDattorroDelay(float sample_rate);
+
+/// Resizes a multichannel Dattorro bank to `channel_count` and normalizes every entry.
+///
+/// New channels are cloned from the last existing one so that a bank grown from the UI keeps the character of the
+/// preset it was created from.
+bool NormalizeMultichannelDattorroDelay(sfFDN::MultichannelDattorroDelayOptions& config, uint32_t channel_count,
+                                        float sample_rate);
+sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t channel_count, float sample_rate);
+
 struct Span2D
 {
     std::span<float> data;

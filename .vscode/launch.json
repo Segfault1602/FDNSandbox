@@ -29,6 +29,13 @@
             ]
         },
         {
+            "type": "lldb-dap",
+            "request": "launch",
+            "name": "Debug",
+            "program": "${workspaceFolder}/build/ninja/src/Debug/FDNSandbox",
+            "args": [],
+        },
+        {
             "name": "(Windows) FDNSandbox",
             "type": "cppvsdbg",
             "request": "launch",

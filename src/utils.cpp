@@ -743,6 +743,130 @@ sfFDN::GraphicEQOptions MakeGraphicEq(float sample_rate)
     return config;
 }
 
+std::string GetDattorroEffectName(sfFDN::DattorroEffectType type)
+{
+    switch (type)
+    {
+    case sfFDN::DattorroEffectType::Vibrato:
+        return "Vibrato";
+    case sfFDN::DattorroEffectType::Flanger:
+        return "Flanger";
+    case sfFDN::DattorroEffectType::WhiteChorus:
+        return "White Chorus";
+    case sfFDN::DattorroEffectType::Doubling:
+        return "Doubling";
+    case sfFDN::DattorroEffectType::Echo:
+        return "Echo";
+    default:
+        return "Unknown";
+    }
+}
+
+bool NormalizeDattorroDelay(sfFDN::DattorroDelayOptions& config)
+{
+    constexpr float kMaximumDelay = 96000.0f;
+    // sfFDN clamps the feedback to this internally; matching it here keeps the value the user sees and the value the
+    // processor runs in agreement.
+    constexpr float kMaximumFeedback = 0.999f;
+    constexpr float kMaximumGain = 2.0f;
+    constexpr uint32_t kDelayHeadroom = 64;
+
+    bool changed = false;
+
+    auto& delay_config = config.delay_config;
+
+    const float delay = std::isfinite(delay_config.delay)
+                            ? std::clamp(delay_config.delay, sfFDN::DattorroDelay::kMinimumDelay, kMaximumDelay)
+                            : sfFDN::DattorroDelay::kMinimumDelay;
+    changed |= delay != delay_config.delay;
+    delay_config.delay = delay;
+
+    if (delay_config.lfo_config.has_value())
+    {
+        auto& lfo_config = *delay_config.lfo_config;
+
+        // The instantaneous tap is `delay + amplitude * sin(...)`, and sfFDN throws outright when the trough of that
+        // would fall below kMinimumDelay, so the available headroom bounds the modulation width.
+        const float maximum_amplitude = delay - sfFDN::DattorroDelay::kMinimumDelay;
+        const float amplitude =
+            std::isfinite(lfo_config.amplitude) ? std::clamp(lfo_config.amplitude, 0.0f, maximum_amplitude) : 0.0f;
+        changed |= amplitude != lfo_config.amplitude;
+        lfo_config.amplitude = amplitude;
+
+        const float frequency = std::isfinite(lfo_config.frequency) ? std::max(lfo_config.frequency, 0.0f) : 0.0f;
+        changed |= frequency != lfo_config.frequency;
+        lfo_config.frequency = frequency;
+    }
+
+    // The delay line is sized from `max_delay`; leaving it short truncates the modulated tap instead of erroring.
+    const float width = delay_config.lfo_config.has_value() ? delay_config.lfo_config->amplitude : 0.0f;
+    const auto required_max_delay = static_cast<uint32_t>(std::ceil(delay + width)) + kDelayHeadroom;
+    if (delay_config.max_delay < required_max_delay)
+    {
+        delay_config.max_delay = required_max_delay;
+        changed = true;
+    }
+
+    const float blend = std::isfinite(config.blend) ? std::clamp(config.blend, -kMaximumGain, kMaximumGain) : 0.0f;
+    changed |= blend != config.blend;
+    config.blend = blend;
+
+    const float feedforward =
+        std::isfinite(config.feedforward) ? std::clamp(config.feedforward, -kMaximumGain, kMaximumGain) : 0.0f;
+    changed |= feedforward != config.feedforward;
+    config.feedforward = feedforward;
+
+    const float feedback =
+        std::isfinite(config.feedback) ? std::clamp(config.feedback, -kMaximumFeedback, kMaximumFeedback) : 0.0f;
+    changed |= feedback != config.feedback;
+    config.feedback = feedback;
+
+    return changed;
+}
+
+sfFDN::DattorroDelayOptions MakeDattorroDelay(float sample_rate)
+{
+    // Single-channel processors only ever sit in the input, output or tone-correction chains, never inside the
+    // feedback loop, so the feedback-carrying presets are safe here.
+    auto config = sfFDN::MakeDattorroDelayOptions(sfFDN::DattorroEffectType::WhiteChorus, sample_rate);
+    NormalizeDattorroDelay(config);
+    return config;
+}
+
+bool NormalizeMultichannelDattorroDelay(sfFDN::MultichannelDattorroDelayOptions& config, uint32_t channel_count,
+                                        float sample_rate)
+{
+    bool changed = false;
+
+    if (config.delays.size() != channel_count)
+    {
+        // Cloning the last entry rather than default-constructing keeps a bank grown from the UI on whatever preset
+        // it was created from.
+        const sfFDN::DattorroDelayOptions seed =
+            config.delays.empty() ? MakeDattorroDelay(sample_rate) : config.delays.back();
+        config.delays.resize(channel_count, seed);
+        changed = true;
+    }
+
+    for (auto& delay_config : config.delays)
+    {
+        changed |= NormalizeDattorroDelay(delay_config);
+    }
+
+    return changed;
+}
+
+sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t channel_count, float sample_rate)
+{
+    // A multichannel bank can be dropped into `loop_filter_configs`, and Vibrato is the only modulated preset sfFDN
+    // documents as unconditionally safe there: it has neither blend nor feedback, so its gain is exactly 1 at every
+    // frequency. The others reach up to +15 dB once the tap moves and would make the network diverge.
+    auto config =
+        sfFDN::MakeMultichannelDattorroDelayOptions(sfFDN::DattorroEffectType::Vibrato, sample_rate, channel_count);
+    NormalizeMultichannelDattorroDelay(config, channel_count, sample_rate);
+    return config;
+}
+
 namespace
 {
 void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size,
@@ -755,6 +879,9 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
                                            {.channel_count = new_size, .sample_rate = sample_rate, .new_gain = 0.5f});
             },
             [new_size](sfFDN::MultichannelSchroederAllpassSectionOptions& config) { config.sections.resize(new_size); },
+            [new_size, sample_rate](sfFDN::MultichannelDattorroDelayOptions& config) {
+                NormalizeMultichannelDattorroDelay(config, new_size, sample_rate);
+            },
             [new_size](sfFDN::AttenuationFilterBankOptions& config) {
                 auto previous_size = config.filter_configs.size();
                 config.filter_configs.resize(new_size);
@@ -944,6 +1071,7 @@ std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& pr
                           [](const sfFDN::FirOptions&) { return "FIR Filter"; },
                           [](const sfFDN::DelayOptions&) { return "Delay"; },
                           [](const sfFDN::GraphicEQOptions&) { return "Graphic EQ"; },
+                          [](const sfFDN::DattorroDelayOptions&) { return "Dattorro Delay"; },
                       },
                       processor_variant);
 }
@@ -954,6 +1082,7 @@ std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& pro
         overloaded{
             [](const sfFDN::ParallelGainsOptions&) { return "Parallel Gains"; },
             [](const sfFDN::MultichannelSchroederAllpassSectionOptions&) { return "Parallel Schroeder Allpass"; },
+            [](const sfFDN::MultichannelDattorroDelayOptions&) { return "Parallel Dattorro Delay"; },
             [](const sfFDN::AttenuationFilterBankOptions&) { return "Attenuation Filter Bank"; },
             [](const sfFDN::DelayBankOptions&) { return "Delay Bank"; },
             [](const sfFDN::DelayBankTimeVaryingOptions&) { return "Time-Varying Delay Bank"; },

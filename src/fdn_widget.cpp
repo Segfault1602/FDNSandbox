@@ -502,6 +502,93 @@ bool DrawTimeVaryingGains(sfFDN::ParallelGainsOptions& config, const sfFDN::FDNC
                                                                       });
     return config_changed;
 }
+
+/// Draws a "Preset" button and the popup listing Dattorro's five classic effects.
+///
+/// Returns the selection for the caller to expand, because the single-channel and multichannel banks build their
+/// options from different sfFDN factories.
+std::optional<sfFDN::DattorroEffectType> DrawDattorroPresetPicker(const char* popup_id)
+{
+    std::optional<sfFDN::DattorroEffectType> selection = std::nullopt;
+
+    if (ImGui::Button("Preset..."))
+    {
+        ImGui::OpenPopup(popup_id);
+    }
+
+    if (ImGui::BeginPopup(popup_id))
+    {
+        constexpr std::array kEffectTypes = {
+            sfFDN::DattorroEffectType::Vibrato,     sfFDN::DattorroEffectType::Flanger,
+            sfFDN::DattorroEffectType::WhiteChorus, sfFDN::DattorroEffectType::Doubling,
+            sfFDN::DattorroEffectType::Echo,
+        };
+
+        for (const auto effect_type : kEffectTypes)
+        {
+            if (ImGui::Selectable(utils::GetDattorroEffectName(effect_type).c_str()))
+            {
+                selection = effect_type;
+            }
+        }
+        ImGui::EndPopup();
+    }
+
+    return selection;
+}
+
+/// Draws the worst-case gain of a Dattorro comb, which is what bounds its effect on an enclosing feedback loop.
+///
+/// `sfFDN` gives the bound as `(|blend| + |feedforward|) / (1 - |feedback|)`. It is loose while the effect is static,
+/// but is reached almost immediately once the feedforward tap modulates: the pole sits at the fixed feedback tap
+/// while the zero moves with the feedforward tap, so the pole-zero cancellation that makes the white chorus allpass
+/// only holds while the two taps coincide. Anything above unity compounds on every circulation of an enclosing FDN
+/// loop, which is why the presets are not interchangeable there.
+///
+/// Computed from the live gains rather than the preset name, so a hand-edited bank is described as accurately as a
+/// preset one. `FDNWidgetVisitor` cannot tell which block it is editing, so this is drawn unconditionally; outside
+/// the feedback loop it is simply a level indication.
+void DrawDattorroGainBound(std::span<const sfFDN::DattorroDelayOptions> delays)
+{
+    if (delays.empty())
+    {
+        return;
+    }
+
+    float worst_gain = 0.f;
+    bool modulated = false;
+    for (const auto& config : delays)
+    {
+        // The normalizer clamps feedback to +/-0.999, so the denominator cannot reach zero, but this draws from the
+        // live config and must not divide by zero if it is ever called before a normalize.
+        const float denominator = std::max(1.f - std::abs(config.feedback), 1e-3f);
+        worst_gain = std::max(worst_gain, (std::abs(config.blend) + std::abs(config.feedforward)) / denominator);
+        modulated |= config.delay_config.lfo_config.has_value() && config.delay_config.lfo_config->amplitude > 0.f;
+    }
+
+    const float gain_db = 20.f * std::log10(std::max(worst_gain, 1e-6f));
+
+    // At or below unity the effect cannot make an enclosing loop diverge, so it is information rather than a warning.
+    if (gain_db <= 0.f)
+    {
+        ImGui::TextDisabled("Worst-case gain: %.1f dB - safe inside the feedback loop", gain_db);
+        return;
+    }
+
+    ImGui::TextColored(fdn_sandbox::theme::Color(fdn_sandbox::theme::ColorRole::StatusWarning),
+                       "Worst-case gain: +%.1f dB", gain_db);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    ImGui::SetItemTooltip(
+        "%s", modulated ? "A modulated comb reaches this bound almost immediately, because the moving\n"
+                          "feedforward tap breaks the pole-zero cancellation. Gain above 0 dB compounds on\n"
+                          "every circulation and will make an enclosing FDN loop diverge.\n\n"
+                          "Harmless in the input or output block. Lower the feedback, or pick the Vibrato\n"
+                          "preset, before placing this inside the feedback loop."
+                        : "Bound on the gain of the comb, (|blend| + |feedforward|) / (1 - |feedback|).\n"
+                          "It is loose while the effect is unmodulated, but gain above 0 dB still has to be\n"
+                          "budgeted for by an enclosing FDN loop.");
+}
 } // namespace
 
 bool FDNWidgetVisitor::operator()(sfFDN::ScalarFeedbackMatrixOptions& config) const
@@ -1015,6 +1102,133 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
     return config_changed;
 }
 
+bool FDNWidgetVisitor::operator()(sfFDN::DattorroDelayOptions& config) const
+{
+    bool config_changed = false;
+
+    if (const auto preset = DrawDattorroPresetPicker("dattorro_preset_popup"); preset.has_value())
+    {
+        config = sfFDN::MakeDattorroDelayOptions(*preset, fdn_config.sample_rate);
+        config_changed = true;
+    }
+
+    const FDNWidgetVisitor delay_visitor{.fdn_config = fdn_config, .state = state};
+    config_changed |= delay_visitor(config.delay_config);
+
+    config_changed |=
+        ImGui::DragFloat("Blend", &config.blend, 0.01f, -2.0f, 2.0f, "%.4f", ImGuiSliderFlags_AlwaysClamp);
+    config_changed |=
+        ImGui::DragFloat("Feedforward", &config.feedforward, 0.01f, -2.0f, 2.0f, "%.4f", ImGuiSliderFlags_AlwaysClamp);
+    config_changed |=
+        ImGui::DragFloat("Feedback", &config.feedback, 0.01f, -0.999f, 0.999f, "%.4f", ImGuiSliderFlags_AlwaysClamp);
+
+    config_changed |= utils::NormalizeDattorroDelay(config);
+
+    ImGui::TextDisabled("Maximum delay: %u samples", config.delay_config.max_delay);
+
+    return config_changed;
+}
+
+bool FDNWidgetVisitor::operator()(sfFDN::MultichannelDattorroDelayOptions& config) const
+{
+    // Normalize first: sfFDN rejects a bank whose channel count does not match the FDN, and the table below indexes
+    // straight into `delays`.
+    bool config_changed =
+        utils::NormalizeMultichannelDattorroDelay(config, fdn_config.fdn_size, fdn_config.sample_rate);
+
+    if (const auto preset = DrawDattorroPresetPicker("multichannel_dattorro_preset_popup"); preset.has_value())
+    {
+        config = sfFDN::MakeMultichannelDattorroDelayOptions(*preset, fdn_config.sample_rate, fdn_config.fdn_size);
+        config_changed = true;
+    }
+
+    if (config.delays.empty())
+    {
+        return config_changed;
+    }
+
+    const bool modulated = config.delays.front().delay_config.lfo_config.has_value();
+
+    if (ImGui::BeginTable("Dattorro Table", modulated ? 7 : 5,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+    {
+        ImGui::TableSetupColumn("Channel", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+        ImGui::TableSetupColumn("Delay", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Blend", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Feedforward", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Feedback", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        if (modulated)
+        {
+            ImGui::TableSetupColumn("Mod. Rate", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+            ImGui::TableSetupColumn("Mod. Width", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        }
+        ImGui::TableHeadersRow();
+
+        for (size_t row = 0; row < config.delays.size(); ++row)
+        {
+            auto& delay_config = config.delays[row];
+            ImGui::PushID(static_cast<int>(row));
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%zu", row + 1);
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            config_changed |= ImGui::DragFloat("##delay", &delay_config.delay_config.delay, 1.0f, 2.0f, 96000.0f,
+                                               "%.1f", ImGuiSliderFlags_AlwaysClamp);
+
+            ImGui::TableSetColumnIndex(2);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            config_changed |= ImGui::DragFloat("##blend", &delay_config.blend, 0.01f, -2.0f, 2.0f, "%.4f",
+                                               ImGuiSliderFlags_AlwaysClamp);
+
+            ImGui::TableSetColumnIndex(3);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            config_changed |= ImGui::DragFloat("##feedforward", &delay_config.feedforward, 0.01f, -2.0f, 2.0f, "%.4f",
+                                               ImGuiSliderFlags_AlwaysClamp);
+
+            ImGui::TableSetColumnIndex(4);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            config_changed |= ImGui::DragFloat("##feedback", &delay_config.feedback, 0.01f, -0.999f, 0.999f, "%.4f",
+                                               ImGuiSliderFlags_AlwaysClamp);
+
+            if (modulated && delay_config.delay_config.lfo_config.has_value())
+            {
+                auto& lfo_config = *delay_config.delay_config.lfo_config;
+
+                ImGui::TableSetColumnIndex(5);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                // sfFDN stores the LFO rate normalized by the sample rate; the user thinks in Hz.
+                float frequency_hz = lfo_config.frequency * fdn_config.sample_rate;
+                if (ImGui::DragFloat("##rate", &frequency_hz, 0.01f, 0.0f, 20.0f, "%.2f Hz",
+                                     ImGuiSliderFlags_AlwaysClamp))
+                {
+                    lfo_config.frequency = std::clamp(frequency_hz, 0.0f, 20.0f) / fdn_config.sample_rate;
+                    config_changed = true;
+                }
+
+                ImGui::TableSetColumnIndex(6);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                config_changed |=
+                    ImGui::DragFloat("##width", &lfo_config.amplitude, 0.01f, 0.0f,
+                                     delay_config.delay_config.delay - 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            }
+
+            ImGui::PopID();
+        }
+
+        ImGui::EndTable();
+    }
+
+    config_changed |= utils::NormalizeMultichannelDattorroDelay(config, fdn_config.fdn_size, fdn_config.sample_rate);
+
+    // Display only: must not touch `config_changed`, or the FDN rebuilds every frame.
+    DrawDattorroGainBound(config.delays);
+
+    return config_changed;
+}
+
 bool FDNWidgetVisitor::operator()(sfFDN::HomogenousFilterOptions& config) const
 {
     bool config_changed = false;
@@ -1399,7 +1613,7 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
     const sfFDN::FDNConfig& fdn_config)
 {
     const std::array single_channel_processor_names = {"Delay", "Schroeder Allpass", "Velvet Noise Decorrelator",
-                                                       "Graphic EQ"};
+                                                       "Graphic EQ", "Dattorro Delay"};
     std::optional<sfFDN::single_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("single_channel_processor_popup"))
     {
@@ -1421,6 +1635,9 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
                     break;
                 case 3:
                     new_processor = utils::MakeGraphicEq(fdn_config.sample_rate);
+                    break;
+                case 4:
+                    new_processor = utils::MakeDattorroDelay(fdn_config.sample_rate);
                     break;
                 default:
                     break;
@@ -1509,8 +1726,9 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
 std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProcessorPopup(
     const sfFDN::FDNConfig& fdn_config)
 {
-    const std::array multi_channel_processor_names = {"Delay Bank", "Time-Varying Delay Bank", "Schroeder Allpass",
-                                                      "Feedback Matrix", "Velvet Noise Decorrelator"};
+    const std::array multi_channel_processor_names = {
+        "Delay Bank",      "Time-Varying Delay Bank",   "Schroeder Allpass",
+        "Feedback Matrix", "Velvet Noise Decorrelator", "Dattorro Delay"};
     std::optional<sfFDN::multi_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("multi_channel_processor_popup"))
     {
@@ -1548,6 +1766,10 @@ std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProce
                 case 4:
                     new_processor.emplace(sfFDN::MultichannelFirOptions{
                         .coeffs = std::vector<std::vector<float>>(fdn_config.fdn_size, std::vector<float>{1.f})});
+                    break;
+                case 5:
+                    new_processor.emplace(
+                        utils::MakeMultichannelDattorroDelay(fdn_config.fdn_size, fdn_config.sample_rate));
                     break;
                 default:
                     break;

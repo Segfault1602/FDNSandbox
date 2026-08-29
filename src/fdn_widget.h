@@ -111,6 +111,8 @@ struct FDNWidgetVisitor
     bool operator()(sfFDN::DelayBankTimeVaryingOptions& config) const;
     bool operator()(sfFDN::SchroederAllpassSectionOptions& config) const;
     bool operator()(sfFDN::MultichannelSchroederAllpassSectionOptions& config) const;
+    bool operator()(sfFDN::DattorroDelayOptions& config) const;
+    bool operator()(sfFDN::MultichannelDattorroDelayOptions& config) const;
     bool operator()(sfFDN::HomogenousFilterOptions& config) const;
     bool operator()(sfFDN::TwoBandFilterOptions& config) const;
     bool operator()(sfFDN::ThreeBandFilterOptions& config) const;
