@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -176,6 +177,34 @@ sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t c
 /// most a few samples.
 sfFDN::MultichannelSchroederAllpassSectionOptions MakeZitaRev1SchroederAllpass(uint32_t channel_count,
                                                                                float sample_rate);
+
+/// Published Schroeder allpass configurations offered as configurator presets.
+enum class SchroederAllpassPreset : std::uint8_t
+{
+    /// One allpass per channel, from zita-rev1. Only meaningful across a whole bank.
+    ZitaRev1,
+    /// Freeverb's four-stage diffuser chain.
+    Freeverb,
+    /// Chowning's three-stage JCREV diffuser chain, recovered from a 1972 MUS10 listing.
+    JCRev,
+};
+
+const char* GetSchroederAllpassPresetName(SchroederAllpassPreset preset);
+
+/// Builds one channel of a series preset (`Freeverb` or `JCRev`).
+///
+/// `channel_index` and `channel_count` drive a small per-channel detune so that a bank does not present the same
+/// chain on every channel; pass `(0, 1)` for the canonical, unspread configuration. Channel zero is always the
+/// canonical chain, later channels are stretched slightly, mirroring how Freeverb offsets its right channel.
+///
+/// `ZitaRev1` is not a series preset and yields an empty chain here; use `MakeMultichannelSchroederAllpassPreset`.
+sfFDN::SchroederAllpassSectionOptions MakeSchroederAllpassSeries(SchroederAllpassPreset preset, float sample_rate,
+                                                                 uint32_t channel_index, uint32_t channel_count);
+
+/// Builds a whole bank for any preset, dispatching `ZitaRev1` to its per-channel factory.
+sfFDN::MultichannelSchroederAllpassSectionOptions MakeMultichannelSchroederAllpassPreset(SchroederAllpassPreset preset,
+                                                                                         uint32_t channel_count,
+                                                                                         float sample_rate);
 
 struct Span2D
 {

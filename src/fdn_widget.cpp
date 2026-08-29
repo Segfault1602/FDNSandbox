@@ -537,29 +537,15 @@ std::optional<sfFDN::DattorroEffectType> DrawDattorroPresetPicker(const char* po
     return selection;
 }
 
-/// Published diffuser configurations selectable from the multichannel Schroeder allpass editor.
-enum class SchroederAllpassPreset : std::uint8_t
-{
-    ZitaRev1,
-};
-
-const char* GetSchroederAllpassPresetName(SchroederAllpassPreset preset)
-{
-    switch (preset)
-    {
-    case SchroederAllpassPreset::ZitaRev1:
-        return "Zita-rev1";
-    }
-    return "Unknown";
-}
-
-/// Draws a "Preset..." button and the popup listing the known Schroeder allpass configurations.
+/// Draws a "Preset..." button and the popup listing the given Schroeder allpass configurations.
 ///
-/// Returns the selection rather than writing the config, mirroring `DrawDattorroPresetPicker`, so the caller keeps
-/// ownership of which factory expands it.
-std::optional<SchroederAllpassPreset> DrawSchroederAllpassPresetPicker(const char* popup_id)
+/// Takes the offerable presets from the caller because the single-channel editor cannot use `ZitaRev1`, which is one
+/// allpass per channel rather than a chain within a channel. Returns the selection rather than writing the config,
+/// mirroring `DrawDattorroPresetPicker`, so the caller keeps ownership of which factory expands it.
+std::optional<utils::SchroederAllpassPreset> DrawSchroederAllpassPresetPicker(
+    const char* popup_id, std::span<const utils::SchroederAllpassPreset> presets)
 {
-    std::optional<SchroederAllpassPreset> selection = std::nullopt;
+    std::optional<utils::SchroederAllpassPreset> selection = std::nullopt;
 
     if (ImGui::Button("Preset..."))
     {
@@ -568,11 +554,9 @@ std::optional<SchroederAllpassPreset> DrawSchroederAllpassPresetPicker(const cha
 
     if (ImGui::BeginPopup(popup_id))
     {
-        constexpr std::array kPresets = {SchroederAllpassPreset::ZitaRev1};
-
-        for (const auto preset : kPresets)
+        for (const auto preset : presets)
         {
-            if (ImGui::Selectable(GetSchroederAllpassPresetName(preset)))
+            if (ImGui::Selectable(utils::GetSchroederAllpassPresetName(preset)))
             {
                 selection = preset;
             }
@@ -582,6 +566,19 @@ std::optional<SchroederAllpassPreset> DrawSchroederAllpassPresetPicker(const cha
 
     return selection;
 }
+
+/// Every preset, for the multichannel editor.
+constexpr std::array kAllSchroederPresets = {
+    utils::SchroederAllpassPreset::ZitaRev1,
+    utils::SchroederAllpassPreset::Freeverb,
+    utils::SchroederAllpassPreset::JCRev,
+};
+
+/// The chain presets, for the single-channel editor.
+constexpr std::array kSeriesSchroederPresets = {
+    utils::SchroederAllpassPreset::Freeverb,
+    utils::SchroederAllpassPreset::JCRev,
+};
 
 /// Draws the worst-case gain of a Dattorro comb, which is what bounds its effect on an enclosing feedback loop.
 ///
@@ -990,6 +987,15 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
 {
     bool config_changed = false;
 
+    // Applied before `num_sections` is read below, which drives both the resize and the table: a count sampled
+    // beforehand would describe the chain the preset just replaced.
+    if (const auto preset = DrawSchroederAllpassPresetPicker("schroeder_preset_popup", kSeriesSchroederPresets);
+        preset.has_value())
+    {
+        config = utils::MakeSchroederAllpassSeries(*preset, fdn_config.sample_rate, 0, 1);
+        config_changed = true;
+    }
+
     int num_sections = static_cast<int>(config.delays.size());
     if (config.gains.size() != config.delays.size())
     {
@@ -1023,7 +1029,10 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
     ImGui::DragIntRange2("Delay Range", &state.schroeder_delay_minimum, &state.schroeder_delay_maximum, 1, 1, 9999,
                          "%d samples", "%d samples", ImGuiSliderFlags_AlwaysClamp);
 
-    if (ImGui::BeginTable("Schroeder Table", num_sections + 1))
+    // Rows are sections here, so the table is two columns wide regardless of the section count. It previously asked
+    // for `num_sections + 1` columns while only ever setting up and filling two, which left trailing unnamed empty
+    // columns once a preset pushed the section count above one.
+    if (ImGui::BeginTable("Schroeder Sections", 2))
     {
         ImGui::TableSetupColumn("Delay", ImGuiTableColumnFlags_WidthFixed, 120.0f);
         ImGui::TableSetupColumn("Gain", ImGuiTableColumnFlags_WidthFixed, 120.0f);
@@ -1065,16 +1074,13 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
         config_changed = true;
     }
 
-    // Applied before `section_count` is read below: the preset collapses every channel to a single stage, and a count
-    // sampled beforehand would size the table for the old stage count while the vectors have already been replaced.
-    if (const auto preset = DrawSchroederAllpassPresetPicker("multichannel_schroeder_preset_popup"); preset.has_value())
+    // Applied before `section_count` is read below: the presets set their own stage count, and a count sampled
+    // beforehand would size the table for the chain that was just replaced.
+    if (const auto preset =
+            DrawSchroederAllpassPresetPicker("multichannel_schroeder_preset_popup", kAllSchroederPresets);
+        preset.has_value())
     {
-        switch (*preset)
-        {
-        case SchroederAllpassPreset::ZitaRev1:
-            config = utils::MakeZitaRev1SchroederAllpass(fdn_config.fdn_size, fdn_config.sample_rate);
-            break;
-        }
+        config = utils::MakeMultichannelSchroederAllpassPreset(*preset, fdn_config.fdn_size, fdn_config.sample_rate);
         config_changed = true;
     }
 
@@ -1116,6 +1122,13 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
                          &state.multichannel_schroeder_delay_maximum, 1, 1, 9999, "%d samples", "%d samples",
                          ImGuiSliderFlags_AlwaysClamp);
 
+    // The table ID is scoped by the section count so that changing it builds a fresh table instead of reconciling
+    // the old one. On a column-count change `TableReconcileColumns` matches columns by name and copies the whole
+    // old column struct across, `DisplayOrder` included: "Gain" moving from index 1 to index 4 keeps the display
+    // order it had when it was the second column, and `TableFixDisplayOrder` then renders it among the delays
+    // rather than last. Scoping the ID sidesteps the reconcile entirely, and costs nothing here because every
+    // column is `WidthFixed` and so has no width state worth preserving.
+    ImGui::PushID(section_count);
     if (ImGui::BeginTable("Schroeder Table", section_count + 1))
     {
         for (int col = 0; col < section_count; ++col)
@@ -1157,6 +1170,7 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
 
         ImGui::EndTable();
     }
+    ImGui::PopID();
 
     return config_changed;
 }

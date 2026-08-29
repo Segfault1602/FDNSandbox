@@ -868,6 +868,63 @@ sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t c
     return config;
 }
 
+namespace
+{
+/// Converts a preset delay time to the prime sample count the Schroeder editors expect.
+///
+/// Snapping to a prime follows the convention already used by the editors' randomize buttons, and keeps detuned
+/// channels from sharing common factors. `GetClosestPrime` searches outward and so can overshoot the editors'
+/// `DragInt` bound (it maps 9999 to 10007), hence the result is bounded too rather than just the input.
+float ToPresetDelaySamples(float seconds, float sample_rate)
+{
+    constexpr long kMaximumDelay = 9999;
+    /// Largest prime within the editors' delay range.
+    constexpr uint32_t kLargestPrimeInRange = 9973;
+
+    const long rounded = std::lround(seconds * sample_rate);
+    const auto samples = static_cast<uint32_t>(std::clamp(rounded, 1L, kMaximumDelay));
+    return static_cast<float>(std::min(GetClosestPrime(samples), kLargestPrimeInRange));
+}
+
+/// Returns the first prime strictly greater than `value`.
+///
+/// `GetClosestPrime` snaps to the nearest prime in either direction, so it cannot be used directly to step upwards.
+uint32_t NextPrimeAbove(uint32_t value)
+{
+    uint32_t candidate = value + 1;
+    while (GetClosestPrime(candidate) <= value)
+    {
+        ++candidate;
+    }
+    return GetClosestPrime(candidate);
+}
+
+// Freeverb's diffuser chain, written as its published sample counts over its 44.1 kHz reference rate so both the
+// canonical values and the rate they belong to stay visible. Processing order is shortest first.
+constexpr std::array<float, 4> kFreeverbTimes = {
+    225.f / 44100.f,
+    341.f / 44100.f,
+    441.f / 44100.f,
+    556.f / 44100.f,
+};
+constexpr float kFreeverbGain = 0.5f;
+
+// Chowning's JCREV diffuser, from a 1972 MUS10 listing tuned by ear at 25 kHz. The three delays are prime and so
+// mutually coprime, and each is roughly a third of its predecessor.
+constexpr std::array<float, 3> kJCRevTimes = {
+    347.f / 25000.f,
+    113.f / 25000.f,
+    37.f / 25000.f,
+};
+constexpr float kJCRevGain = 0.7f;
+
+/// Fractional stretch applied to the last channel of a series preset bank.
+///
+/// Freeverb decorrelates its two channels by adding 23 samples to the right one, which is +10.2% on its shortest
+/// stage and +4.1% on its longest. Ten percent therefore sits at the top of the range Freeverb itself uses.
+constexpr float kChannelSpread = 0.10f;
+} // namespace
+
 sfFDN::MultichannelSchroederAllpassSectionOptions MakeZitaRev1SchroederAllpass(uint32_t channel_count,
                                                                                float sample_rate)
 {
@@ -884,10 +941,6 @@ sfFDN::MultichannelSchroederAllpassSectionOptions MakeZitaRev1SchroederAllpass(u
     // is inverted here. Getting this wrong still yields an allpass, just a differently phased one, and nothing in the
     // build or the running app would report it.
     constexpr float kZitaAllpassGain = 0.6f;
-
-    // Matches the delay bound of the editor this preset feeds, so applying it never lands on a value the table would
-    // immediately clamp. Only reachable above roughly 316 kHz.
-    constexpr long kMaximumDelay = 9999;
 
     // Sorted once for the interpolation path below; `channel_count <= 8` uses the source ordering instead.
     std::array<float, 8> sorted_times = kZitaAllpassTimes;
@@ -915,14 +968,120 @@ sfFDN::MultichannelSchroederAllpassSectionOptions MakeZitaRev1SchroederAllpass(u
             time = std::lerp(sorted_times[lower], sorted_times[upper], fraction);
         }
 
-        const long rounded = std::lround(time * sample_rate);
-        const auto samples = static_cast<uint32_t>(std::clamp(rounded, 1L, kMaximumDelay));
-
         config.sections[i] = sfFDN::SchroederAllpassSectionOptions{
-            .delays = {static_cast<float>(GetClosestPrime(samples))},
+            .delays = {ToPresetDelaySamples(time, sample_rate)},
             .gains = {(i % 2 == 0) ? -kZitaAllpassGain : kZitaAllpassGain},
             .parallel = false,
         };
+    }
+
+    return config;
+}
+
+const char* GetSchroederAllpassPresetName(SchroederAllpassPreset preset)
+{
+    switch (preset)
+    {
+    case SchroederAllpassPreset::ZitaRev1:
+        return "Zita-rev1";
+    case SchroederAllpassPreset::Freeverb:
+        return "Freeverb";
+    case SchroederAllpassPreset::JCRev:
+        return "Chowning JCRev";
+    }
+    return "Unknown";
+}
+
+sfFDN::SchroederAllpassSectionOptions MakeSchroederAllpassSeries(SchroederAllpassPreset preset, float sample_rate,
+                                                                 uint32_t channel_index, uint32_t channel_count)
+{
+    std::span<const float> times{};
+    float gain = 0.f;
+
+    switch (preset)
+    {
+    case SchroederAllpassPreset::Freeverb:
+        times = kFreeverbTimes;
+        gain = kFreeverbGain;
+        break;
+    case SchroederAllpassPreset::JCRev:
+        times = kJCRevTimes;
+        gain = kJCRevGain;
+        break;
+    case SchroederAllpassPreset::ZitaRev1:
+        // Not a chain: zita places one allpass per channel rather than several within a channel.
+        return {};
+    }
+
+    // Both gains stay positive. Freeverb accumulates v[n] = x[n] + g*v[n-N], and JCREV's Schroeder section shares
+    // that polarity with `sfFDN::SchroederAllpass`, so neither needs the sign inversion the zita preset above does.
+
+    // Channel zero keeps the published chain and later channels are stretched slightly, the same shape as Freeverb
+    // offsetting its right channel. Scaling the chain as a whole rather than each stage independently preserves the
+    // roughly 3:1 stage ratio these designs rely on for diffusion.
+    const float scale =
+        (channel_count > 1)
+            ? 1.f + (kChannelSpread * static_cast<float>(channel_index) / static_cast<float>(channel_count - 1))
+            : 1.f;
+
+    sfFDN::SchroederAllpassSectionOptions config{};
+    config.parallel = false;
+    config.delays.reserve(times.size());
+    config.gains.reserve(times.size());
+
+    for (const float time : times)
+    {
+        config.delays.push_back(ToPresetDelaySamples(time * scale, sample_rate));
+        config.gains.push_back(gain);
+    }
+
+    return config;
+}
+
+sfFDN::MultichannelSchroederAllpassSectionOptions MakeMultichannelSchroederAllpassPreset(SchroederAllpassPreset preset,
+                                                                                         uint32_t channel_count,
+                                                                                         float sample_rate)
+{
+    if (preset == SchroederAllpassPreset::ZitaRev1)
+    {
+        return MakeZitaRev1SchroederAllpass(channel_count, sample_rate);
+    }
+
+    sfFDN::MultichannelSchroederAllpassSectionOptions config{};
+    config.sections.reserve(channel_count);
+
+    /// Largest prime within the editors' delay range; nudging stops rather than exceed it.
+    constexpr uint32_t kLargestPrimeInRange = 9973;
+
+    for (uint32_t i = 0; i < channel_count; ++i)
+    {
+        auto section = MakeSchroederAllpassSeries(preset, sample_rate, i, channel_count);
+
+        // What decorrelates channels is a distinct chain, not distinct individual stages. Prime snapping collapses
+        // the short stages of a large bank onto shared values - the gaps between primes near 71 samples exceed the
+        // per-channel step - so the scale alone leaves duplicate chains once the bank grows past about eight
+        // channels. Nudging the longest stage separates them at the least cost, because that stage has by far the
+        // most room between consecutive primes.
+        while (std::ranges::any_of(config.sections, [&section](const sfFDN::SchroederAllpassSectionOptions& existing) {
+            return existing.delays == section.delays;
+        }))
+        {
+            const auto longest = std::ranges::max_element(section.delays);
+            if (longest == section.delays.end())
+            {
+                break;
+            }
+
+            const uint32_t nudged = NextPrimeAbove(static_cast<uint32_t>(*longest));
+            if (nudged > kLargestPrimeInRange)
+            {
+                // Out of room: accept the duplicate rather than emit a delay the editor would clamp.
+                break;
+            }
+            *longest = static_cast<float>(nudged);
+        }
+
+        config.sections.push_back(std::move(section));
     }
 
     return config;
