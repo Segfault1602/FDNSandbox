@@ -537,6 +537,52 @@ std::optional<sfFDN::DattorroEffectType> DrawDattorroPresetPicker(const char* po
     return selection;
 }
 
+/// Published diffuser configurations selectable from the multichannel Schroeder allpass editor.
+enum class SchroederAllpassPreset : std::uint8_t
+{
+    ZitaRev1,
+};
+
+const char* GetSchroederAllpassPresetName(SchroederAllpassPreset preset)
+{
+    switch (preset)
+    {
+    case SchroederAllpassPreset::ZitaRev1:
+        return "Zita-rev1";
+    }
+    return "Unknown";
+}
+
+/// Draws a "Preset..." button and the popup listing the known Schroeder allpass configurations.
+///
+/// Returns the selection rather than writing the config, mirroring `DrawDattorroPresetPicker`, so the caller keeps
+/// ownership of which factory expands it.
+std::optional<SchroederAllpassPreset> DrawSchroederAllpassPresetPicker(const char* popup_id)
+{
+    std::optional<SchroederAllpassPreset> selection = std::nullopt;
+
+    if (ImGui::Button("Preset..."))
+    {
+        ImGui::OpenPopup(popup_id);
+    }
+
+    if (ImGui::BeginPopup(popup_id))
+    {
+        constexpr std::array kPresets = {SchroederAllpassPreset::ZitaRev1};
+
+        for (const auto preset : kPresets)
+        {
+            if (ImGui::Selectable(GetSchroederAllpassPresetName(preset)))
+            {
+                selection = preset;
+            }
+        }
+        ImGui::EndPopup();
+    }
+
+    return selection;
+}
+
 /// Draws the worst-case gain of a Dattorro comb, which is what bounds its effect on an enclosing feedback loop.
 ///
 /// `sfFDN` gives the bound as `(|blend| + |feedforward|) / (1 - |feedback|)`. It is loose while the effect is static,
@@ -1016,6 +1062,19 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
     if (config.sections.size() != fdn_config.fdn_size)
     {
         config.sections.resize(fdn_config.fdn_size);
+        config_changed = true;
+    }
+
+    // Applied before `section_count` is read below: the preset collapses every channel to a single stage, and a count
+    // sampled beforehand would size the table for the old stage count while the vectors have already been replaced.
+    if (const auto preset = DrawSchroederAllpassPresetPicker("multichannel_schroeder_preset_popup"); preset.has_value())
+    {
+        switch (*preset)
+        {
+        case SchroederAllpassPreset::ZitaRev1:
+            config = utils::MakeZitaRev1SchroederAllpass(fdn_config.fdn_size, fdn_config.sample_rate);
+            break;
+        }
         config_changed = true;
     }
 

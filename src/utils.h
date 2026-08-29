@@ -165,6 +165,18 @@ bool NormalizeMultichannelDattorroDelay(sfFDN::MultichannelDattorroDelayOptions&
                                         float sample_rate);
 sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t channel_count, float sample_rate);
 
+/// Builds a one-allpass-per-channel Schroeder bank from the diffuser configuration of Fons Adriaensen's zita-rev1.
+///
+/// zita-rev1 gives each of its eight FDN branches a single allpass whose length is stored in seconds and converted at
+/// runtime, so the bank is derived from `sample_rate` rather than from a fixed sample table. Only the diffuser times
+/// are reproduced; the enclosing loop-delay split and damping filters are not representable in `FDNConfig`.
+///
+/// `channel_count` beyond eight is served by interpolating the sorted source times, which preserves their
+/// 13.458-31.604 ms span. Delays are snapped to primes to match the rest of this configurator, which moves them by at
+/// most a few samples.
+sfFDN::MultichannelSchroederAllpassSectionOptions MakeZitaRev1SchroederAllpass(uint32_t channel_count,
+                                                                               float sample_rate);
+
 struct Span2D
 {
     std::span<float> data;

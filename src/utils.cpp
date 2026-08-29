@@ -7,6 +7,7 @@
 #include <sndfile.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <complex>
@@ -864,6 +865,66 @@ sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t c
     auto config =
         sfFDN::MakeMultichannelDattorroDelayOptions(sfFDN::DattorroEffectType::Vibrato, sample_rate, channel_count);
     NormalizeMultichannelDattorroDelay(config, channel_count, sample_rate);
+    return config;
+}
+
+sfFDN::MultichannelSchroederAllpassSectionOptions MakeZitaRev1SchroederAllpass(uint32_t channel_count,
+                                                                               float sample_rate)
+{
+    // Diffuser lengths of the eight FDN branches in zita-rev1, in seconds (`Reverb::_tdiff1`). The source keeps them
+    // as times rather than samples and rounds at init, so a bank built here tracks whatever rate the session runs at.
+    static constexpr std::array<float, 8> kZitaAllpassTimes = {
+        0.020346f, 0.024421f, 0.031604f, 0.027333f, 0.022904f, 0.029291f, 0.013458f, 0.019123f,
+    };
+
+    // zita alternates the diffuser coefficient by branch parity, `(i & 1) ? -0.6f : 0.6f`. That sign cannot be copied
+    // across verbatim: zita's `Diff1` computes v[n] = x[n] - c*v[n-M], y[n] = v[n-M] + c*v[n], giving
+    // H(z) = (c + z^-M) / (1 + c*z^-M), while `sfFDN::SchroederAllpass` computes v[n] = x[n] + g*v[n-M],
+    // y[n] = v[n-M] - g*v[n], giving H(z) = (-g + z^-M) / (1 - g*z^-M). The two agree only when g = -c, so the parity
+    // is inverted here. Getting this wrong still yields an allpass, just a differently phased one, and nothing in the
+    // build or the running app would report it.
+    constexpr float kZitaAllpassGain = 0.6f;
+
+    // Matches the delay bound of the editor this preset feeds, so applying it never lands on a value the table would
+    // immediately clamp. Only reachable above roughly 316 kHz.
+    constexpr long kMaximumDelay = 9999;
+
+    // Sorted once for the interpolation path below; `channel_count <= 8` uses the source ordering instead.
+    std::array<float, 8> sorted_times = kZitaAllpassTimes;
+    std::ranges::sort(sorted_times);
+
+    sfFDN::MultichannelSchroederAllpassSectionOptions config{};
+    config.sections.resize(channel_count);
+
+    for (uint32_t i = 0; i < channel_count; ++i)
+    {
+        float time = 0.f;
+        if (channel_count <= kZitaAllpassTimes.size())
+        {
+            time = kZitaAllpassTimes[i];
+        }
+        else
+        {
+            // Resample the sorted source curve onto `channel_count` points. Interpolating rather than extending the
+            // range keeps a larger FDN inside the span zita was voiced for.
+            const float position = static_cast<float>(i) * static_cast<float>(sorted_times.size() - 1) /
+                                   static_cast<float>(channel_count - 1);
+            const auto lower = static_cast<size_t>(position);
+            const size_t upper = std::min(lower + 1, sorted_times.size() - 1);
+            const float fraction = position - static_cast<float>(lower);
+            time = std::lerp(sorted_times[lower], sorted_times[upper], fraction);
+        }
+
+        const long rounded = std::lround(time * sample_rate);
+        const auto samples = static_cast<uint32_t>(std::clamp(rounded, 1L, kMaximumDelay));
+
+        config.sections[i] = sfFDN::SchroederAllpassSectionOptions{
+            .delays = {static_cast<float>(GetClosestPrime(samples))},
+            .gains = {(i % 2 == 0) ? -kZitaAllpassGain : kZitaAllpassGain},
+            .parallel = false,
+        };
+    }
+
     return config;
 }
 
