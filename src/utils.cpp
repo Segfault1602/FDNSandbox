@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <numeric>
 #include <random>
 #include <ranges>
 #include <span>
@@ -870,6 +871,48 @@ sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t c
 
 namespace
 {
+constexpr float kSchroederDefaultDelay = 47.0f;
+constexpr float kSchroederDefaultGain = 0.7f;
+constexpr float kSchroederDefaultFrequencyHz = 0.25f;
+constexpr float kSchroederDefaultAmplitude = 0.1f;
+constexpr float kSchroederMaximumDelay = 9999.0f;
+
+float ValidSampleRate(float sample_rate)
+{
+    return std::isfinite(sample_rate) && sample_rate > 0.0f ? sample_rate
+                                                            : static_cast<float>(sfFDN::kDefaultSampleRate);
+}
+
+sfFDN::ModulationOptions MakeDefaultSchroederModulation(size_t index, size_t count, float sample_rate)
+{
+    const float valid_sample_rate = ValidSampleRate(sample_rate);
+    return {
+        .frequency = kSchroederDefaultFrequencyHz / valid_sample_rate,
+        .amplitude = kSchroederDefaultAmplitude,
+        .initial_phase = count > 0 ? static_cast<float>(index) / static_cast<float>(count) : 0.0f,
+    };
+}
+
+sfFDN::TimeVaryingSchroederAllpassSectionOptions MakeTimeVaryingSchroederAllpass(
+    const sfFDN::SchroederAllpassSectionOptions& source, float sample_rate, size_t modulation_offset,
+    size_t modulation_count)
+{
+    sfFDN::TimeVaryingSchroederAllpassSectionOptions config{
+        .delays = source.delays,
+        .gains = source.gains,
+        .time_varying_config = {},
+        .parallel = source.parallel,
+    };
+    config.time_varying_config.reserve(config.delays.size());
+    for (size_t stage = 0; stage < config.delays.size(); ++stage)
+    {
+        config.time_varying_config.push_back(
+            MakeDefaultSchroederModulation(modulation_offset + stage, modulation_count, sample_rate));
+    }
+    NormalizeTimeVaryingSchroederAllpass(config, sample_rate);
+    return config;
+}
+
 /// Converts a preset delay time to the prime sample count the Schroeder editors expect.
 ///
 /// Snapping to a prime follows the convention already used by the editors' randomize buttons, and keeps detuned
@@ -924,6 +967,193 @@ constexpr float kJCRevGain = 0.7f;
 /// stage and +4.1% on its longest. Ten percent therefore sits at the top of the range Freeverb itself uses.
 constexpr float kChannelSpread = 0.10f;
 } // namespace
+
+bool NormalizeTimeVaryingSchroederAllpass(sfFDN::TimeVaryingSchroederAllpassSectionOptions& config, float sample_rate)
+{
+    bool changed = false;
+    const size_t stage_count =
+        std::max({size_t{1}, config.delays.size(), config.gains.size(), config.time_varying_config.size()});
+
+    if (config.delays.size() != stage_count)
+    {
+        const float seed = config.delays.empty() ? kSchroederDefaultDelay : config.delays.back();
+        config.delays.resize(stage_count, seed);
+        changed = true;
+    }
+    if (config.gains.size() != stage_count)
+    {
+        const float seed = config.gains.empty() ? kSchroederDefaultGain : config.gains.back();
+        config.gains.resize(stage_count, seed);
+        changed = true;
+    }
+
+    const size_t previous_modulation_count = config.time_varying_config.size();
+    if (previous_modulation_count != stage_count)
+    {
+        config.time_varying_config.resize(stage_count);
+        changed = true;
+    }
+
+    const float valid_sample_rate = ValidSampleRate(sample_rate);
+    const float minimum_frequency = kTimeVaryingSchroederMinimumFrequencyHz / valid_sample_rate;
+    const float maximum_frequency = kTimeVaryingSchroederMaximumFrequencyHz / valid_sample_rate;
+
+    for (size_t stage = 0; stage < stage_count; ++stage)
+    {
+        float& delay = config.delays[stage];
+        const float normalized_delay =
+            std::isfinite(delay) ? std::clamp(std::round(delay), 1.0f, kSchroederMaximumDelay) : kSchroederDefaultDelay;
+        changed |= normalized_delay != delay;
+        delay = normalized_delay;
+
+        float& gain = config.gains[stage];
+        const float maximum_base_gain =
+            kTimeVaryingSchroederMaximumTrajectoryGain - kTimeVaryingSchroederMinimumAmplitude;
+        const float normalized_gain =
+            std::isfinite(gain) ? std::clamp(gain, -maximum_base_gain, maximum_base_gain) : kSchroederDefaultGain;
+        changed |= normalized_gain != gain;
+        gain = normalized_gain;
+
+        auto& modulation = config.time_varying_config[stage];
+        if (stage >= previous_modulation_count)
+        {
+            modulation = MakeDefaultSchroederModulation(stage, stage_count, valid_sample_rate);
+        }
+
+        const float normalized_frequency = std::isfinite(modulation.frequency)
+                                               ? std::clamp(modulation.frequency, minimum_frequency, maximum_frequency)
+                                               : kSchroederDefaultFrequencyHz / valid_sample_rate;
+        changed |= normalized_frequency != modulation.frequency;
+        modulation.frequency = normalized_frequency;
+
+        float phase = std::isfinite(modulation.initial_phase) ? std::clamp(modulation.initial_phase, 0.0f, 1.0f) : 0.0f;
+        float amplitude = std::isfinite(modulation.amplitude) ? modulation.amplitude : kSchroederDefaultAmplitude;
+        if (amplitude < 0.0f)
+        {
+            amplitude = -amplitude;
+            phase = std::fmod(phase + 0.5f, 1.0f);
+        }
+
+        const float maximum_amplitude = std::max(kTimeVaryingSchroederMinimumAmplitude,
+                                                 kTimeVaryingSchroederMaximumTrajectoryGain - std::abs(gain));
+        amplitude = std::clamp(amplitude, kTimeVaryingSchroederMinimumAmplitude, maximum_amplitude);
+
+        changed |= amplitude != modulation.amplitude;
+        changed |= phase != modulation.initial_phase;
+        modulation.amplitude = amplitude;
+        modulation.initial_phase = phase;
+    }
+
+    return changed;
+}
+
+bool ResizeTimeVaryingSchroederAllpass(sfFDN::TimeVaryingSchroederAllpassSectionOptions& config, size_t stage_count,
+                                       float sample_rate)
+{
+    stage_count = std::max(stage_count, size_t{1});
+    bool changed = config.delays.size() != stage_count || config.gains.size() != stage_count ||
+                   config.time_varying_config.size() != stage_count;
+
+    const float delay_seed = config.delays.empty() ? kSchroederDefaultDelay : config.delays.back();
+    const float gain_seed = config.gains.empty() ? kSchroederDefaultGain : config.gains.back();
+    const size_t previous_modulation_count = config.time_varying_config.size();
+    config.delays.resize(stage_count, delay_seed);
+    config.gains.resize(stage_count, gain_seed);
+    config.time_varying_config.resize(stage_count);
+    for (size_t stage = previous_modulation_count; stage < stage_count; ++stage)
+    {
+        config.time_varying_config[stage] = MakeDefaultSchroederModulation(stage, stage_count, sample_rate);
+    }
+
+    changed |= NormalizeTimeVaryingSchroederAllpass(config, sample_rate);
+    return changed;
+}
+
+sfFDN::TimeVaryingSchroederAllpassSectionOptions MakeTimeVaryingSchroederAllpass(float sample_rate)
+{
+    sfFDN::TimeVaryingSchroederAllpassSectionOptions config{
+        .delays = {kSchroederDefaultDelay},
+        .gains = {kSchroederDefaultGain},
+        .time_varying_config = {MakeDefaultSchroederModulation(0, 1, sample_rate)},
+        .parallel = false,
+    };
+    NormalizeTimeVaryingSchroederAllpass(config, sample_rate);
+    return config;
+}
+
+bool NormalizeMultichannelTimeVaryingSchroederAllpass(
+    sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions& config, uint32_t channel_count, float sample_rate)
+{
+    bool changed = false;
+    const size_t previous_channel_count = config.sections.size();
+    if (config.sections.size() != channel_count)
+    {
+        const auto seed =
+            config.sections.empty() ? MakeTimeVaryingSchroederAllpass(sample_rate) : config.sections.back();
+        config.sections.resize(channel_count, seed);
+        changed = true;
+    }
+
+    for (auto& section : config.sections)
+    {
+        changed |= NormalizeTimeVaryingSchroederAllpass(section, sample_rate);
+    }
+
+    if (config.sections.empty())
+    {
+        return changed;
+    }
+
+    const size_t stage_count = std::ranges::max(
+        config.sections | std::views::transform([](const auto& section) { return section.delays.size(); }));
+    for (auto& section : config.sections)
+    {
+        if (section.delays.size() != stage_count || section.gains.size() != stage_count ||
+            section.time_varying_config.size() != stage_count)
+        {
+            changed |= ResizeTimeVaryingSchroederAllpass(section, stage_count, sample_rate);
+        }
+    }
+
+    if (channel_count > previous_channel_count)
+    {
+        constexpr float kPhaseStep = 0.61803398875f;
+        for (size_t channel = previous_channel_count; channel < channel_count; ++channel)
+        {
+            auto& section = config.sections[channel];
+            for (size_t stage = 0; stage < stage_count; ++stage)
+            {
+                float phase = std::fmod(section.time_varying_config[stage].initial_phase +
+                                            (kPhaseStep * static_cast<float>(channel - previous_channel_count + 1)),
+                                        1.0f);
+                const auto collides = [&](float candidate) {
+                    return std::ranges::any_of(
+                        config.sections.begin(), config.sections.begin() + static_cast<std::ptrdiff_t>(channel),
+                        [stage, candidate](const auto& existing) {
+                            const float distance =
+                                std::abs(existing.time_varying_config[stage].initial_phase - candidate);
+                            return std::min(distance, 1.0f - distance) < 1.0e-6f;
+                        });
+                };
+                for (size_t attempt = 0; attempt <= channel && collides(phase); ++attempt)
+                {
+                    phase = std::fmod(phase + kPhaseStep, 1.0f);
+                }
+                section.time_varying_config[stage].initial_phase = phase;
+            }
+        }
+    }
+
+    return changed;
+}
+
+sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions MakeMultichannelTimeVaryingSchroederAllpass(
+    uint32_t channel_count, float sample_rate)
+{
+    sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions config{};
+    NormalizeMultichannelTimeVaryingSchroederAllpass(config, channel_count, sample_rate);
+    return config;
+}
 
 sfFDN::MultichannelSchroederAllpassSectionOptions MakeZitaRev1SchroederAllpass(uint32_t channel_count,
                                                                                float sample_rate)
@@ -1087,6 +1317,46 @@ sfFDN::MultichannelSchroederAllpassSectionOptions MakeMultichannelSchroederAllpa
     return config;
 }
 
+sfFDN::TimeVaryingSchroederAllpassSectionOptions MakeTimeVaryingSchroederAllpassSeries(SchroederAllpassPreset preset,
+                                                                                       float sample_rate,
+                                                                                       uint32_t channel_index,
+                                                                                       uint32_t channel_count)
+{
+    const auto source = MakeSchroederAllpassSeries(preset, sample_rate, channel_index, channel_count);
+    if (source.delays.empty())
+    {
+        return MakeTimeVaryingSchroederAllpass(sample_rate);
+    }
+
+    const size_t stage_count = source.delays.size();
+    return MakeTimeVaryingSchroederAllpass(source, sample_rate, static_cast<size_t>(channel_index) * stage_count,
+                                           static_cast<size_t>(channel_count) * stage_count);
+}
+
+sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions MakeMultichannelTimeVaryingSchroederAllpassPreset(
+    SchroederAllpassPreset preset, uint32_t channel_count, float sample_rate)
+{
+    const auto source = MakeMultichannelSchroederAllpassPreset(preset, channel_count, sample_rate);
+    sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions config{};
+    config.sections.reserve(source.sections.size());
+
+    const size_t modulation_count =
+        std::accumulate(source.sections.begin(), source.sections.end(), size_t{0},
+                        [](size_t count, const sfFDN::SchroederAllpassSectionOptions& section) {
+                            return count + section.delays.size();
+                        });
+    size_t modulation_offset = 0;
+    for (const auto& section : source.sections)
+    {
+        config.sections.push_back(
+            MakeTimeVaryingSchroederAllpass(section, sample_rate, modulation_offset, modulation_count));
+        modulation_offset += section.delays.size();
+    }
+
+    NormalizeMultichannelTimeVaryingSchroederAllpass(config, channel_count, sample_rate);
+    return config;
+}
+
 namespace
 {
 void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t& config_variant, uint32_t new_size,
@@ -1099,6 +1369,9 @@ void ResizeMultichannelProcessorConfigs(sfFDN::multi_channel_processor_variant_t
                                            {.channel_count = new_size, .sample_rate = sample_rate, .new_gain = 0.5f});
             },
             [new_size](sfFDN::MultichannelSchroederAllpassSectionOptions& config) { config.sections.resize(new_size); },
+            [new_size, sample_rate](sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions& config) {
+                NormalizeMultichannelTimeVaryingSchroederAllpass(config, new_size, sample_rate);
+            },
             [new_size, sample_rate](sfFDN::MultichannelDattorroDelayOptions& config) {
                 NormalizeMultichannelDattorroDelay(config, new_size, sample_rate);
             },
@@ -1284,16 +1557,18 @@ void ResizeFDNConfig(sfFDN::FDNConfig& config, uint32_t new_size)
 
 std::string GetProcessorName(const sfFDN::single_channel_processor_variant_t& processor_variant)
 {
-    return std::visit(overloaded{
-                          [](const sfFDN::SchroederAllpassSectionOptions&) { return "Schroeder Allpass"; },
-                          [](const sfFDN::AllpassFilterOptions&) { return "Allpass Filter"; },
-                          [](const sfFDN::CascadedBiquadsOptions&) { return "Cascaded Biquads"; },
-                          [](const sfFDN::FirOptions&) { return "FIR Filter"; },
-                          [](const sfFDN::DelayOptions&) { return "Delay"; },
-                          [](const sfFDN::GraphicEQOptions&) { return "Graphic EQ"; },
-                          [](const sfFDN::DattorroDelayOptions&) { return "Dattorro Delay"; },
-                      },
-                      processor_variant);
+    return std::visit(
+        overloaded{
+            [](const sfFDN::SchroederAllpassSectionOptions&) { return "Schroeder Allpass"; },
+            [](const sfFDN::TimeVaryingSchroederAllpassSectionOptions&) { return "Time-Varying Schroeder Allpass"; },
+            [](const sfFDN::AllpassFilterOptions&) { return "Allpass Filter"; },
+            [](const sfFDN::CascadedBiquadsOptions&) { return "Cascaded Biquads"; },
+            [](const sfFDN::FirOptions&) { return "FIR Filter"; },
+            [](const sfFDN::DelayOptions&) { return "Delay"; },
+            [](const sfFDN::GraphicEQOptions&) { return "Graphic EQ"; },
+            [](const sfFDN::DattorroDelayOptions&) { return "Dattorro Delay"; },
+        },
+        processor_variant);
 }
 
 std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& processor_variant)
@@ -1302,6 +1577,9 @@ std::string GetProcessorName(const sfFDN::multi_channel_processor_variant_t& pro
         overloaded{
             [](const sfFDN::ParallelGainsOptions&) { return "Parallel Gains"; },
             [](const sfFDN::MultichannelSchroederAllpassSectionOptions&) { return "Parallel Schroeder Allpass"; },
+            [](const sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions&) {
+                return "Parallel Time-Varying Schroeder Allpass";
+            },
             [](const sfFDN::MultichannelDattorroDelayOptions&) { return "Parallel Dattorro Delay"; },
             [](const sfFDN::AttenuationFilterBankOptions&) { return "Attenuation Filter Bank"; },
             [](const sfFDN::DelayBankOptions&) { return "Delay Bank"; },

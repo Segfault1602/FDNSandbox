@@ -166,6 +166,29 @@ bool NormalizeMultichannelDattorroDelay(sfFDN::MultichannelDattorroDelayOptions&
                                         float sample_rate);
 sfFDN::MultichannelDattorroDelayOptions MakeMultichannelDattorroDelay(uint32_t channel_count, float sample_rate);
 
+inline constexpr float kTimeVaryingSchroederMinimumFrequencyHz = 0.01f;
+inline constexpr float kTimeVaryingSchroederMaximumFrequencyHz = 20.0f;
+inline constexpr float kTimeVaryingSchroederMinimumAmplitude = 0.001f;
+inline constexpr float kTimeVaryingSchroederMaximumTrajectoryGain = 0.999f;
+
+/// Repairs a time-varying Schroeder section so every stage is constructible by sfFDN.
+///
+/// Modulation amplitude is represented as a positive magnitude. A negative serialized amplitude is converted without
+/// changing its trajectory by shifting the phase by half a cycle.
+bool NormalizeTimeVaryingSchroederAllpass(sfFDN::TimeVaryingSchroederAllpassSectionOptions& config, float sample_rate);
+/// Resizes all three stage arrays together, seeds new stages, and normalizes the result.
+bool ResizeTimeVaryingSchroederAllpass(sfFDN::TimeVaryingSchroederAllpassSectionOptions& config, size_t stage_count,
+                                       float sample_rate);
+sfFDN::TimeVaryingSchroederAllpassSectionOptions MakeTimeVaryingSchroederAllpass(float sample_rate);
+
+/// Resizes a multichannel time-varying Schroeder bank and normalizes every section.
+///
+/// New channels clone the last section so growing a preset bank preserves its character.
+bool NormalizeMultichannelTimeVaryingSchroederAllpass(
+    sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions& config, uint32_t channel_count, float sample_rate);
+sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions MakeMultichannelTimeVaryingSchroederAllpass(
+    uint32_t channel_count, float sample_rate);
+
 /// Builds a one-allpass-per-channel Schroeder bank from the diffuser configuration of Fons Adriaensen's zita-rev1.
 ///
 /// zita-rev1 gives each of its eight FDN branches a single allpass whose length is stored in seconds and converted at
@@ -205,6 +228,14 @@ sfFDN::SchroederAllpassSectionOptions MakeSchroederAllpassSeries(SchroederAllpas
 sfFDN::MultichannelSchroederAllpassSectionOptions MakeMultichannelSchroederAllpassPreset(SchroederAllpassPreset preset,
                                                                                          uint32_t channel_count,
                                                                                          float sample_rate);
+
+/// Builds time-varying versions of the published Schroeder presets with deterministic gain modulation.
+sfFDN::TimeVaryingSchroederAllpassSectionOptions MakeTimeVaryingSchroederAllpassSeries(SchroederAllpassPreset preset,
+                                                                                       float sample_rate,
+                                                                                       uint32_t channel_index,
+                                                                                       uint32_t channel_count);
+sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions MakeMultichannelTimeVaryingSchroederAllpassPreset(
+    SchroederAllpassPreset preset, uint32_t channel_count, float sample_rate);
 
 struct Span2D
 {

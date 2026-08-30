@@ -28,6 +28,7 @@
 #include <array>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <optional>
 #include <random>
@@ -474,6 +475,56 @@ bool DrawModulationTable(std::span<sfFDN::ModulationOptions> modulations, const 
     }
 
     ImGui::EndTable();
+    return config_changed;
+}
+
+void SetupTimeVaryingSchroederTable(const char* index_label)
+{
+    ImGui::TableSetupColumn(index_label, ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("Delay");
+    ImGui::TableSetupColumn("Base Gain");
+    ImGui::TableSetupColumn("Frequency");
+    ImGui::TableSetupColumn("Amplitude");
+    ImGui::TableSetupColumn("Phase");
+    ImGui::TableHeadersRow();
+}
+
+bool DrawTimeVaryingSchroederStage(float& delay, float& gain, sfFDN::ModulationOptions& modulation, float sample_rate)
+{
+    bool config_changed = false;
+
+    ImGui::TableSetColumnIndex(1);
+    int delay_samples = static_cast<int>(delay);
+    config_changed |=
+        ImGui::DragInt("##Delay", &delay_samples, 1.0f, 1, 9999, "%d samples", ImGuiSliderFlags_AlwaysClamp);
+    delay = static_cast<float>(delay_samples);
+
+    ImGui::TableSetColumnIndex(2);
+    const float maximum_base_gain =
+        std::max(0.0f, utils::kTimeVaryingSchroederMaximumTrajectoryGain - modulation.amplitude);
+    config_changed |= ImGui::DragFloat("##BaseGain", &gain, 0.01f, -maximum_base_gain, maximum_base_gain, "%.3f",
+                                       ImGuiSliderFlags_AlwaysClamp);
+
+    ImGui::TableSetColumnIndex(3);
+    float frequency_hz = modulation.frequency * sample_rate;
+    if (ImGui::DragFloat("##Frequency", &frequency_hz, 0.01f, utils::kTimeVaryingSchroederMinimumFrequencyHz,
+                         utils::kTimeVaryingSchroederMaximumFrequencyHz, "%.2f Hz", ImGuiSliderFlags_AlwaysClamp))
+    {
+        modulation.frequency = sample_rate > 0.0f ? frequency_hz / sample_rate : 0.0f;
+        config_changed = true;
+    }
+
+    ImGui::TableSetColumnIndex(4);
+    const float maximum_amplitude = std::max(utils::kTimeVaryingSchroederMinimumAmplitude,
+                                             utils::kTimeVaryingSchroederMaximumTrajectoryGain - std::abs(gain));
+    config_changed |=
+        ImGui::DragFloat("##Amplitude", &modulation.amplitude, 0.01f, utils::kTimeVaryingSchroederMinimumAmplitude,
+                         maximum_amplitude, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+
+    ImGui::TableSetColumnIndex(5);
+    config_changed |=
+        ImGui::DragFloat("##Phase", &modulation.initial_phase, 0.01f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+
     return config_changed;
 }
 
@@ -1064,6 +1115,66 @@ bool FDNWidgetVisitor::operator()(sfFDN::SchroederAllpassSectionOptions& config)
     return config_changed;
 }
 
+bool FDNWidgetVisitor::operator()(sfFDN::TimeVaryingSchroederAllpassSectionOptions& config) const
+{
+    bool config_changed = utils::NormalizeTimeVaryingSchroederAllpass(config, fdn_config.sample_rate);
+
+    if (const auto preset =
+            DrawSchroederAllpassPresetPicker("time_varying_schroeder_preset_popup", kSeriesSchroederPresets);
+        preset.has_value())
+    {
+        config = utils::MakeTimeVaryingSchroederAllpassSeries(*preset, fdn_config.sample_rate, 0, 1);
+        config_changed = true;
+    }
+
+    int stage_count = static_cast<int>(config.delays.size());
+    config_changed |= ImGui::InputInt("Stage Count", &stage_count, 1, 1);
+    stage_count = std::clamp(stage_count, 1, 10);
+    if (config.delays.size() != static_cast<size_t>(stage_count))
+    {
+        config_changed |=
+            utils::ResizeTimeVaryingSchroederAllpass(config, static_cast<size_t>(stage_count), fdn_config.sample_rate);
+    }
+
+    config_changed |= ImGui::Checkbox("Parallel Stages", &config.parallel);
+
+    if (ImGui::Button("Randomize Time-Varying Delays"))
+    {
+        std::random_device rd;
+        std::mt19937 engine(rd());
+        std::uniform_int_distribution<uint32_t> distribution(state.schroeder_delay_minimum,
+                                                             state.schroeder_delay_maximum);
+        for (float& delay : config.delays)
+        {
+            delay = static_cast<float>(utils::GetClosestPrime(distribution(engine)));
+        }
+        config_changed = true;
+    }
+    ImGui::SameLine();
+    ImGui::DragIntRange2("Time-Varying Delay Range", &state.schroeder_delay_minimum, &state.schroeder_delay_maximum, 1,
+                         1, 9999, "%d samples", "%d samples", ImGuiSliderFlags_AlwaysClamp);
+
+    if (ImGui::BeginTable("##TimeVaryingSchroederStages", 6,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+    {
+        SetupTimeVaryingSchroederTable("Stage");
+        for (size_t stage = 0; stage < config.delays.size(); ++stage)
+        {
+            ImGui::PushID(static_cast<int>(stage));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%zu", stage + 1);
+            config_changed |= DrawTimeVaryingSchroederStage(config.delays[stage], config.gains[stage],
+                                                            config.time_varying_config[stage], fdn_config.sample_rate);
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    config_changed |= utils::NormalizeTimeVaryingSchroederAllpass(config, fdn_config.sample_rate);
+    return config_changed;
+}
+
 bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOptions& config) const
 {
     bool config_changed = false;
@@ -1172,6 +1283,107 @@ bool FDNWidgetVisitor::operator()(sfFDN::MultichannelSchroederAllpassSectionOpti
     }
     ImGui::PopID();
 
+    return config_changed;
+}
+
+bool FDNWidgetVisitor::operator()(sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions& config) const
+{
+    bool config_changed =
+        utils::NormalizeMultichannelTimeVaryingSchroederAllpass(config, fdn_config.fdn_size, fdn_config.sample_rate);
+    if (config.sections.empty())
+    {
+        return config_changed;
+    }
+
+    if (const auto preset =
+            DrawSchroederAllpassPresetPicker("multichannel_time_varying_schroeder_preset_popup", kAllSchroederPresets);
+        preset.has_value())
+    {
+        config = utils::MakeMultichannelTimeVaryingSchroederAllpassPreset(*preset, fdn_config.fdn_size,
+                                                                          fdn_config.sample_rate);
+        config_changed = true;
+    }
+
+    int stage_count = static_cast<int>(config.sections.front().delays.size());
+    config_changed |= ImGui::InputInt("Stage Count", &stage_count, 1, 1);
+    stage_count = std::clamp(stage_count, 1, 10);
+    for (auto& section : config.sections)
+    {
+        if (section.delays.size() != static_cast<size_t>(stage_count))
+        {
+            config_changed |= utils::ResizeTimeVaryingSchroederAllpass(section, static_cast<size_t>(stage_count),
+                                                                       fdn_config.sample_rate);
+        }
+    }
+
+    const bool mixed_topology = std::ranges::any_of(config.sections, [&config](const auto& section) {
+        return section.parallel != config.sections.front().parallel;
+    });
+    bool parallel = config.sections.front().parallel;
+    if (mixed_topology)
+    {
+        ImGui::TextDisabled("Channel topology is mixed");
+    }
+    if (ImGui::Checkbox("Parallel Stages", &parallel))
+    {
+        for (auto& section : config.sections)
+        {
+            section.parallel = parallel;
+        }
+        config_changed = true;
+    }
+
+    if (ImGui::Button("Randomize Time-Varying Delays"))
+    {
+        std::random_device rd;
+        std::mt19937 engine(rd());
+        std::uniform_int_distribution<uint32_t> distribution(state.multichannel_schroeder_delay_minimum,
+                                                             state.multichannel_schroeder_delay_maximum);
+        for (auto& section : config.sections)
+        {
+            for (float& delay : section.delays)
+            {
+                delay = static_cast<float>(utils::GetClosestPrime(distribution(engine)));
+            }
+        }
+        config_changed = true;
+    }
+    ImGui::SameLine();
+    ImGui::DragIntRange2("Time-Varying Delay Range", &state.multichannel_schroeder_delay_minimum,
+                         &state.multichannel_schroeder_delay_maximum, 1, 1, 9999, "%d samples", "%d samples",
+                         ImGuiSliderFlags_AlwaysClamp);
+
+    for (size_t stage = 0; stage < config.sections.front().delays.size(); ++stage)
+    {
+        ImGui::PushID(static_cast<int>(stage));
+        char stage_label[32]{};
+        std::snprintf(stage_label, sizeof(stage_label), "Stage %zu", stage + 1);
+        ImGui::SeparatorText(stage_label);
+        if (ImGui::BeginTable("##TimeVaryingSchroederChannels", 6,
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
+                                  ImGuiTableFlags_ScrollY,
+                              ImVec2(0.0f, 260.0f)))
+        {
+            SetupTimeVaryingSchroederTable("Channel");
+            for (size_t channel = 0; channel < config.sections.size(); ++channel)
+            {
+                auto& section = config.sections[channel];
+                ImGui::PushID(static_cast<int>(channel));
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%zu", channel + 1);
+                config_changed |=
+                    DrawTimeVaryingSchroederStage(section.delays[stage], section.gains[stage],
+                                                  section.time_varying_config[stage], fdn_config.sample_rate);
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        ImGui::PopID();
+    }
+
+    config_changed |=
+        utils::NormalizeMultichannelTimeVaryingSchroederAllpass(config, fdn_config.fdn_size, fdn_config.sample_rate);
     return config_changed;
 }
 
@@ -1651,6 +1863,15 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
             ImGui::SameLine();
             ImGui::Text("%s %zu", utils::GetProcessorName(processor).c_str(), i + 1);
 
+            if (std::holds_alternative<sfFDN::TimeVaryingSchroederAllpassSectionOptions>(processor) &&
+                ImGui::IsPopupOpen("edit_processor_popup"))
+            {
+                constexpr float kEditorMinimumWidth = 760.0f;
+                constexpr float kMaximumWindowWidth = std::numeric_limits<float>::max();
+                const float maximum_window_height = std::max(360.0f, ImGui::GetIO().DisplaySize.y * 0.85f);
+                ImGui::SetNextWindowSizeConstraints(ImVec2(kEditorMinimumWidth, 0.0f),
+                                                    ImVec2(kMaximumWindowWidth, maximum_window_height));
+            }
             if (ImGui::BeginPopup("edit_processor_popup", ImGuiWindowFlags_AlwaysAutoResize))
             {
                 config_changed |= DrawFDNOptions(processor, fdn_config, state);
@@ -1685,8 +1906,9 @@ bool DrawSingleChannelProcessorList(std::vector<sfFDN::single_channel_processor_
 std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelProcessorPopup(
     const sfFDN::FDNConfig& fdn_config)
 {
-    const std::array single_channel_processor_names = {"Delay", "Schroeder Allpass", "Velvet Noise Decorrelator",
-                                                       "Graphic EQ", "Dattorro Delay"};
+    const std::array single_channel_processor_names = {
+        "Delay",      "Schroeder Allpass", "Time-Varying Schroeder Allpass", "Velvet Noise Decorrelator",
+        "Graphic EQ", "Dattorro Delay"};
     std::optional<sfFDN::single_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("single_channel_processor_popup"))
     {
@@ -1704,12 +1926,15 @@ std::optional<sfFDN::single_channel_processor_variant_t> DrawAddSingleChannelPro
                         sfFDN::SchroederAllpassSectionOptions{.delays = {47}, .gains = {0.7f}, .parallel = false};
                     break;
                 case 2:
-                    new_processor = sfFDN::FirOptions{};
+                    new_processor = utils::MakeTimeVaryingSchroederAllpass(fdn_config.sample_rate);
                     break;
                 case 3:
-                    new_processor = utils::MakeGraphicEq(fdn_config.sample_rate);
+                    new_processor = sfFDN::FirOptions{};
                     break;
                 case 4:
+                    new_processor = utils::MakeGraphicEq(fdn_config.sample_rate);
+                    break;
+                case 5:
                     new_processor = utils::MakeDattorroDelay(fdn_config.sample_rate);
                     break;
                 default:
@@ -1756,13 +1981,15 @@ bool DrawMultiChannelProcessorList(std::vector<sfFDN::multi_channel_processor_va
 
             ImGui::Text("%s %zu", utils::GetProcessorName(processor).c_str(), i + 1);
 
-            if (std::holds_alternative<sfFDN::DelayBankTimeVaryingOptions>(processor) &&
+            if ((std::holds_alternative<sfFDN::DelayBankTimeVaryingOptions>(processor) ||
+                 std::holds_alternative<sfFDN::MultichannelTimeVaryingSchroederAllpassSectionOptions>(processor)) &&
                 ImGui::IsPopupOpen("edit_processor_popup"))
             {
                 constexpr float kEditorMinimumWidth = 760.0f;
-                constexpr float kMaximumWindowSize = std::numeric_limits<float>::max();
+                constexpr float kMaximumWindowWidth = std::numeric_limits<float>::max();
+                const float maximum_window_height = std::max(360.0f, ImGui::GetIO().DisplaySize.y * 0.85f);
                 ImGui::SetNextWindowSizeConstraints(ImVec2(kEditorMinimumWidth, 0.0f),
-                                                    ImVec2(kMaximumWindowSize, kMaximumWindowSize));
+                                                    ImVec2(kMaximumWindowWidth, maximum_window_height));
             }
             if (ImGui::BeginPopup("edit_processor_popup", ImGuiWindowFlags_AlwaysAutoResize))
             {
@@ -1800,7 +2027,7 @@ std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProce
     const sfFDN::FDNConfig& fdn_config)
 {
     const std::array multi_channel_processor_names = {
-        "Delay Bank",      "Time-Varying Delay Bank",   "Schroeder Allpass",
+        "Delay Bank",      "Time-Varying Delay Bank",   "Schroeder Allpass", "Time-Varying Schroeder Allpass",
         "Feedback Matrix", "Velvet Noise Decorrelator", "Dattorro Delay"};
     std::optional<sfFDN::multi_channel_processor_variant_t> new_processor = std::nullopt;
     if (ImGui::BeginPopup("multi_channel_processor_popup"))
@@ -1834,13 +2061,17 @@ std::optional<sfFDN::multi_channel_processor_variant_t> DrawAddMultiChannelProce
                     break;
                 }
                 case 3:
-                    new_processor.emplace(sfFDN::ScalarFeedbackMatrixOptions{.matrix_size = fdn_config.fdn_size});
+                    new_processor.emplace(utils::MakeMultichannelTimeVaryingSchroederAllpass(fdn_config.fdn_size,
+                                                                                             fdn_config.sample_rate));
                     break;
                 case 4:
+                    new_processor.emplace(sfFDN::ScalarFeedbackMatrixOptions{.matrix_size = fdn_config.fdn_size});
+                    break;
+                case 5:
                     new_processor.emplace(sfFDN::MultichannelFirOptions{
                         .coeffs = std::vector<std::vector<float>>(fdn_config.fdn_size, std::vector<float>{1.f})});
                     break;
-                case 5:
+                case 6:
                     new_processor.emplace(
                         utils::MakeMultichannelDattorroDelay(fdn_config.fdn_size, fdn_config.sample_rate));
                     break;
