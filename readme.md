@@ -7,11 +7,9 @@ This project is a sandbox for experimenting with Feedback Delay Networks (FDNs) 
 The library is built using CMake and uses [cpm](https://github.com/cpm-cmake/CPM.cmake) to manage dependencies. CMake presets are provided for building with Ninja+LLVM and MSVC+Visual Studio.
 
 ```bash
-# configure with Ninja and LLVM
-cmake --preset llvm-ninja
-
-# build
-cmake --build --preset llvm-debug
+# configure and build with Ninja and LLVM
+ cmake --preset llvm-ninja
+ cmake --build --preset llvm --config Debug
 
 # Or, configure with MSVC and Visual Studio
 cmake --preset windows
@@ -46,5 +44,3 @@ These 3 dependencies are also required:
 - https://github.com/Segfault1602/fdn_opt
 - https://github.com/Segfault1602/sfFDN
 - https://github.com/Segfault1602/audio_utils
-
-If you use CMakePreset.json, CMake will expect these repository to be already checked in on your machine at the path defined by the `CPM_##_SOURCE` variable. You can simply delete those variables if you want CPM to download those for you instead.
