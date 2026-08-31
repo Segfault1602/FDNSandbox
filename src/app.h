@@ -7,12 +7,14 @@
 #include "files/file_dialogs.h"
 #include "files/file_workflows.h"
 #include "notifications.h"
+#include "performance/fdn_benchmark.h"
 #include "session/fdn_session.h"
 #include "views/analysis_views.h"
 #include "views/audio_view.h"
 #include "views/fdn_configurator_view.h"
 #include "views/fdn_info_view.h"
 #include "views/optimization_view.h"
+#include "views/performance_view.h"
 #include "views/settings_view.h"
 #include "views/shell_view.h"
 
@@ -41,6 +43,8 @@ class FDNToolboxApp
     void UpdateFDN();
     void PublishFdnCommit(fdn_sandbox::session::FdnCommit commit);
     void ReportFdnBuildError(const fdn_sandbox::session::FdnBuildError& error);
+    void StartPerformanceBenchmark();
+    void UpdatePerformanceBenchmark();
 
     bool StartAudioStream();
     void StopAudioStream();
@@ -54,10 +58,12 @@ class FDNToolboxApp
 
     fdn_sandbox::audio::AudioEngine audio_engine_;
     fdn_sandbox::session::FdnSession fdn_session_;
+    fdn_sandbox::performance::FdnBenchmarkRunner performance_runner_;
 
     bool first_frame_ = true;
     bool reset_layout_requested_ = false;
     bool clipping_notification_active_ = false;
+    bool performance_audio_was_running_ = false;
     uint64_t reported_event_overflow_count_ = 0;
     fdn_sandbox::NotificationCenter notification_center_;
 
@@ -68,6 +74,7 @@ class FDNToolboxApp
     fdn_sandbox::views::AudioView audio_view_;
     fdn_sandbox::views::SettingsView settings_view_;
     fdn_sandbox::views::FdnInfoView fdn_info_view_;
+    fdn_sandbox::views::PerformanceView performance_view_;
     fdn_sandbox::views::OptimizationView optimization_view_;
     fdn_sandbox::views::AnalysisViews analysis_views_;
     fdn_sandbox::views::ShellView shell_view_;

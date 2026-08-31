@@ -222,6 +222,7 @@ void ShellView::BuildDefaultDockLayout(ImGuiID dockspace_id)
     ImGui::DockBuilderDockWindow(ids::kAudioPlayer, dock_id_ir);
     ImGui::DockBuilderDockWindow(ids::kSettings, dock_id_ir);
     ImGui::DockBuilderDockWindow(ids::kFdnInfo, dock_id_ir);
+    ImGui::DockBuilderDockWindow(ids::kPerformance, dock_id_ir);
 
     ImGui::DockBuilderDockWindow(ids::kSpectrogram, dock_main_id);
     ImGui::DockBuilderDockWindow(ids::kSpectrum, dock_main_id);

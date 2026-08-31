@@ -1,11 +1,13 @@
 #include "app.h"
 
 #include "notifications.h"
+#include "performance/fdn_benchmark.h"
 #include "presets.h"
 #include "session/fdn_session.h"
 #include "settings.h"
 #include "theme.h"
 #include "views/fdn_info_view.h"
+#include "views/performance_view.h"
 #include "views/shell_view.h"
 #include "views/window_ids.h"
 
@@ -38,6 +40,7 @@ FDNToolboxApp::FDNToolboxApp(float ui_scale)
 }
 FDNToolboxApp::~FDNToolboxApp()
 {
+    performance_runner_.StopAndJoin();
     audio_engine_.Shutdown();
 }
 
@@ -63,6 +66,7 @@ void FDNToolboxApp::loop()
 {
     HandleShellActions(shell_view_.DrawMainMenuBar(audio_view_, audio_engine_));
     ProcessFileDialogSelections();
+    UpdatePerformanceBenchmark();
     UpdateUiTelemetry();
     ProcessNotifications();
     HandleShellActions(
@@ -122,6 +126,15 @@ void FDNToolboxApp::loop()
         UpdateFDN();
     }
     fdn_sandbox::views::FdnInfoView::Draw(fdn_session_, analysis_workspace_, audio_view_.DisplayedCpuUsage());
+    if (const ImGuiWindow* fdn_info_window = ImGui::FindWindowByName(fdn_sandbox::views::ids::kFdnInfo);
+        fdn_info_window != nullptr && fdn_info_window->DockId != 0)
+    {
+        ImGui::SetNextWindowDockID(fdn_info_window->DockId, ImGuiCond_FirstUseEver);
+    }
+    if (performance_view_.Draw() == fdn_sandbox::views::PerformanceView::Action::Measure)
+    {
+        StartPerformanceBenchmark();
+    }
     analysis_views_.DrawAll(analysis_workspace_);
 
     ImGui::End(); // End the main window
@@ -206,4 +219,89 @@ void FDNToolboxApp::ReportFdnBuildError(const fdn_sandbox::session::FdnBuildErro
     LOG_ERROR(Settings::Instance().GetLogger(), "Failed to build FDN: {}", error.message);
     notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "fdn-build-failed", "Failed to build FDN",
                               error.message, 6.0);
+}
+
+void FDNToolboxApp::StartPerformanceBenchmark()
+{
+    if (performance_runner_.IsRunning())
+    {
+        return;
+    }
+
+    fdn_sandbox::performance::BenchmarkRequest request{
+        .config_a = fdn_session_.ActiveSlot() == fdn_sandbox::session::FdnSlot::A
+                        ? fdn_session_.Draft()
+                        : fdn_session_.ConfigForSlot(fdn_sandbox::session::FdnSlot::A),
+        .config_b = fdn_session_.ActiveSlot() == fdn_sandbox::session::FdnSlot::B
+                        ? fdn_session_.Draft()
+                        : fdn_session_.ConfigForSlot(fdn_sandbox::session::FdnSlot::B),
+        .sample_rate = Settings::Instance().SampleRateAs<float>(),
+    };
+
+    performance_audio_was_running_ = audio_engine_.IsRunning();
+    if (performance_audio_was_running_)
+    {
+        StopAudioStream();
+    }
+
+    auto start_result = performance_runner_.Start(std::move(request));
+    if (!start_result)
+    {
+        const std::string message = start_result.error().message;
+        performance_view_.SetError(message);
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "performance-start-failed",
+                                  "Performance measurement failed", message, 6.0);
+        if (performance_audio_was_running_ && !StartAudioStream())
+        {
+            notification_center_.Push(
+                fdn_sandbox::NotificationSeverity::Error, "audio-restart-failed", "Audio restart failed",
+                "The audio stream could not be restarted after the benchmark failed to start.", 6.0);
+        }
+        performance_audio_was_running_ = false;
+        return;
+    }
+
+    performance_view_.SetRunning();
+}
+
+void FDNToolboxApp::UpdatePerformanceBenchmark()
+{
+    if (performance_runner_.IsRunning())
+    {
+        // The audio configuration window can request a restart while measuring; keep the benchmark uncontended.
+        if (audio_engine_.IsRunning())
+        {
+            StopAudioStream();
+        }
+        return;
+    }
+
+    auto outcome = performance_runner_.ConsumeOutcome();
+    if (!outcome)
+    {
+        return;
+    }
+
+    if (*outcome)
+    {
+        performance_view_.SetResult(std::move(**outcome));
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Success, "performance-completed",
+                                  "Performance measurement completed", "FDN A and FDN B results are ready.", 6.0);
+    }
+    else
+    {
+        const std::string message = (*outcome).error().message;
+        LOG_ERROR(Settings::Instance().GetLogger(), "Performance measurement failed: {}", message);
+        performance_view_.SetError(message);
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "performance-failed",
+                                  "Performance measurement failed", message, 6.0);
+    }
+
+    if (performance_audio_was_running_ && !StartAudioStream())
+    {
+        notification_center_.Push(fdn_sandbox::NotificationSeverity::Error, "audio-restart-failed",
+                                  "Audio restart failed",
+                                  "The audio stream could not be restarted after performance measurement.", 6.0);
+    }
+    performance_audio_was_running_ = false;
 }

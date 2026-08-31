@@ -14,6 +14,7 @@ inline constexpr char kAudioPlayer[] = "Audio Player";
 inline constexpr char kAudioConfiguration[] = "Audio";
 inline constexpr char kSettings[] = "Settings";
 inline constexpr char kFdnInfo[] = "FDN Info";
+inline constexpr char kPerformance[] = "Performance";
 inline constexpr char kOptimization[] = "Optimization";
 inline constexpr char kSpectrogram[] = "Spectrogram";
 inline constexpr char kSpectrum[] = "Spectrum";

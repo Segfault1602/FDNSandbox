@@ -11,6 +11,20 @@ target_link_libraries(
             fdn_sandbox::fdn_sandbox_warnings
 )
 
+# ====== Headless performance logic ======
+find_package(Threads REQUIRED)
+add_library(fdn_sandbox_performance STATIC performance/fdn_benchmark.cpp)
+add_library(fdn_sandbox::performance ALIAS fdn_sandbox_performance)
+
+target_include_directories(fdn_sandbox_performance PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+    fdn_sandbox_performance
+    PUBLIC sfFDN::sfFDN
+           fdn_sandbox::fdn_sandbox_options
+    PRIVATE Threads::Threads
+            fdn_sandbox::fdn_sandbox_warnings
+)
+
 # ====== Headless analysis logic ======
 add_library(fdn_sandbox_analysis STATIC analysis/analysis_workspace.cpp fdn_analyzer.cpp ir_analyzer.cpp)
 add_library(fdn_sandbox::analysis ALIAS fdn_sandbox_analysis)
@@ -92,6 +106,7 @@ target_sources(
             views/fdn_configurator_view.cpp
             views/fdn_info_view.cpp
             views/optimization_view.cpp
+            views/performance_view.cpp
             views/settings_view.cpp
             views/shell_view.cpp
             views/window_ids.h
@@ -112,6 +127,7 @@ target_link_libraries(
            Eigen3::Eigen
            nlohmann_json::nlohmann_json
            fdn_sandbox::core
+           fdn_sandbox::performance
            fdn_sandbox::analysis
            fdn_sandbox::audio
            fdn_sandbox::audio_engine
